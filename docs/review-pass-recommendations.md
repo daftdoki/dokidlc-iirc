@@ -1,6 +1,7 @@
 # Recommendations for `dokidlc-skill-memory`: a review pass, not a dream cycle
 
-Written 2026-09-19 for the creator to work from separately. It applies the
+Written 2026-09-19 for the creator to work from separately; Honcho notes added
+2026-09-30. It applies the
 findings of the [agent memory systems report](https://github.com/daftdoki/research/tree/main/agent-memory-systems-and-dreaming) in the research
 repository to this plugin
 at `e56235f`, using the two fields that have run it for about two weeks: `daftdoki/agent-neckbeard` (60 pages, 170 commits
@@ -55,10 +56,11 @@ whether the primary document was read. The parts that bear on this plugin:
 | Selection is not synthesis. A scorer that decides *which* entries survive, with no step deciding *what* they say, promotes verbatim noise. | OpenClaw issue #67363; Auto-Dreamer Appendix I, where a baseline's "consolidation step fires nine times but retires no active entries" and its bank holds 49 paraphrases of one instruction | Any pass the wrapper runs must be read-only. The writer is the agent, in a session, with the diff visible. |
 | Updating is the worst-measured memory operation: best 65% correct, four of six production systems under 26%. | HaluMem (arXiv 2511.03506) | Never put a rewrite step in an unattended pass. `write --force` is a full replacement; count it as destruction in the cap. |
 | Consolidation's demonstrated win is compression at equal accuracy; its effect on recall is inside the noise everywhere it was measured except the trained-on domain. | Auto-Dreamer Table 1, Appendix H bootstrap CIs, Appendix I case study (48/96 both, 24.5x smaller bank) | Expect a review pass to make the field smaller and cleaner, not to make recall better. Measure it that way. |
-| The four shipping dream cycles disagree on trigger; only one is nightly. Letta fires on step count or a compaction event. | First-party docs: OpenClaw, Anthropic Managed Agents Dreams, Letta, OpenAI | Trigger on work done and on churn events, not on a schedule. |
+| The five shipping dream cycles disagree on trigger; only one is nightly. Letta fires on step count or a compaction event. Honcho fires on ≥50 new observations and ≥8 h since the last dream, then waits 60 min of inactivity, and any new message cancels the pending dream. | First-party docs: OpenClaw, Anthropic Managed Agents Dreams, Letta, OpenAI; Honcho `src/dreamer/dream_scheduler.py` and `src/deriver/enqueue.py` at `a3c30e1` | Trigger on work done and on churn events, not on a schedule; debounce on activity so the nudge lands when the session is quiet. |
 | Copy-on-write removes the update problem instead of managing it. Anthropic's Dreams never modifies the input store; a human adopts or discards the output. | Anthropic Managed Agents Dreams docs | Git is already this. A review on a branch, merged by the creator, is the same design at zero cost. |
-| A bounded loss per sweep is the one safety control every careful implementation has. | OpenClaw `maxPriorEntryLossFraction` 0.25; Letta backup-before-reorganise; Anthropic zero-by-construction | Add a per-session cap. |
-| Frequency is the signal a poisoning attack exploits; injection succeeds 98.2% of the time and consolidation launders provenance. | MINJA (arXiv 2503.03704) | Recall counts are a display signal, never a promotion signal. Cloned pages' origin must be visible in the review. |
+| A bounded loss per sweep is the one safety control every careful implementation has. The one shipping pass whose model can delete — Honcho's — has no cap, only a 20-iteration effort bound. | OpenClaw `maxPriorEntryLossFraction` 0.25; Letta backup-before-reorganise; Anthropic zero-by-construction; Honcho `settings.DREAM` | Add a per-session cap. |
+| Frequency is the signal a poisoning attack exploits; injection succeeds 98.2% of the time and consolidation launders provenance. Novelty is no better: Honcho's optional surprisal selector hunts the observations least like the rest, which is exactly what a planted record is. | MINJA (arXiv 2503.03704); Honcho `src/dreamer/surprisal.py` | Recall counts are a display signal, never a promotion signal. Cloned pages' origin must be visible in the review. |
+| Provenance can be enforced at the write path. Honcho refuses a deductive, inductive or contradiction observation with "missing or empty `source_ids`"; fabricated ids are stripped and an under-sourced observation is rejected (#945). | Honcho `src/utils/agent_tools.py`, CHANGELOG #945 | The Sources check is not cosmetic. A page a review session creates by splitting or rewriting must cite the pages or files it came from, and `validate_page` should refuse, not warn, when it cannot. |
 | Below ~150 conversations a full-context control arm wins on accuracy. | ConvoMem (arXiv 2511.10523) | The plugin's recall test (10/10 from memory alone) is the right kind of measurement. Keep running it as the field grows. |
 
 ## 2. What the fields' history shows
@@ -276,6 +278,12 @@ check. Add one clause to its line when either holds:
   "over 50 pages, the session-start line says so" item from the 2026-09-04
   usage review, which was accepted and never shipped.
 
+- **Idle debounce**, from Honcho: once either condition holds, wait for a quiet
+  period before surfacing the nudge, and let a new write cancel and re-arm it, so the
+  review lands when the session has stopped rather than mid-task. In this plugin the
+  natural carrier is the existing Stop hook (`memory nudge --stop`), which already
+  speaks once per session, rather than the SessionStart line.
+
 Neither is a clock. A field that is not being written to is not reviewed.
 
 ### 4.4 Copy-on-write, for free
@@ -327,6 +335,13 @@ is 75, which is not a diff anyone reviews in one sitting. A fixed count fails
 the other way: 5 is fine at 60 pages and blocks every legitimate
 post-migration cleanup at 300.
 
+**The counter-example.** Honcho's Dreamer is the one shipping pass whose model holds a
+`delete_observations` tool, and it has no cap at all — `MAX_TOOL_ITERATIONS=20` bounds
+how long it runs, not what it removes. Its changelog in the eight months since shows
+what that buys even with every call traced: fabricated source ids (#945), conclusions
+misdated to ingestion (#890), a trigger that counted its own output (#573). A cap is
+cheap next to any of those.
+
 **Options.**
 
 | Rule | at 20 pages | at 60 | at 150 | at 300 | at 1,000 | Notes |
@@ -351,7 +366,7 @@ it.
 
 | Don't | Because |
 |---|---|
-| A model call in the wrapper (scoring, summarising, merging) | HaluMem: the update operation is the least reliable one measured (best 65%). Auto-Dreamer's LightMem case and OpenClaw #67363: a pass that writes without a human in the loop packs and duplicates. DEVELOPMENT.md's "never reimplements storage, search, or indexing" should add "or synthesis." |
+| A model call in the wrapper (scoring, summarising, merging) | HaluMem: the update operation is the least reliable one measured (best 65%). Auto-Dreamer's LightMem case and OpenClaw #67363: a pass that writes without a human in the loop packs and duplicates. Honcho, the best-instrumented model-written pass shipping, logged fabricated sources, misdated conclusions and a self-inflating trigger in eight months. DEVELOPMENT.md's "never reimplements storage, search, or indexing" should add "or synthesis." |
 | Automatic merging of overlapping pages | Skill rule 2. And the field's duplication problem is hub pages accreting, not pairs; the fix is splitting. |
 | Decay tiers or time-based deletion | Design decision 4, and the research: no evidence that age-based forgetting helps; `decision` never aging is right. Age stays a glance. |
 | Promotion by recall frequency | MINJA: frequency is what an injected record optimises for. Recall counts are display, never trust. |
