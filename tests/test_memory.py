@@ -934,6 +934,8 @@ def _git(repo, *args):
 def _project(tmp_path, monkeypatch):
     """A git repository with a committed .memory/index.md, isolated from the user's git config."""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null"); monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "t"); monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@t")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     _repo(tmp_path)
@@ -1036,3 +1038,191 @@ def test_doctor_brief_counts_uncommitted(tmp_path, monkeypatch, capsys):
     _page(field, "loose.md")
     memory.main(["doctor", "--brief"])
     assert "1 memory change not committed." in capsys.readouterr().out
+
+
+# --- remote stores ------------------------------------------------------------
+
+
+def _remote(tmp_path, monkeypatch, write="agent"):
+    """A project repository with a project store and a remote store cloned from a bare repository."""
+    proj = tmp_path / "proj"; proj.mkdir()
+    _project(proj, monkeypatch)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    bare = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
+    (proj / ".claude").mkdir()
+    (proj / ".claude" / "memory.toml").write_text(
+        f'write = "{write}"\n\n[stores.project]\nkind = "project"\npath = ".memory"\n\n[stores.agent]\nkind = "remote"\nurl = "{bare}"\n')
+    memory.set_root(proj)
+    agent = memory.store_named("agent")
+    assert memory.clone_store(agent) is None
+    monkeypatch.setattr(memory, "tool", _fake_tool(proj / ".memory"))
+    return proj, agent, bare
+
+
+def _other_clone(tmp_path, bare, name="other"):
+    other = tmp_path / name
+    _git(tmp_path, "clone", "-q", str(bare), str(other))
+    return other
+
+
+def _push_page(other, page, text="from the other instance\n"):
+    (other / page).write_text(f"---\ntitle: O\nsummary: o\ntopics: [t]\nkind: finding\n---\n{text}")
+    _git(other, "add", page); _git(other, "commit", "-qm", f"other {page}"); _git(other, "push", "-q", "origin", "main")
+
+
+def test_stores_add_writes_config_and_clones(tmp_path, monkeypatch):
+    proj = tmp_path / "proj"; proj.mkdir()
+    _project(proj, monkeypatch)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    bare = tmp_path / "remote.git"; _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
+    memory.main(["stores", "add", "agent", str(bare), "--default"])
+    text = (proj / ".claude" / "memory.toml").read_text()
+    assert 'write = "agent"' in text and "[stores.project]" in text and f'url = "{bare}"' in text
+    agent = memory.store_named("agent")
+    assert (agent.dir / "index.md").is_file()
+    assert _git(bare, "log", "-1", "--format=%s", "main") == "memory: create store agent\n"
+    assert _git(proj, "show", "--name-only", "--format=%s", "HEAD").split() == ["memory:", "add", "store", "agent", ".claude/memory.toml"]
+
+
+def test_push_store_rebases_once(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    _push_page(_other_clone(tmp_path, bare), "theirs.md")
+    _write(monkeypatch, "mine.md")
+    assert "not pushed" not in capsys.readouterr().err
+    tree = _git(bare, "ls-tree", "--name-only", "main").split()
+    assert "theirs.md" in tree and "mine.md" in tree
+    assert "Memory-Project: " in _git(bare, "log", "-1", "--format=%B", "main")
+
+
+def test_push_store_conflict_keeps_the_commit(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    _write(monkeypatch, "shared.md")
+    _push_page(_other_clone(tmp_path, bare), "shared.md", "their version\n")
+    _write(monkeypatch, "shared.md", "--summary", "mine changed")
+    err = capsys.readouterr().err
+    assert "not pushed" in err and "memory sync" in err
+    assert not memory.rebase_in_progress(agent.repo)
+    assert _git(agent.repo, "log", "-1", "--format=%s") == "memory: write shared.md\n"
+    assert memory.unpushed(agent) == 1
+
+
+def test_sync_commits_pulls_and_pushes(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    monkeypatch.setattr(memory, "reindex", lambda: None)
+    _page(agent.dir, "loose.md")
+    _push_page(_other_clone(tmp_path, bare), "theirs.md")
+    memory.main(["sync"])
+    out = capsys.readouterr().out
+    assert out.startswith("agent: committed 1 file, pulled 1 file, pushed")
+    tree = _git(bare, "ls-tree", "--name-only", "main").split()
+    assert "loose.md" in tree and "theirs.md" in tree and memory.unpushed(agent) == 0
+
+
+def test_project_store_never_pushes(tmp_path, monkeypatch):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    project_remote = tmp_path / "project.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(project_remote))
+    _git(proj, "remote", "add", "origin", str(project_remote))
+    _write(monkeypatch, "local.md", "--store", "project")
+    assert _git(proj, "log", "-1", "--format=%s") == "memory: write local.md\n"
+    assert _git(project_remote, "rev-list", "--all") == ""          # nothing was pushed
+
+
+def test_brief_pulls_only_at_session_start(tmp_path, monkeypatch, capsys):
+    import io
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    started = []
+    monkeypatch.setattr(memory, "start_background", lambda argv: started.append(argv))
+    _push_page(_other_clone(tmp_path, bare), "theirs.md")
+    head = _git(agent.repo, "rev-parse", "HEAD")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SubagentStart"})))
+    memory.main(["doctor", "--brief", "--hook"]); capsys.readouterr()
+    assert _git(agent.repo, "rev-parse", "HEAD") == head and not started
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup"})))
+    memory.main(["doctor", "--brief", "--hook"])
+    assert (agent.dir / "theirs.md").is_file() and "Pulled 1 page" in capsys.readouterr().out
+    assert started and started[0][-1] == "index"
+
+
+def test_doctor_brief_counts_unpushed(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    memory.main(["doctor", "--brief"])
+    assert "not pushed" not in capsys.readouterr().out
+    _page(agent.dir, "local-only.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "local")
+    memory.main(["doctor", "--brief"])
+    assert "1 memory commit not pushed (memory sync)." in capsys.readouterr().out
+
+
+def test_project_id_normalizes_origin(tmp_path):
+    same = ["git@github.com:DaftDoki/agent-builder.git", "https://github.com/daftdoki/agent-builder",
+            "ssh://git@github.com:22/daftdoki/agent-builder.git", "https://user@github.com/DaftDoki/agent-builder.git/"]
+    assert {memory.normalize_origin(u) for u in same} == {"github.com/daftdoki/agent-builder"}
+    plain = tmp_path / "My_Project"; plain.mkdir()
+    assert memory.project_id(plain) == "my-project"
+
+
+def test_remote_page_gets_project_and_prefixed_refs(tmp_path, monkeypatch):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    _write(monkeypatch, "cites.md", "--ref", "docs/a.md")
+    fm = memory.page_frontmatter("cites.md", agent)
+    pid = memory.project_id()
+    sha = _git(proj, "log", "-1", "--format=%h", "--", "docs/a.md").strip()
+    assert fm["project"] == pid and fm["refs"] == [f"{pid}:docs/a.md@{sha}"]
+    assert memory.suspicion(fm) == []
+
+
+def test_ref_in_another_project_gives_no_signal(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    marker = tmp_path / "ran"
+    _page(agent.dir, "theirs.md", extra=f"project: github.com/x/other\nrefs:\n- github.com/x/other:docs/a.md@deadbee\ncheck: touch {marker}\n")
+    fm = memory.page_frontmatter("theirs.md", agent)
+    assert memory.suspicion(fm, run_checks=True) == []
+    memory.main(["doubt"])
+    assert "not checked here" in capsys.readouterr().err and not marker.exists()
+    memory.main(["verify", "agent/theirs.md"])
+    assert "verified agent/theirs.md" in capsys.readouterr().out and not marker.exists()
+    assert memory.page_frontmatter("theirs.md", agent)["refs"] == ["github.com/x/other:docs/a.md@deadbee"]
+
+
+def test_verify_keeps_other_project_refs(tmp_path, monkeypatch):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    pid = memory.project_id()
+    old = _git(proj, "log", "-1", "--format=%h").strip()
+    (proj / "docs" / "a.md").write_text("changed\n"); _git(proj, "commit", "-qam", "change")
+    new = _git(proj, "log", "-1", "--format=%h").strip()
+    _page(agent.dir, "mixed.md", extra=f"project: {pid}\nrefs:\n- {pid}:docs/a.md@{old}\n- github.com/x/other:lib/b.py@abc1234\n")
+    memory.main(["verify", "mixed.md"])
+    assert memory.page_frontmatter("mixed.md", agent)["refs"] == [f"{pid}:docs/a.md@{new}", "github.com/x/other:lib/b.py@abc1234"]
+
+
+def test_search_ranks_current_project_first(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    pid = memory.project_id()
+    _page(agent.dir, "aaa-elsewhere.md", "zeppelin notes", extra="project: github.com/x/other\n")
+    _page(agent.dir, "zzz-here.md", "zeppelin notes", extra=f"project: {pid}\n")
+    memory.main(["search", "zeppelin"])
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split(":")[0] for line in lines] == ["agent/zzz-here.md", "agent/aaa-elsewhere.md"]
+
+
+def test_doctor_warns_about_non_page_md(tmp_path, monkeypatch):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    (agent.dir / "README.md").write_text("# memory repo\n")
+    assert memory.non_pages(agent) == ["README.md"]
+
+
+def test_guard_denies_a_raw_read_in_a_remote_store():
+    import subprocess
+    shim = ROOT / "scripts" / "guard.sh"
+    def run(payload):
+        return subprocess.run(["sh", str(shim)], input=json.dumps(payload), capture_output=True, text=True).stdout
+    page = "/home/u/.local/share/dokidlc-memory/stores/agent-3f9c2a10/a-page.md"
+    for payload in ({"tool_name": "Bash", "tool_input": {"command": f"cat {page}"}}, {"tool_name": "Read", "tool_input": {"file_path": page}}):
+        out = json.loads(run(payload))
+        assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "memory read STORE/a-page.md" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert run({"tool_name": "Read", "tool_input": {"file_path": page.replace("a-page.md", "index.md")}}) == ""

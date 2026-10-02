@@ -21,17 +21,18 @@ case "$cmd" in
     ;;
 esac
 # a page read with a pager: cat, head, sed, tail, less, or more starts a simple command (at the
-# start, or after ; & | ( or a newline) and a .memory/*.md path other than index.md follows it
-page=$(printf '%s' "$cmd" | sed -En 's/.*(^|[;&|(]|\\n)[[:space:]]*(cat|head|sed|less|more|tail)[[:space:]]+([^>;|&]*[[:space:]])?([^[:space:]|;&>]*\.memory\/[a-z0-9-]+\.md).*/\4/p')
+# start, or after ; & | ( or a newline) and a page path other than index.md follows it: .memory/*.md,
+# or a remote store's clone, dokidlc-memory/stores/NAME-HASH/*.md
+page=$(printf '%s' "$cmd" | sed -En 's/.*(^|[;&|(]|\\n)[[:space:]]*(cat|head|sed|less|more|tail)[[:space:]]+([^>;|&]*[[:space:]])?([^[:space:]|;&>]*(\.memory|dokidlc-memory\/stores\/[a-z0-9-]+)\/[a-z0-9-]+\.md).*/\4/p')
 # the Read tool on a page file
 if [ -z "$page" ]; then
-  page=$(printf '%s' "$file" | sed -En 's/^(.*\.memory\/[a-z0-9-]+\.md)$/\1/p')
+  page=$(printf '%s' "$file" | sed -En 's/^(.*(\.memory|dokidlc-memory\/stores\/[a-z0-9-]+)\/[a-z0-9-]+\.md)$/\1/p')
 fi
 case "$page" in
   ""|*/index.md) ;;
   *)
     name=${page##*/}
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s is a memory page. Read it with: memory read %s. That prints its trust markers and ends with the commands that fix it; a raw read loses both. If memory read itself fails, run: memory doctor --fix"}}\n' "$page" "$name"
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s is a memory page. Read it with: memory read %s, or memory read STORE/%s when two stores hold that name. That prints its trust markers and ends with the commands that fix it; a raw read loses both. If memory read itself fails, run: memory doctor --fix"}}\n' "$page" "$name" "$name"
     ;;
 esac
 exit 0

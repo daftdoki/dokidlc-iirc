@@ -25,6 +25,8 @@ Usage:
   memory stats [--days N]      how memory is being used
   memory setup                 semantic (default) or string search, and the embedding host; once per machine
   memory init                  create .memory/ and the CLAUDE.md paragraph
+  memory sync                  commit, pull, and push every remote store
+  memory stores [add NAME URL] list the stores, or add a remote store (ask the creator first)
 """
 
 from __future__ import annotations
@@ -353,6 +355,46 @@ def row_store(r: dict) -> str:
 def page_label(store: str, filename: str) -> str:
     """STORE/PAGE with two or more stores, PAGE with one."""
     return f"{store}/{filename}" if len(STORES) > 1 else filename
+
+
+SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.I)
+
+
+def normalize_origin(url: str) -> str:
+    """host/owner/repo from an ssh, scp-style, or https remote: no scheme, user, port, or .git, lowercase."""
+    u = url.strip()
+    had_scheme = bool(SCHEME_RE.match(u))
+    u = SCHEME_RE.sub("", u)
+    u = re.sub(r"^[^@/]+@", "", u)
+    if had_scheme:
+        u = re.sub(r"^([^/:]+):\d+(?=/|$)", r"\1", u)          # host:port/...
+    else:
+        u = re.sub(r"^([^/:]+):", r"\1/", u, count=1)            # scp-style host:owner/repo
+    u = re.sub(r"\.git/*$", "", u.rstrip("/"))
+    return u.rstrip("/").lower()
+
+
+_PROJECT_ID: dict[Path, str] = {}
+
+
+def project_id(root: Path | None = None) -> str:
+    """The project's identity in a remote store: its origin, normalized, or its directory name."""
+    root = Path(root or ROOT).resolve()
+    if root not in _PROJECT_ID:
+        url = None
+        try:
+            proc = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"], capture_output=True, text=True)
+            url = proc.stdout.strip() if proc.returncode == 0 else None
+        except FileNotFoundError:
+            pass
+        _PROJECT_ID[root] = normalize_origin(url) if url else slugify(root.name)
+    return _PROJECT_ID[root]
+
+
+def same_project(fm: dict, root: Path | None = None) -> bool:
+    """True for a page of this project: no project key (a project store page) or this project's id."""
+    p = fm.get("project")
+    return not p or str(p) == project_id(root)
 
 
 def config_text(root: Path | None = None) -> str:
@@ -710,7 +752,7 @@ def hybrid_search(query: str) -> list[dict]:
     def key(r: dict):
         both = "semantic" in r["via"] and r["hits"] > 0
         d = r.get("distance") if isinstance(r.get("distance"), (int, float)) else 1.0
-        return (0 if both else 1 if "semantic" in r["via"] else 2, d, -r["hits"], r["filename"])
+        return (0 if both else 1 if "semantic" in r["via"] else 2, 0 if row_current(r) else 1, d, -r["hits"], r["filename"])
 
     rows.sort(key=key)
     return rows
@@ -728,8 +770,18 @@ def merge_results(per_query: list[tuple[str, list[dict]]]) -> list[dict]:
             if isinstance(d_new, (int, float)) and (not isinstance(d_old, (int, float)) or d_new < d_old):
                 row["distance"] = d_new
     rows = list(merged.values())
-    rows.sort(key=lambda r: (-len(r["matched"]), r["distance"] if isinstance(r.get("distance"), (int, float)) else 1.0, r["filename"]))
+    rows.sort(key=lambda r: (-len(r["matched"]), 0 if row_current(r) else 1, r["distance"] if isinstance(r.get("distance"), (int, float)) else 1.0, r["filename"]))
     return rows
+
+
+def row_current(r: dict) -> bool:
+    """A result from this project ranks ahead of another project's in the same class."""
+    if len(STORES) < 2:
+        return True
+    store = store_named(row_store(r))
+    if store is None or store.kind == "project":
+        return True
+    return same_project(r.get("fm") or page_frontmatter(r["filename"], store))
 
 
 RECALL_MIN_PROMPT = 40
@@ -1026,11 +1078,30 @@ def is_url(ref: str) -> bool:
     return bool(URL_RE.match(str(ref)))
 
 
-def fill_ref(ref: str, root: Path | None = None) -> str:
-    """'path' becomes 'path@sha' of the last commit touching it. 'path@sha' and URLs are kept."""
+def split_ref(ref: str) -> tuple[str | None, str]:
+    """'ID:path@sha' to (ID, 'path@sha'); a plain ref or a URL to (None, ref)."""
+    if is_url(ref) or ":" not in ref:
+        return None, ref
+    pid, rest = ref.split(":", 1)
+    return pid, rest
+
+
+def fill_ref(ref: str, root: Path | None = None, store: Store | None = None) -> str:
+    """'path' becomes 'path@sha' of the last commit touching it. 'path@sha' and URLs are kept.
+
+    In a remote store a file ref names its project: 'ID:path@sha'. Another project's ref is kept as written.
+    """
     root = root or ROOT
     if is_url(ref):
         return ref
+    pid, rest = split_ref(ref)
+    if pid is not None and pid != project_id(root):
+        return ref
+    filled = _fill_path(rest, root)
+    return f"{project_id(root)}:{filled}" if store is not None and store.kind == "remote" else filled
+
+
+def _fill_path(ref: str, root: Path) -> str:
     if "@" in ref:
         path, sha = ref.rsplit("@", 1)
         if not SHA_RE.match(sha):
@@ -1134,6 +1205,9 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     root = root or ROOT
     if is_url(ref):
         return None
+    pid, ref = split_ref(ref)
+    if pid is not None and pid != project_id(root):
+        return None          # another project's file: not checked here
     if "@" not in ref:
         return f"{ref}: no commit cited"
     path, sha = ref.rsplit("@", 1)
@@ -1236,6 +1310,8 @@ def label(sig: str) -> str:
 def suspicion(fm: dict, root: Path | None = None, run_checks: bool = False, now: datetime | None = None, check_urls: bool = False, approved: dict | None = None) -> list[tuple[str, str]]:
     """List of (signal, reason). 'ref' and 'check' mean suspect; 'url' and 'age' mean glance."""
     root = root or ROOT
+    if not same_project(fm, root):
+        return []            # another project's page: its refs and check are not checked here
     found: list[tuple[str, str]] = []
     for ref in fm.get("refs") or []:
         if is_url(str(ref)):
@@ -1315,9 +1391,13 @@ def cmd_doubt(args: argparse.Namespace) -> None:
     approved = approved_checks()
     rows = []
     unchecked_urls = 0
+    elsewhere = []
     for store in live_stores():
         for page in list_pages(store.dir):
             fm, _ = parse_page(page.read_text())
+            if not same_project(fm):
+                elsewhere.append(page_label(store.name, page.name))
+                continue
             signals = suspicion(fm, run_checks=True, check_urls=args.network, approved=approved)
             if not args.network:
                 unchecked_urls += sum(1 for r in fm.get("refs") or [] if is_url(str(r)))
@@ -1327,6 +1407,8 @@ def cmd_doubt(args: argparse.Namespace) -> None:
     if unchecked_urls:
         print(f"memory: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `memory doubt --network` contacts them; ask the creator first.", file=sys.stderr)
     rows.sort(key=lambda r: (RANK[r[2][0][0]] if r[2] else 99, r[0]))
+    if elsewhere:
+        print(f"memory: {len(elsewhere)} page{'s' if len(elsewhere) != 1 else ''} of other projects not checked here" + (": " + ", ".join(elsewhere) if args.all else ""), file=sys.stderr)
     if not rows:
         print("no suspect pages")
         return
@@ -1385,8 +1467,10 @@ def cmd_write(args: argparse.Namespace) -> None:
     fm: dict = {"title": args.title, "summary": args.summary}
     fm["topics"] = [t.strip() for t in args.topics.split(",") if t.strip()]
     fm["kind"] = args.kind
+    if store.kind == "remote":
+        fm["project"] = project_id()
     if args.ref:
-        fm["refs"] = [fill_ref(r) for r in args.ref]
+        fm["refs"] = [fill_ref(r, store=store) for r in args.ref]
     if args.check:
         validate_check(args.check, args.page)
         fm["check"] = args.check
@@ -1430,7 +1514,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
     if not page.is_file():
         die(f"no such page {args.page}")
     fm, body = parse_page(page.read_text())
-    if fm.get("check"):
+    mine = same_project(fm)
+    if fm.get("check") and mine:
         cmd = str(fm["check"])
         if UNSAFE_CHECK_RE.search(cmd):
             die("refused: this page's check is not read-only in form; rewrite the page")
@@ -1440,9 +1525,11 @@ def cmd_verify(args: argparse.Namespace) -> None:
         if reason:
             die(f"cannot verify: {reason}. Fix the page or its check first.")
     fm["verified"] = now_iso()
-    if fm.get("refs"):
-        # re-confirmed against the cited files as they are now, so cite them as they are now
-        fm["refs"] = [fill_ref(str(r).rsplit("@", 1)[0] if not is_url(str(r)) else str(r)) for r in fm["refs"]]
+    if store.kind == "remote" and not fm.get("project"):
+        fm["project"] = project_id()
+    if fm.get("refs") and mine:
+        # re-confirmed against the cited files as they are now, so cite them as they are now; another project's refs stay
+        fm["refs"] = [refresh_ref(str(r), store) for r in fm["refs"]]
     log_event("verify", page=args.page)
     proc = tool("write", "--force", name, stdin=render_page(fm, body), check=False, field=store.field)
     if proc.returncode:
@@ -1450,6 +1537,15 @@ def cmd_verify(args: argparse.Namespace) -> None:
     print(f"verified {args.page} at {fm['verified']}")
     reindex()
     save(store, f"memory: verify {name}")
+
+
+def refresh_ref(ref: str, store: Store) -> str:
+    if is_url(ref):
+        return ref
+    pid, rest = split_ref(ref)
+    if pid is not None and pid != project_id():
+        return ref
+    return fill_ref(rest.rsplit("@", 1)[0], store=store)
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
@@ -1681,12 +1777,12 @@ class LockTimeout(Exception):
 
 
 @contextlib.contextmanager
-def store_lock(key: str):
-    """Exclusive flock on state_dir()/locks/KEY.lock, waiting at most LOCK_WAIT. Take it once per command."""
+def store_lock(key: str, wait: float = LOCK_WAIT):
+    """Exclusive flock on state_dir()/locks/KEY.lock, waiting at most `wait` seconds. Take it once per command."""
     locks = state_dir() / "locks"
     locks.mkdir(parents=True, exist_ok=True)
     with open(locks / f"{key}.lock", "w") as f:
-        deadline = time.monotonic() + LOCK_WAIT
+        deadline = time.monotonic() + wait
         while True:
             try:
                 fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1741,18 +1837,264 @@ def store_pathspec(store: Store) -> str:
 
 def commit_memory(store: Store, message: str) -> str | None:
     """Commit the store's whole directory, so a page an earlier command left uncommitted comes along."""
+    if store.kind == "remote":
+        message += f"\n\nMemory-Project: {project_id()}"
     return commit_paths(store.repo, [store_pathspec(store)], message)
 
 
 def save(store: Store, message: str) -> None:
-    """Commit a store after a change. Prints one line when it cannot; the change itself stays written."""
+    """Commit a store after a change, and push a remote store. Prints one line when it cannot; the change stays written."""
+    pushed = None
     try:
         with store_lock(store.field):
             reason = commit_memory(store, message)
+            if not reason and store.kind == "remote":
+                pushed = push_store(store)
     except LockTimeout:
         reason = f"another memory command held the store lock for {LOCK_WAIT:.0f} s"
     if reason:
         print(f"memory: written, not committed: {reason}", file=sys.stderr)
+    elif pushed:
+        print(f"memory: committed, not pushed: {pushed}; run memory sync", file=sys.stderr)
+
+
+# --- remote stores --------------------------------------------------------------
+
+NET_TIMEOUT = 30.0
+BRIEF_PULL_BUDGET = 5.0
+
+
+def git_net(repo: Path, *args: str, timeout: float = NET_TIMEOUT) -> subprocess.CompletedProcess[str]:
+    """git with no credential prompt and a time limit; a timeout comes back as exit 124."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    try:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, env=env, timeout=max(timeout, 0.1))
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(["git", *args], 124, "", f"git {args[0]} timed out after {timeout:.0f} s")
+
+
+def current_branch(repo: Path) -> str:
+    out = run_git(repo, "symbolic-ref", "--short", "HEAD").stdout.strip()
+    return out or "main"
+
+
+def last_line(proc: subprocess.CompletedProcess[str]) -> str:
+    text = (proc.stderr or proc.stdout or "").strip()
+    return text.splitlines()[-1] if text else f"git exited {proc.returncode}"
+
+
+def mark_own_rebase(repo: Path, on: bool) -> None:
+    """Remember a rebase this command started, so sync can abort it if git was killed mid-way."""
+    data = read_state_json("own-rebase.json")
+    if on:
+        data[str(repo)] = now_iso()
+    else:
+        data.pop(str(repo), None)
+    write_state_json("own-rebase.json", data)
+
+
+def rebase_in_progress(repo: Path) -> bool:
+    return any((repo / run_git(repo, "rev-parse", "--git-path", n).stdout.strip()).exists() for n in ("rebase-merge", "rebase-apply"))
+
+
+def pull_store(store: Store, ff_only: bool = False, timeout: float = NET_TIMEOUT) -> tuple[int, str | None]:
+    """Pull the store's branch. (pages changed, reason or None). Never leaves a rebase of its own behind."""
+    repo, branch = store.repo, current_branch(store.repo)
+    before = run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    if ff_only:
+        proc = git_net(repo, "pull", "-q", "--ff-only", "origin", branch, timeout=timeout)
+    else:
+        mark_own_rebase(repo, True)
+        proc = git_net(repo, "pull", "-q", "--rebase", "origin", branch, timeout=timeout)
+        if proc.returncode and rebase_in_progress(repo):
+            run_git(repo, "rebase", "--abort")
+        mark_own_rebase(repo, False)
+    if proc.returncode:
+        if "couldn't find remote ref" in (proc.stderr or ""):
+            return 0, None            # the remote has no commits yet
+        return 0, last_line(proc)
+    after = run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    if not before or before == after:
+        return (len(list_pages(store.dir)) if not before and after else 0), None
+    changed = run_git(repo, "diff", "--name-only", before, after, "--", store_pathspec(store)).stdout.split()
+    return len(changed), None
+
+
+def push_store(store: Store, timeout: float = NET_TIMEOUT) -> str | None:
+    """Push the store's branch; on rejection, one pull --rebase and one more push. None, or why it did not push."""
+    branch = current_branch(store.repo)
+    proc = git_net(store.repo, "push", "-q", "-u", "origin", branch, timeout=timeout)
+    if proc.returncode == 0:
+        return None
+    if "rejected" not in (proc.stderr or "") and "fetch first" not in (proc.stderr or ""):
+        return last_line(proc)
+    _, reason = pull_store(store, timeout=timeout)
+    if reason:
+        return f"the remote changed and the rebase did not apply cleanly ({reason})"
+    proc = git_net(store.repo, "push", "-q", "-u", "origin", branch, timeout=timeout)
+    return None if proc.returncode == 0 else last_line(proc)
+
+
+def unpushed(store: Store) -> int:
+    """Commits on the store's branch that its remote does not have."""
+    if store.kind != "remote" or not store.dir.is_dir() or not is_work_tree(store.repo):
+        return 0
+    branch = current_branch(store.repo)
+    if run_git(store.repo, "rev-parse", "--verify", "-q", f"origin/{branch}").returncode == 0:
+        out = run_git(store.repo, "rev-list", "--count", f"origin/{branch}..HEAD").stdout.strip()
+    else:
+        out = run_git(store.repo, "rev-list", "--count", "HEAD").stdout.strip()
+    return int(out) if out.isdigit() else 0
+
+
+def clone_store(store: Store) -> str | None:
+    """Clone a missing remote store and give an empty one its index.md. None, or why not."""
+    store.dir.parent.mkdir(parents=True, exist_ok=True)
+    proc = git_net(store.dir.parent, "clone", "-q", store.url, store.dir.name, timeout=60)
+    if proc.returncode:
+        return last_line(proc)
+    return create_index(store)
+
+
+def create_index(store: Store) -> str | None:
+    """An empty remote store gets index.md, committed and pushed."""
+    if (store.dir / "index.md").is_file():
+        return None
+    (store.dir / "index.md").write_text(INDEX_TEMPLATE)
+    regenerate_index(store.dir)
+    with store_lock(store.field):
+        reason = commit_memory(store, f"memory: create store {store.name}")
+        return reason or push_store(store)
+
+
+def start_background(argv: list[str]) -> None:
+    """Detached from the hook: no shared stdin or stdout, its own session, so the hook returns at once."""
+    try:
+        subprocess.Popen(argv, cwd=ROOT, env=dict(os.environ, CLAUDE_PROJECT_DIR=str(ROOT)),
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
+
+def pull_at_session_start() -> list[str]:
+    """Fast-forward each remote store within one budget; start a background reindex when pages arrived. Never blocks the hook."""
+    notes: list[str] = []
+    deadline = time.monotonic() + BRIEF_PULL_BUDGET
+    arrived = 0
+    for store in [s for s in live_stores() if s.kind == "remote"]:
+        left = deadline - time.monotonic()
+        if left < 0.5:
+            break
+        try:
+            with store_lock(store.field, wait=0):
+                n, reason = pull_store(store, ff_only=True, timeout=left)
+        except LockTimeout:
+            continue
+        if reason:
+            notes.append(f"Store {store.name} was not pulled ({reason}); run memory sync.")
+        arrived += n
+    if arrived:
+        start_background([str(PLUGIN_ROOT / "bin" / "memory"), "index"])
+        notes.append(f"Pulled {arrived} page{'s' if arrived != 1 else ''} from remote stores; reindexing in the background.")
+    return notes
+
+
+def non_pages(store: Store) -> list[str]:
+    """Markdown files in a store that are not pages; the tool would index them anyway."""
+    return sorted(p.name for p in store.dir.glob("*.md") if p.name != "index.md" and not PAGE_RE.match(p.name))
+
+
+def cmd_sync(args: argparse.Namespace) -> None:
+    """Make each remote store match its remote: commit leftovers, pull with rebase, push, reindex."""
+    remotes = [s for s in STORES if s.kind == "remote"]
+    if not remotes:
+        print("no remote stores; nothing to sync")
+        return
+    changed_any = False
+    for store in remotes:
+        if not store.dir.is_dir():
+            print(f"{store.name}: not on this machine; run memory doctor --fix")
+            continue
+        try:
+            with store_lock(store.field):
+                if read_state_json("own-rebase.json").get(str(store.repo)) and rebase_in_progress(store.repo):
+                    run_git(store.repo, "rebase", "--abort")
+                    mark_own_rebase(store.repo, False)
+                loose = uncommitted(store)
+                reason = commit_memory(store, "memory: sync") if loose else None
+                if reason:
+                    print(f"{store.name}: not committed: {reason}")
+                    continue
+                pulled, reason = pull_store(store)
+                if reason:
+                    print(f"{store.name}: committed {loose} file{'s' if loose != 1 else ''}; pull stopped: {reason}. The local commits stay; ask the creator to resolve the conflict in {store.dir}")
+                    continue
+                ahead = unpushed(store)
+                reason = push_store(store) if ahead else None
+                changed_any = changed_any or pulled > 0
+                print(f"{store.name}: committed {loose} file{'s' if loose != 1 else ''}, pulled {pulled} file{'s' if pulled != 1 else ''}, "
+                      + (f"not pushed: {reason}" if reason else f"pushed {ahead} commit{'s' if ahead != 1 else ''}"))
+        except LockTimeout:
+            print(f"{store.name}: another memory command holds the store; try again")
+    if changed_any:
+        reindex()
+
+
+def write_store_config(root: Path, name: str, url: str, make_default: bool) -> str:
+    """Add a remote store to .claude/memory.toml and return the new text. Keeps the project store configured."""
+    path = root / STORE_CONFIG
+    text = path.read_text() if path.is_file() else ""
+    if not text and (root / ".memory").is_dir():
+        text = '[stores.project]\nkind = "project"\npath = ".memory"\n'
+    if make_default:
+        if re.search(r"(?m)^write\s*=", text):
+            text = re.sub(r'(?m)^write\s*=.*$', f'write = "{name}"', text)
+        else:
+            text = f'write = "{name}"\n\n' + text
+    text = text.rstrip("\n") + ("\n\n" if text.strip() else "") + f'[stores.{name}]\nkind = "remote"\nurl = "{url}"\n'
+    return text
+
+
+def cmd_stores(args: argparse.Namespace) -> None:
+    if args.action == "add":
+        if not args.name or not args.url:
+            die("usage: memory stores add NAME URL [--default]")
+        if store_named(args.name):
+            die(f"a store named {args.name!r} already exists")
+        if not NAME_RE.match(args.name) or len(args.name) > STORE_NAME_MAX:
+            die(f"store name {args.name!r} must be lowercase letters and digits joined by single hyphens, at most {STORE_NAME_MAX} characters")
+        path = ROOT / STORE_CONFIG
+        new = write_store_config(ROOT, args.name, args.url, args.default)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new)
+        set_root(ROOT)
+        if CONFIG_ERROR:
+            die(CONFIG_ERROR)
+        store = store_named(args.name)
+        reason = clone_store(store) if not store.dir.is_dir() else create_index(store)
+        if reason:
+            print(f"memory: {store.name}: {reason}", file=sys.stderr)
+        try:
+            with store_lock(f"config-{field_name(ROOT)}"):
+                reason = commit_paths(ROOT, [STORE_CONFIG], f"memory: add store {args.name}")
+        except LockTimeout:
+            reason = "another memory command held the config lock"
+        if reason:
+            print(f"memory: {STORE_CONFIG} written, not committed: {reason}", file=sys.stderr)
+    for s in STORES:
+        where = str(s.dir).replace(str(Path.home()), "~", 1) if s.kind == "remote" else str(s.dir.relative_to(ROOT))
+        if not s.dir.is_dir():
+            status, n = "missing (memory doctor --fix)" if s.kind == "remote" else "missing (memory init)", 0
+        else:
+            n = len(list_pages(s.dir))
+            notes = []
+            if uncommitted(s):
+                notes.append(f"{uncommitted(s)} not committed")
+            if unpushed(s):
+                notes.append(f"{unpushed(s)} not pushed")
+            status = ", ".join(notes) or "ok"
+        print(f"{s.name:<10} {s.kind:<8} {where:<48} {n:>4} pages  {status}")
+    print(f"write target: {write_store(None).name if STORES else 'none'}")
 
 
 def uncommitted(store: Store) -> int:
@@ -1810,6 +2152,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if found is not None and found > FORMAT:
             emit(f"memory: a store was written by a newer memory plugin (format {found}); update the plugin")
             return
+        pulled_notes = pull_at_session_start() if hook == "SessionStart" else []
         per_store = [(s, list_pages(s.dir)) for s in live_stores()]
         pages = [p for _, ps in per_store for p in ps]
         n = len(pages)
@@ -1827,7 +2170,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             if any(sig == "ref" for sig, _ in suspicion(fm)):   # git only; never check commands here
                 suspects.append(page.name)
         top = ", ".join(f"{t} {c}" for t, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
-        parts = [f"memory: {n} page{'' if n == 1 else 's'}, {mode}."]
+        parts = [f"memory: {n} page{'' if n == 1 else 's'}, {mode}."] + pulled_notes
         if len(STORES) > 1:
             parts.append("Stores: " + ", ".join(f"{s.name} {len(ps)}" for s, ps in per_store) + ".")
         pin = read_pin()
@@ -1841,6 +2184,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         dirty = sum(uncommitted(s) for s in live_stores())
         if dirty:
             parts.append(f"{dirty} memory change{'s' if dirty != 1 else ''} not committed.")
+        ahead = sum(unpushed(s) for s in live_stores())
+        if ahead:
+            parts.append(f"{ahead} memory commit{'s' if ahead != 1 else ''} not pushed (memory sync).")
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
@@ -1900,7 +2246,22 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         report(f"model {pin['model']} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {pin['model']}")
 
     for store in STORES:
+        if store.kind == "remote" and not store.dir.is_dir() and args.fix:
+            reason = clone_store(store)
+            if reason:
+                print(f"memory: cloning {store.name}: {reason}")
+        elif store.kind == "remote" and store.dir.is_dir() and args.fix:
+            create_index(store)
         report(f"store {store.name} at {store.dir}", store.dir.is_dir(), "memory init" if store.kind == "project" else "memory doctor --fix")
+        if store.kind == "remote" and store.dir.is_dir():
+            origin = run_git(store.repo, "remote", "get-url", "origin").stdout.strip()
+            report(f"store {store.name} tracks {store.url}", origin == store.url, f"the clone at {store.dir} tracks {origin or 'nothing'}; move it aside and run memory doctor --fix")
+            ahead = unpushed(store)
+            report(f"store {store.name} has nothing unpushed" if not ahead else f"store {store.name} has {ahead} commit{'s' if ahead != 1 else ''} not pushed", ahead == 0, "memory sync")
+            extra = non_pages(store)
+            report(f"store {store.name} holds only pages and index.md" if not extra else f"store {store.name} holds non-page markdown: {', '.join(extra)}", not extra, "remove them; the tool indexes every .md file in a store")
+        if store.kind == "project" and store.dir.name != ".memory":
+            print(f"note store {store.name} at {store.dir.relative_to(ROOT)} is outside the guard, which covers .memory/ and remote stores")
         n = uncommitted(store)
         report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "memory index commits them")
 
@@ -2046,6 +2407,16 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("init", help="create .memory/ and the CLAUDE.md paragraph")
     p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("sync", help="commit, pull with rebase, and push every remote store")
+    p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("stores", help="list the stores; `stores add NAME URL [--default]` adds a remote store (ask the creator first)")
+    p.add_argument("action", nargs="?", choices=["add"])
+    p.add_argument("name", nargs="?")
+    p.add_argument("url", nargs="?")
+    p.add_argument("--default", action="store_true", help="with add: make the new store the write target")
+    p.set_defaults(func=cmd_stores)
 
     p = sub.add_parser("recall", help="hook entry: name pages that match the prompt (stdin JSON)")
     p.add_argument("--failure", action="store_true", help="PostToolUseFailure: search the failed command and its error")
