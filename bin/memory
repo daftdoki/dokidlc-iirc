@@ -30,6 +30,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -1401,6 +1403,7 @@ def cmd_write(args: argparse.Namespace) -> None:
     log_event("write", page=page_label(store.name, args.page), kind=args.kind)
     regenerate_index(store.dir)
     reindex()
+    save(store, f"memory: write {args.page}")
 
 
 def cmd_approve(args: argparse.Namespace) -> None:
@@ -1446,6 +1449,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
         die(proc.stderr.strip() or "verify failed")
     print(f"verified {args.page} at {fm['verified']}")
     reindex()
+    save(store, f"memory: verify {name}")
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
@@ -1458,6 +1462,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
     log_event("delete", page=page_label(store.name, name))
     regenerate_index(store.dir)
     reindex()
+    save(store, f"memory: delete {name}")
 
 
 def cmd_index(args: argparse.Namespace) -> None:
@@ -1465,6 +1470,8 @@ def cmd_index(args: argparse.Namespace) -> None:
     for store in live_stores():
         regenerate_index(store.dir)
     reindex()
+    for store in live_stores():
+        save(store, "memory: index")
     print("index current")
 
 
@@ -1663,6 +1670,99 @@ def git_add(paths: list[str]) -> None:
         pass
 
 
+# --- committing ---------------------------------------------------------------
+
+LOCK_WAIT = 10.0
+IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+
+
+class LockTimeout(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def store_lock(key: str):
+    """Exclusive flock on state_dir()/locks/KEY.lock, waiting at most LOCK_WAIT. Take it once per command."""
+    locks = state_dir() / "locks"
+    locks.mkdir(parents=True, exist_ok=True)
+    with open(locks / f"{key}.lock", "w") as f:
+        deadline = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise LockTimeout(key)
+                time.sleep(0.05)
+        yield
+
+
+def run_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+
+def is_work_tree(repo: Path) -> bool:
+    try:
+        return run_git(repo, "rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+    except FileNotFoundError:
+        return False
+
+
+def git_busy(repo: Path) -> bool:
+    """True while a merge, rebase, cherry-pick, or revert is in progress."""
+    for name in IN_PROGRESS:
+        out = run_git(repo, "rev-parse", "--git-path", name).stdout.strip()
+        if out and (repo / out if not os.path.isabs(out) else Path(out)).exists():
+            return True
+    return False
+
+
+def commit_paths(repo: Path, pathspec: list[str], message: str) -> str | None:
+    """Stage and commit exactly this pathspec. None on success or nothing to commit, else a reason. The caller holds the lock."""
+    if not is_work_tree(repo):
+        return "not a git repository"
+    if git_busy(repo):
+        return "a merge or rebase is in progress"
+    proc = run_git(repo, "add", "--", *pathspec)
+    if proc.returncode:
+        return proc.stderr.strip() or "git add failed"
+    if run_git(repo, "diff", "--cached", "--quiet", "--", *pathspec).returncode == 0:
+        return None
+    proc = run_git(repo, "commit", "-q", "-m", message, "--", *pathspec)
+    if proc.returncode:
+        return (proc.stderr.strip() or proc.stdout.strip() or "git commit failed").splitlines()[-1]
+    return None
+
+
+def store_pathspec(store: Store) -> str:
+    return "." if store.dir == store.repo else str(store.dir.relative_to(store.repo))
+
+
+def commit_memory(store: Store, message: str) -> str | None:
+    """Commit the store's whole directory, so a page an earlier command left uncommitted comes along."""
+    return commit_paths(store.repo, [store_pathspec(store)], message)
+
+
+def save(store: Store, message: str) -> None:
+    """Commit a store after a change. Prints one line when it cannot; the change itself stays written."""
+    try:
+        with store_lock(store.field):
+            reason = commit_memory(store, message)
+    except LockTimeout:
+        reason = f"another memory command held the store lock for {LOCK_WAIT:.0f} s"
+    if reason:
+        print(f"memory: written, not committed: {reason}", file=sys.stderr)
+
+
+def uncommitted(store: Store) -> int:
+    """Changed or new files under the store's directory, by git status."""
+    if not store.dir.is_dir() or not is_work_tree(store.repo):
+        return 0
+    out = run_git(store.repo, "status", "--porcelain", "--", store_pathspec(store)).stdout
+    return len([line for line in out.splitlines() if line.strip()])
+
+
 # --- doctor -----------------------------------------------------------------
 
 INDEX_TEMPLATE = """---
@@ -1738,6 +1838,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append(f"Topics: {top}.")
         if suspects:
             parts.append(f"{len(suspects)} suspect: {', '.join(suspects[:3])} (cited file changed).")
+        dirty = sum(uncommitted(s) for s in live_stores())
+        if dirty:
+            parts.append(f"{dirty} memory change{'s' if dirty != 1 else ''} not committed.")
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
@@ -1798,6 +1901,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
     for store in STORES:
         report(f"store {store.name} at {store.dir}", store.dir.is_dir(), "memory init" if store.kind == "project" else "memory doctor --fix")
+        n = uncommitted(store)
+        report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "memory index commits them")
 
     claude_md = ROOT / "CLAUDE.md"
     report("CLAUDE.md has the memory paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "memory init")

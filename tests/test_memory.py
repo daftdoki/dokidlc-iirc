@@ -921,3 +921,118 @@ def test_search_prefixes_store_with_two_stores(tmp_path, monkeypatch, capsys):
     (tmp_path / ".claude" / "memory.toml").unlink(); memory.set_root(tmp_path)
     memory.main(["search", "ollama"])
     assert capsys.readouterr().out.startswith("ollama-p.md: ")      # one store: no prefix
+
+
+# --- auto commit --------------------------------------------------------------
+
+
+def _git(repo, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout
+
+
+def _project(tmp_path, monkeypatch):
+    """A git repository with a committed .memory/index.md, isolated from the user's git config."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null"); monkeypatch.setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    _repo(tmp_path)
+    field = tmp_path / ".memory"; field.mkdir()
+    (field / "index.md").write_text(memory.INDEX_TEMPLATE)
+    _git(tmp_path, "add", ".memory"); _git(tmp_path, "commit", "-qm", "memory")
+    memory.set_root(tmp_path)
+    monkeypatch.setattr(memory, "tool", _fake_tool(field))
+    monkeypatch.setattr(memory, "reindex", lambda: None)
+    return field
+
+
+def _write(monkeypatch, name, *extra):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    memory.main(["write", name, "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding", *extra])
+
+
+def test_commit_memory_commits_only_memory_paths(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    (tmp_path / "staged.txt").write_text("s\n"); _git(tmp_path, "add", "staged.txt")
+    (tmp_path / "docs" / "a.md").write_text("edited\n")
+    _write(monkeypatch, "new-page.md")
+    files = _git(tmp_path, "show", "--name-only", "--format=%s", "HEAD").split()
+    assert files[:3] == ["memory:", "write", "new-page.md"]
+    assert sorted(files[3:]) == [".memory/index.md", ".memory/new-page.md"]
+    status = _git(tmp_path, "status", "--porcelain")
+    assert "A  staged.txt" in status and " M docs/a.md" in status
+
+
+def test_commit_picks_up_an_earlier_uncommitted_page(tmp_path, monkeypatch):
+    field = _project(tmp_path, monkeypatch)
+    _page(field, "left-behind.md")
+    _write(monkeypatch, "next.md")
+    assert ".memory/left-behind.md" in _git(tmp_path, "show", "--name-only", "--format=", "HEAD").split()
+
+
+def test_commit_memory_runs_only_without_an_operation_in_progress(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / ".git" / "MERGE_HEAD").write_text(head)
+    _write(monkeypatch, "during-merge.md")
+    assert (tmp_path / ".memory" / "during-merge.md").is_file()
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+    assert "not committed: a merge or rebase is in progress" in capsys.readouterr().err
+
+
+def test_commit_memory_reports_a_failing_hook(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    hook = tmp_path / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho refused by hook >&2\nexit 1\n"); hook.chmod(0o755)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    _write(monkeypatch, "hooked.md")                        # exits 0: no SystemExit
+    assert (tmp_path / ".memory" / "hooked.md").is_file() and _git(tmp_path, "rev-parse", "HEAD") == head
+    assert "written, not committed: refused by hook" in capsys.readouterr().err
+
+
+def test_verify_delete_index_commit(tmp_path, monkeypatch):
+    field = _project(tmp_path, monkeypatch)
+    _write(monkeypatch, "life.md")
+    memory.main(["verify", "life.md"])
+    assert _git(tmp_path, "log", "-1", "--format=%s") == "memory: verify life.md\n"
+    memory.main(["delete", "life.md"])
+    assert _git(tmp_path, "log", "-1", "--format=%s") == "memory: delete life.md\n"
+    assert not (field / "life.md").exists() and "life.md" not in _git(tmp_path, "ls-files")
+    (field / "index.md").write_text("intro\n")
+    memory.main(["index"])
+    assert _git(tmp_path, "log", "-1", "--format=%s") == "memory: index\n"
+
+
+def test_store_lock_serializes_two_writers(tmp_path, monkeypatch, capsys):
+    import threading
+    field = _project(tmp_path, monkeypatch)
+    store = memory.project_store()
+    _page(field, "one.md"); _page(field, "two.md")
+    errors = []
+
+    def commit(msg):
+        try:
+            memory.save(store, msg)
+        except Exception as e:   # pragma: no cover - surfaced by the assert
+            errors.append(e)
+    with memory.store_lock(store.field):
+        threads = [threading.Thread(target=commit, args=(f"memory: write {n}",)) for n in ("one.md", "two.md")]
+        for t in threads:
+            t.start()
+        import time; time.sleep(0.3)                          # both wait on the lock this test holds
+        assert _git(tmp_path, "status", "--porcelain", "--", ".memory").count("??") == 2
+    for t in threads:
+        t.join()
+    assert not errors and "index.lock" not in capsys.readouterr().err
+    assert _git(tmp_path, "status", "--porcelain", "--", ".memory") == ""
+
+
+def test_doctor_brief_counts_uncommitted(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    memory.main(["doctor", "--brief"])
+    assert "not committed" not in capsys.readouterr().out
+    _page(field, "loose.md")
+    memory.main(["doctor", "--brief"])
+    assert "1 memory change not committed." in capsys.readouterr().out
