@@ -237,7 +237,7 @@ def test_set_root_and_project_root(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     assert memory.project_root() == tmp_path.resolve()
     memory.set_root(tmp_path)
-    assert memory.FIELD_DIR == tmp_path.resolve() / ".memory"
+    assert [(s.name, s.kind, s.dir) for s in memory.STORES] == [("project", "project", tmp_path.resolve() / ".memory")]
     monkeypatch.delenv("CLAUDE_PROJECT_DIR")
     import subprocess
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -475,12 +475,18 @@ def test_verify_requires_an_approved_check(tmp_path, monkeypatch, capsys):
     assert "not read-only" in capsys.readouterr().err
 
 
-def _fake_tool(field):
-    """Stands in for memoryfield-tool: write stores the page, everything else succeeds silently."""
-    def fake(*a, stdin=None, **k):
+def _fake_tool(field, calls=None):
+    """Stands in for memoryfield-tool: write stores the page in the field= store (else `field`), everything else succeeds silently."""
+    def fake(*a, stdin=None, field=None, **k):
+        if calls is not None:
+            calls.append((a, field))
+        target = next((s.dir for s in memory.STORES if s.field == field), None) if field else None
         if a[0] == "write":
-            (field / a[-1]).write_text(stdin)
+            ((target or field_dir) / a[-1]).write_text(stdin)
+        if a[0] == "delete":
+            ((target or field_dir) / a[-1]).unlink()
         return type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+    field_dir = field
     return fake
 
 
@@ -767,3 +773,151 @@ def test_doctor_brief_returns_with_stdin_held_open(tmp_path):
         assert "memory: not set up" in proc.stdout.readline()
     finally:
         proc.kill()
+
+
+# --- stores -------------------------------------------------------------------
+
+
+def _two_stores(tmp_path, monkeypatch, write=None, remote_url="https://example.com/agent-memory.git"):
+    """A project store at .memory and a remote store whose clone directory exists (no git needed)."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    head = f'write = "{write}"\n' if write else ""
+    (tmp_path / ".claude" / "memory.toml").write_text(
+        head + '[stores.project]\nkind = "project"\npath = ".memory"\n\n[stores.agent]\nkind = "remote"\n'
+        f'url = "{remote_url}"\n')
+    (tmp_path / ".memory").mkdir(exist_ok=True)
+    memory.set_root(tmp_path)
+    agent = memory.store_named("agent")
+    agent.dir.mkdir(parents=True, exist_ok=True)
+    return memory.store_named("project"), agent
+
+
+def _page(store_dir, name, summary="s", extra=""):
+    (store_dir / name).write_text(f"---\ntitle: T\nsummary: {summary}\ntopics: [t]\nkind: finding\n{extra}---\nbody\n")
+
+
+def test_load_stores_defaults_to_one_project_store(tmp_path):
+    stores, write = memory.load_stores(tmp_path)
+    assert write is None and len(stores) == 1
+    s = stores[0]
+    assert (s.name, s.kind, s.dir, s.field) == ("project", "project", tmp_path.resolve() / ".memory", memory.field_name(tmp_path))
+
+
+def test_load_stores_reads_project_and_remote(tmp_path, monkeypatch):
+    project, agent = _two_stores(tmp_path, monkeypatch, write="agent")
+    assert memory.WRITE_DEFAULT == "agent" and [s.name for s in memory.STORES] == ["project", "agent"]
+    assert agent.kind == "remote" and agent.url == "https://example.com/agent-memory.git"
+    assert agent.dir.parent == tmp_path / "data" / "dokidlc-memory" / "stores"
+    assert memory.re.fullmatch(r"agent-[0-9a-f]{8}", agent.dir.name) and agent.field == agent.dir.name
+    assert project.field == memory.field_name(tmp_path)
+
+
+def test_load_stores_rejects_bad_config(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    cfg = tmp_path / ".claude" / "memory.toml"
+    bad = [
+        '[stores.agent-]\nkind = "remote"\nurl = "u"\n',
+        '[stores.a--b]\nkind = "remote"\nurl = "u"\n',
+        '[stores.project]\nkind = "project"\npath = "/abs"\n',
+        '[stores.agent]\nkind = "remote"\n',
+        'write = "nope"\n[stores.project]\nkind = "project"\n',
+        '[stores.one]\nkind = "remote"\nurl = "u"\n[stores.two]\nkind = "remote"\nurl = "v"\n',
+        '[stores.project]\nkind = "project"\n[stores.second]\nkind = "project"\npath = "m2"\n',
+        'not toml [',
+    ]
+    for text in bad:
+        cfg.write_text(text)
+        with pytest.raises(memory.ConfigError) as e:
+            memory.load_stores(tmp_path)
+        assert ".claude/memory.toml" in str(e.value), text
+
+
+def test_config_error_kills_commands_and_silences_hooks(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "memory.toml").write_text("not toml [")
+    with pytest.raises(SystemExit):
+        memory.main(["search", "x"])
+    assert ".claude/memory.toml" in capsys.readouterr().err
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "a prompt long enough to be worth a recall search here"})))
+    memory.main(["recall"])
+    memory.main(["doctor", "--brief"])
+    assert capsys.readouterr() == ("", "")
+
+
+def test_config_text_lists_every_store(tmp_path, monkeypatch):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    text = memory.config_text(tmp_path)
+    assert f"[memoryfields.{project.field}]" in text and f"[memoryfields.{agent.field}]" in text
+    assert f'location = "{agent.dir.resolve()}"' in text
+
+
+def test_resolve_page_bare_prefixed_and_ambiguous(tmp_path, monkeypatch, capsys):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    _page(project.dir, "only-here.md"); _page(agent.dir, "both.md"); _page(project.dir, "both.md")
+    assert memory.resolve_page("only-here.md") == (project, "only-here.md")
+    assert memory.resolve_page("agent/both.md") == (agent, "both.md")
+    with pytest.raises(SystemExit):
+        memory.resolve_page("both.md")
+    err = capsys.readouterr().err
+    assert "project/both.md" in err and "agent/both.md" in err
+    with pytest.raises(SystemExit):
+        memory.resolve_page("nostore/x.md")
+
+
+def test_write_store_order(tmp_path, monkeypatch):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    assert memory.write_store("agent") == agent
+    assert memory.write_store(None) == project                    # no write key: the project store
+    _two_stores(tmp_path, monkeypatch, write="agent")
+    assert memory.write_store(None) == memory.store_named("agent")
+    (tmp_path / ".claude" / "memory.toml").write_text('[stores.solo]\nkind = "remote"\nurl = "u"\n')
+    memory.set_root(tmp_path)
+    assert memory.write_store(None).name == "solo"               # the only store
+
+
+def test_write_refuses_a_name_in_another_store(tmp_path, monkeypatch, capsys):
+    import io
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    _page(agent.dir, "taken.md")
+    monkeypatch.setattr(memory, "tool", _fake_tool(project.dir))
+    monkeypatch.setattr(memory, "reindex", lambda: None)
+    argv = ["write", "taken.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding"]
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    with pytest.raises(SystemExit):
+        memory.main(argv)
+    assert "already exists in store agent" in capsys.readouterr().err
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    memory.main(argv + ["--store", "project"])
+    assert (project.dir / "taken.md").is_file()
+
+
+def test_read_and_pull_pass_the_field(tmp_path, monkeypatch, capsys):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    _page(project.dir, "p.md"); _page(agent.dir, "a.md")
+    calls = []
+    monkeypatch.setattr(memory, "tool", _fake_tool(project.dir, calls))
+    memory.main(["read", "p.md", "agent/a.md"])
+    assert [(a[0], a[-1], f) for a, f in calls] == [("read", "p.md", project.field), ("read", "a.md", agent.field)]
+    calls.clear()
+    monkeypatch.setattr(memory, "hybrid_search", lambda q: [{"filename": "a.md", "store": "agent", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
+    memory.main(["pull", "x"])
+    assert calls == [(("read", "--no-line-numbers", "a.md"), agent.field)]
+
+
+def test_search_prefixes_store_with_two_stores(tmp_path, monkeypatch, capsys):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    _page(project.dir, "ollama-p.md", "ollama in project"); _page(agent.dir, "ollama-a.md", "ollama in agent")
+    memory.write_config_file({"semantic": False})
+    memory.main(["search", "ollama"])
+    lines = capsys.readouterr().out.splitlines()
+    assert sorted(line.split(":")[0] for line in lines) == ["agent/ollama-a.md", "project/ollama-p.md"]
+    memory.main(["search", "--json", "ollama"])
+    rows = json.loads(capsys.readouterr().out)
+    assert sorted((r["store"], r["filename"]) for r in rows) == [("agent", "ollama-a.md"), ("project", "ollama-p.md")]
+    (tmp_path / ".claude" / "memory.toml").unlink(); memory.set_root(tmp_path)
+    memory.main(["search", "ollama"])
+    assert capsys.readouterr().out.startswith("ollama-p.md: ")      # one store: no prefix
