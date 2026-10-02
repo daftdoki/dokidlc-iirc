@@ -1,6 +1,6 @@
 ---
 name: memory
-description: "The repository's own memory: pages in .memory/ that past sessions wrote, searched and maintained with the memory command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, and to set memory up. Not Claude Code's memory under ~/.claude."
+description: "The repository's own memory: pages in .memory/ or the stores .claude/memory.toml names, that past sessions wrote, searched and maintained with the memory command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, and to set memory up. Not Claude Code's memory under ~/.claude."
 ---
 
 # Memory
@@ -17,7 +17,7 @@ Fix or delete a page the moment you find it wrong.
 memory search "what am I looking for"     ranked pages with summary and markers
 memory search term1 term2 term3           several terms, searched separately, merged
 memory pull "what am I looking for"       full text of the matching pages
-memory read PAGE.md                       one page
+memory read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
 memory doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
 memory verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
 memory approve PAGE.md                    run a page's check once and approve it here (ask first)
@@ -25,6 +25,8 @@ memory delete PAGE.md
 memory setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
 memory doctor --fix                       install or repair prerequisites
 memory init                               create .memory/ and the CLAUDE.md paragraph
+memory stores                             the stores, their page counts, and anything not committed or pushed
+memory sync                               commit, pull, and push the remote stores
 ```
 
 Write a page, body on stdin. The body carries the finding and its
@@ -41,8 +43,24 @@ printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | memory 
   --check "command -v ollama"
 ```
 
-`--title`, `--summary`, `--topics`, and `--kind` are required. `--ref` and
-`--check` are optional. The same command replaces an existing page.
+`--title`, `--summary`, `--topics`, and `--kind` are required. `--ref`,
+`--check`, and `--store` are optional. The same command replaces an
+existing page.
+
+## Stores
+
+Pages live in stores: the project's own `.memory/`, and any remote store
+`.claude/memory.toml` names, which is a separate memory repository shared
+by every project and machine that names it. `memory stores` lists them.
+With two or more, results read `STORE/PAGE.md`; read and verify a page by
+that name.
+
+Write a fact about this project to the project store. Write a fact that
+holds in any project, such as how a tool behaves, to the remote store,
+with `--store NAME` when the default store is the wrong one. Every change
+commits itself, and a remote store pushes too. When a line says
+`not pushed`, run `memory sync`. Run `memory stores add` only when the
+creator asks; it changes the repository's configuration.
 
 ## Setup, led by you
 
@@ -141,7 +159,8 @@ age. `doubt` also runs each page's `--check` command and marks failures.
 - Found right in use: `verify` it. One command. `verify` re-runs the
   page's check.
 - Run `memory doubt` when the session-start line names a suspect, after a
-  `git pull`, and before you close a quest stage.
+  `git pull` or `memory sync`, and before you close a quest stage. A page
+  another project wrote is not checked here; `doubt` counts them.
 - A `--check` must be read-only and must pass when you write it; the
   wrapper refuses one that does not. Checks run only from `doubt`,
   `verify`, and `approve`, never from hooks.

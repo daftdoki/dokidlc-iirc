@@ -106,6 +106,40 @@ memory might be out of date?" runs `memory doubt`. The full command list
 is in `memory --help`; the rules the agent follows are in
 [skills/memory/SKILL.md](skills/memory/SKILL.md).
 
+## Stores and auto commit
+
+Every change the agent makes to memory is committed at once. `write`,
+`verify`, `delete`, and `index` each commit the store's directory and
+nothing else, so your own staged and unstaged work stays out of the
+commit. No commit is made during a merge or rebase, and the
+session-start line counts anything left uncommitted.
+
+By default the only store is `.memory/` in the project. A remote store is
+a separate git repository that several projects or machines share: the
+plugin clones it under `~/.local/share/dokidlc-memory/stores/` and pushes
+after every commit. `.claude/memory.toml` lists the stores:
+
+```toml
+write = "agent"          # the store `memory write` uses without --store
+
+[stores.project]
+kind = "project"
+path = ".memory"
+
+[stores.agent]
+kind = "remote"
+url = "git@github.com:you/agent-memory.git"
+```
+
+Create the remote repository, then ask the agent to add it; it runs
+`memory stores add agent URL --default`, which writes that file, clones
+the repository, and commits the config. Search reads every store, and
+with two or more each result names its store, as in
+`agent/ollama-host.md`. A page in a remote store records which project
+wrote it; its refs and check run only in that project. When a push is
+rejected, the plugin rebases once; `memory sync` finishes the job when it
+cannot. The plugin never pushes the project repository itself.
+
 ## Caveats
 
 - The hooks fail open. A dead embedding host is skipped after a two-second
@@ -117,6 +151,9 @@ is in `memory --help`; the rules the agent follows are in
   refuses the page.
 - URLs in a page's refs are contacted only by `memory doubt --network`,
   which asks you first.
+- A remote store's clone sits on the agent's own machine. The guard
+  refuses a raw read of its pages by pattern, which is a convention, not
+  a boundary.
 - Past fifty pages the session-start line says to merge or delete before
   writing more. Search stays cheap as the field grows; near-duplicate
   pages make it name the wrong one.

@@ -11,13 +11,35 @@ page's check command.
 
 | When | What the agent sees |
 |---|---|
-| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed. After a compaction, a reminder to write if the session has written nothing. |
+| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, and memory changes not committed or not pushed. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
 | Every prompt you send | If pages match, one line naming up to three with the `memory read` command for each. Short prompts, one-word answers, and slash commands are skipped. At most 400 bytes. |
 | A shell command fails | The same line, searched with the error text. Silent when the error says nothing but an exit code. |
 | A shell command works after failing twice | A reminder to write the fix as a procedure page, once per command. |
 | The agent is about to stop | Once per session, only when a command failed twice then worked and nothing was written: write it, or say there is nothing worth a page. |
 | The agent runs `memory doubt --network` or `memory approve` | Claude Code asks you to approve it. |
 | The agent opens a page file raw, with `cat`, `head`, `sed`, `tail`, `less`, or `more`, or with the Read tool | The call is refused and the agent is told to use `memory read`, which prints the page with its trust markers and the commands that fix it, and to run `memory doctor --fix` if that command itself fails. |
+
+## Stores
+
+`.claude/memory.toml` lists the stores; without it there is one, the
+project store at `.memory/`. A store is one memoryfield field, so
+memoryfield-tool searches them all in one call.
+
+| Store | Where | Committed | Pushed |
+|---|---|---|---|
+| project (at most one) | a directory in the project repository, `.memory` by default | yes | never |
+| remote | a clone at `~/.local/share/dokidlc-memory/stores/NAME-HASH`, HASH from the URL | yes | after every commit |
+
+Each command that changes a store commits that store's whole directory
+with a pathspec commit, `memory: write NAME` and so on, under a per-store
+lock so two sessions on one machine never collide in git. A commit to a
+remote store carries a `Memory-Project:` trailer and is pushed; a
+rejected push is rebased once and pushed again, and a conflict leaves the
+local commit for `memory sync`. A page written to a remote store gets
+`project:` in its frontmatter, the project's `origin` normalized to
+`host/owner/repo`, and its file refs read `PROJECT:path@sha`. Suspicion,
+checks, and `verify` act only on pages of the current project. Search
+ranks the current project's pages first and hides nothing.
 
 ## Memory pages
 
