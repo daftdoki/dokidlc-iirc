@@ -1302,3 +1302,57 @@ def test_ref_changed_then_reverted_is_clean(tmp_path, monkeypatch):
     assert memory.ref_changed(f"docs/doc.md@{sha}", tmp_path)
     doc.write_text(original); _git(tmp_path, "commit", "-qam", "revert")
     assert memory.ref_changed(f"docs/doc.md@{sha}", tmp_path) is None
+
+
+SECTIONED = "intro\n\n## Alpha\n\nalpha text\n\n```\n## Gamma in a fence\n```\n\nalpha after the fence\n\n## Beta\n\nbeta text\n"
+
+
+def test_section_ref_ignores_edits_elsewhere(tmp_path, monkeypatch):
+    sha = _cited(tmp_path, monkeypatch, SECTIONED)
+    doc = tmp_path / "docs" / "doc.md"
+    doc.write_text(SECTIONED.replace("beta text", "beta rewritten")); _git(tmp_path, "commit", "-qam", "beta")
+    assert memory.ref_changed(f"docs/doc.md#Alpha@{sha}", tmp_path) is None
+    assert memory.ref_changed(f"docs/doc.md@{sha}", tmp_path)          # the whole file did change
+
+
+def test_section_ref_fires_on_its_own_text(tmp_path, monkeypatch):
+    sha = _cited(tmp_path, monkeypatch, SECTIONED)
+    doc = tmp_path / "docs" / "doc.md"
+    doc.write_text(SECTIONED.replace("alpha after the fence", "alpha changed after the fence")); _git(tmp_path, "commit", "-qam", "alpha")
+    reason = memory.ref_changed(f"docs/doc.md#Alpha@{sha}", tmp_path)
+    assert reason and "docs/doc.md#Alpha changed since cited" in reason
+
+
+def test_section_ref_missing_heading_is_suspect(tmp_path, monkeypatch):
+    sha = _cited(tmp_path, monkeypatch, SECTIONED)
+    doc = tmp_path / "docs" / "doc.md"
+    doc.write_text(SECTIONED.replace("## Beta", "## Renamed")); _git(tmp_path, "commit", "-qam", "rename heading")
+    assert "section no longer exists" in memory.ref_changed(f"docs/doc.md#Beta@{sha}", tmp_path)
+
+
+def test_section_ref_heading_with_a_colon(tmp_path, monkeypatch):
+    body = "## Review record: plan\n\nfirst\n\n## Other\n\nx\n"
+    sha = _cited(tmp_path, monkeypatch, body)
+    _page(tmp_path / ".memory", "colon.md", extra=f"refs:\n- 'docs/doc.md#Review record: plan@{sha}'\n")
+    (tmp_path / "docs" / "doc.md").write_text(body.replace("first", "second")); _git(tmp_path, "commit", "-qam", "edit")
+    signals = memory.suspicion(memory.page_frontmatter("colon.md"))
+    assert [s for s, _ in signals] == ["ref"] and "Review record: plan" in signals[0][1]
+
+
+def test_verify_moves_a_section_ref(tmp_path, monkeypatch):
+    sha = _cited(tmp_path, monkeypatch, SECTIONED)
+    _page(tmp_path / ".memory", "sect.md", extra=f"refs:\n- docs/doc.md#Alpha@{sha}\n")
+    _git(tmp_path, "mv", "docs/doc.md", "docs/moved.md"); _git(tmp_path, "commit", "-qm", "move")
+    assert memory.suspicion(memory.page_frontmatter("sect.md")) == []
+    memory.main(["verify", "sect.md"])
+    ref = memory.page_frontmatter("sect.md")["refs"][0]
+    assert ref.startswith("docs/moved.md#Alpha@") and not ref.endswith(sha)
+
+
+def test_write_section_ref_fills_and_refuses_a_missing_heading(tmp_path, monkeypatch, capsys):
+    sha = _cited(tmp_path, monkeypatch, SECTIONED)
+    _write(monkeypatch, "with-section.md", "--ref", "docs/doc.md#Beta")
+    assert memory.page_frontmatter("with-section.md")["refs"] == [f"docs/doc.md#Beta@{sha}"]
+    with pytest.raises(SystemExit):
+        _write(monkeypatch, "bad-section.md", "--ref", "docs/doc.md#Nope")
+    assert "no heading 'Nope'" in capsys.readouterr().err

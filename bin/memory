@@ -1079,11 +1079,51 @@ def is_url(ref: str) -> bool:
 
 
 def split_ref(ref: str) -> tuple[str | None, str]:
-    """'ID:path@sha' to (ID, 'path@sha'); a plain ref or a URL to (None, ref)."""
-    if is_url(ref) or ":" not in ref:
+    """'ID:path@sha' to (ID, 'path@sha'); a plain ref or a URL to (None, ref). An ID comes before the first '#', so a heading may hold ':'."""
+    if is_url(ref) or ":" not in ref.split("#", 1)[0]:
         return None, ref
     pid, rest = ref.split(":", 1)
     return pid, rest
+
+
+SHA_TAIL_RE = re.compile(r"^(.*)@([0-9a-f]{7,40})$", re.S)
+
+
+def ref_parts(ref: str) -> tuple[str | None, str, str | None, str | None]:
+    """[ID:]PATH[#HEADING][@SHA] to (ID, PATH, HEADING, SHA). A heading may hold ':' and '@'; the sha is the trailing hex."""
+    pid, rest = split_ref(ref)
+    if "#" not in rest:
+        path, sha = rest.rsplit("@", 1) if "@" in rest else (rest, None)
+        return pid, path, None, sha
+    path, tail = rest.split("#", 1)
+    m = SHA_TAIL_RE.match(tail)
+    return (pid, path, m.group(1), m.group(2)) if m else (pid, path, tail, None)
+
+
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def section_text(text: str, heading: str) -> str | None:
+    """The first markdown section whose heading text is HEADING, to the next heading of the same or a higher level. Fenced code is not read as headings."""
+    lines = text.splitlines()
+    fence = False
+    start, level = None, 0
+    for i, line in enumerate(lines):
+        if FENCE_RE.match(line):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        m = HEADING_RE.match(line)
+        if not m:
+            continue
+        if start is None:
+            if m.group(2).strip() == heading:
+                start, level = i, len(m.group(1))
+        elif len(m.group(1)) <= level:
+            return "\n".join(lines[start:i])
+    return "\n".join(lines[start:]) if start is not None else None
 
 
 def fill_ref(ref: str, root: Path | None = None, store: Store | None = None) -> str:
@@ -1102,6 +1142,18 @@ def fill_ref(ref: str, root: Path | None = None, store: Store | None = None) -> 
 
 
 def _fill_path(ref: str, root: Path) -> str:
+    if "#" in ref:
+        _, path, heading, sha = ref_parts(ref)
+        if sha:
+            return ref
+        if not (root / path).is_file():
+            die(f"ref {ref!r}: no such file in this repository")
+        if section_text((root / path).read_text(), heading) is None:
+            die(f"ref {ref!r}: {path} has no heading {heading!r}")
+        sha = git("log", "-1", "--format=%h", "--", path, cwd=root)
+        if not sha:
+            die(f"ref {ref!r}: not committed yet, so it has no sha to cite")
+        return f"{path}#{heading}@{sha}"
     if "@" in ref:
         path, sha = ref.rsplit("@", 1)
         if not SHA_RE.match(sha):
@@ -1250,11 +1302,11 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     pid, ref = split_ref(ref)
     if pid is not None and pid != project_id(root):
         return None          # another project's file: not checked here
-    if "@" not in ref:
-        return f"{ref}: no commit cited"
-    path, sha = ref.rsplit("@", 1)
-    if not SHA_RE.match(sha):
+    _, path, heading, sha = ref_parts(ref)
+    if heading is None and "@" in ref and not sha:
         return f"{ref}: cited sha is not hex"
+    if not sha:
+        return f"{ref}: no commit cited"
     try:
         if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True).returncode:
             return f"{path}: cited commit {sha} not found in history"
@@ -1263,11 +1315,21 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     now = current_path(path, sha, root)
     if now is None:
         return f"{path} no longer exists"
-    if blob(sha, path, root) == blob("HEAD", now, root):
-        return None          # same text, perhaps under a new name
+    if heading is None:
+        if blob(sha, path, root) == blob("HEAD", now, root):
+            return None      # same text, perhaps under a new name
+    else:
+        then = section_text(git("show", f"{sha}:{path}", cwd=root) or "", heading)
+        if then is None:
+            return f"{path}#{heading}: cited section not found at {sha}"
+        current = section_text(git("show", f"HEAD:{now}", cwd=root) or "", heading)
+        if current is None:
+            return f"{now}#{heading}: section no longer exists"
+        if then.strip() == current.strip():
+            return None
     out = subprocess.run(["git", "log", "--oneline", f"{sha}..HEAD", "--", path, now], cwd=root, capture_output=True, text=True).stdout
     n = max(len(out.splitlines()), 1)
-    where = path if now == path else f"{path} (now {now})"
+    where = path + (f"#{heading}" if heading else "") + ("" if now == path else f" (now {now})")
     return f"{where} changed since cited ({n} commit{'s' if n > 1 else ''})"
 
 
@@ -1587,11 +1649,10 @@ def refresh_ref(ref: str, store: Store) -> str:
     pid, rest = split_ref(ref)
     if pid is not None and pid != project_id():
         return ref
-    path = rest.rsplit("@", 1)[0]
-    if "@" in rest:
-        moved = current_path(path, rest.rsplit("@", 1)[1], ROOT)
-        path = moved or path
-    return fill_ref(path, store=store)
+    _, path, heading, sha = ref_parts(rest)
+    if sha:
+        path = current_path(path, sha, ROOT) or path
+    return fill_ref(path + (f"#{heading}" if heading else ""), store=store)
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
@@ -2415,7 +2476,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--summary", required=True, help="one sentence; this is what search prints")
     p.add_argument("--topics", required=True, help="comma-separated, one or two short tags")
     p.add_argument("--kind", required=True, choices=list(KINDS), help="environment, procedure, finding, or decision")
-    p.add_argument("--ref", action="append", help="repo path, path@sha, or a URL; repeatable. Bare paths get the last commit's sha")
+    p.add_argument("--ref", action="append", help="repo path, path#Heading for one section, path@sha, or a URL; repeatable. Bare paths get the last commit's sha")
     p.add_argument("--check", help="read-only shell command; exit 0 means the page still holds")
     p.add_argument("--store", help="the store to write to; default: write in .claude/memory.toml, else the project store")
     p.set_defaults(func=cmd_write)
