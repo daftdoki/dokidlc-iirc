@@ -70,7 +70,7 @@ goes silent, because the client has no timeout.
 | `summary` | One sentence, 160 characters or fewer. Search shows this line. |
 | `topics` | One or two tags. They make the topic list in `index.md`. |
 | `kind` | `environment`, `procedure`, `finding`, or `decision`. Says how fast the page can go stale. |
-| `refs` | Files this page cites, each at a commit, or URLs. If a file changes, the page becomes suspect. URLs are checked only when you allow it. |
+| `refs` | Files this page cites, each at a commit, or URLs. The page becomes suspect when the cited text differs from the file now; a move alone is no change, and `verify` rewrites the ref to the new path. `PATH#Heading@SHA` cites one markdown section, up to the next heading of its level or higher, so edits elsewhere in the file do not count; with two headings of the same text, the first counts. URLs are checked only when you allow it. |
 | `check` | A read-only command. If it fails, the page becomes suspect. A check runs on a machine only after that machine approved it. |
 | `verified` | When the agent last confirmed the page is still true. |
 

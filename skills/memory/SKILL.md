@@ -39,13 +39,15 @@ printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | memory 
   --summary "One sentence. This is what search prints." \
   --topics install,ollama \
   --kind environment \
-  --ref docs/some/doc.md \
+  --ref "docs/some/doc.md#Install steps" \
   --check "command -v ollama"
 ```
 
 `--title`, `--summary`, `--topics`, and `--kind` are required. `--ref`,
 `--check`, and `--store` are optional. The same command replaces an
-existing page.
+existing page. Cite a heading, `--ref "PATH#Heading"`, when the page
+rests on one part of a long document: the page then turns suspect only
+when that section changes.
 
 ## Stores
 
