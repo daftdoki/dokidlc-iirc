@@ -159,7 +159,7 @@ cannot. The plugin never pushes the project repository itself.
   grows; near-duplicate pages make it name the wrong one. `memory doctor`
   names each pair of pages whose embeddings are 0.10 apart or closer, and
   the session-start line counts them. The same line says when its scan
-  of cited files took more than 3 seconds; the scan costs about 19 ms
+  of cited files took more than 5 seconds; the scan costs about 19 ms
   per cited file, and the hook times out at 10 seconds.
 - The plugin has to be installed once per machine. `.claude/settings.json`
   can enable it for every clone, but cannot install it.

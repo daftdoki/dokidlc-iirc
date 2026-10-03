@@ -2222,7 +2222,7 @@ def uncommitted(store: Store) -> int:
 
 # --- near-duplicate pages -----------------------------------------------------
 
-SCAN_BUDGET = 3.0        # seconds for the session-start scan; the hook times out at 10 and a pull may take 5
+SCAN_BUDGET = 5.0        # seconds for the session-start scan; the hook times out at 10 and a pull may take 5 more
 NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
 VECTOR_FLOATS = 768
 

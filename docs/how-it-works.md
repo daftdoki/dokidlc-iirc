@@ -11,7 +11,7 @@ page's check command.
 
 | When | What the agent sees |
 |---|---|
-| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, memory changes not committed or not pushed, the count of near-duplicate pairs that `memory doctor` names, and the scan time when it passed 3 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
+| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, memory changes not committed or not pushed, the count of near-duplicate pairs that `memory doctor` names, and the scan time when it passed 5 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
 | Every prompt you send | If pages match, one line naming up to three with the `memory read` command for each. Short prompts, one-word answers, and slash commands are skipped. At most 400 bytes. |
 | A shell command fails | The same line, searched with the error text. Silent when the error says nothing but an exit code. |
 | A shell command works after failing twice | A reminder to write the fix as a procedure page, once per command. |
