@@ -1356,3 +1356,9 @@ def test_write_section_ref_fills_and_refuses_a_missing_heading(tmp_path, monkeyp
     with pytest.raises(SystemExit):
         _write(monkeypatch, "bad-section.md", "--ref", "docs/doc.md#Nope")
     assert "no heading 'Nope'" in capsys.readouterr().err
+
+
+def test_whole_file_ref_needs_a_hex_sha(tmp_path, monkeypatch):
+    _cited(tmp_path, monkeypatch)
+    for bad in ("docs/doc.md@HEAD", "docs/doc.md@HEAD~1", "docs/doc.md@zzzzzzz"):
+        assert "cited sha is not hex" in memory.ref_changed(bad, tmp_path), bad

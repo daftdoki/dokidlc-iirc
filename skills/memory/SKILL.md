@@ -47,7 +47,7 @@ printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | memory 
 `--check`, and `--store` are optional. The same command replaces an
 existing page. Cite a heading, `--ref "PATH#Heading"`, when the page
 rests on one part of a long document: the page then turns suspect only
-when that section changes.
+when that section changes or its heading disappears.
 
 ## Stores
 

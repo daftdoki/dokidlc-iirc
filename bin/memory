@@ -1303,7 +1303,7 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     if pid is not None and pid != project_id(root):
         return None          # another project's file: not checked here
     _, path, heading, sha = ref_parts(ref)
-    if heading is None and "@" in ref and not sha:
+    if heading is None and "@" in ref and not (sha and SHA_RE.match(sha)):
         return f"{ref}: cited sha is not hex"
     if not sha:
         return f"{ref}: no commit cited"
@@ -1324,7 +1324,7 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
             return f"{path}#{heading}: cited section not found at {sha}"
         current = section_text(git("show", f"HEAD:{now}", cwd=root) or "", heading)
         if current is None:
-            return f"{now}#{heading}: section no longer exists"
+            return f"{path}#{heading}" + ("" if now == path else f" (now {now})") + ": section no longer exists"
         if then.strip() == current.strip():
             return None
     out = subprocess.run(["git", "log", "--oneline", f"{sha}..HEAD", "--", path, now], cwd=root, capture_output=True, text=True).stdout
