@@ -1242,7 +1242,8 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
     memory.write_config_file({"semantic": False})
     procs = []
     real = memory.start_background
-    monkeypatch.setattr(memory, "start_background", lambda argv: procs.append(real(["sleep", "3"])))
+    asked = []
+    monkeypatch.setattr(memory, "start_background", lambda argv: asked.append(argv) or procs.append(real(["sleep", "3"])))
     _push_page(_other_clone(tmp_path, bare), "theirs.md")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup"})))
     t0 = time.monotonic()
@@ -1253,7 +1254,7 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
         assert p.poll() is None and os.getsid(p.pid) != os.getsid(0)   # still running, in its own session
     finally:
         p.kill()
-    assert "Pulled 1 page" in capsys.readouterr().out
+    assert "Pulled 1 page" in capsys.readouterr().out and asked[0][-1] == "index"
 
 
 def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, monkeypatch, capsys):

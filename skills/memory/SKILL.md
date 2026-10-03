@@ -23,7 +23,7 @@ memory verify PAGE.md                     you re-confirmed it; re-run its check,
 memory approve PAGE.md                    run a page's check once and approve it here (ask first)
 memory delete PAGE.md
 memory setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
-memory doctor --fix                       install or repair prerequisites
+memory doctor --fix                       install or repair prerequisites; clone missing remote stores
 memory init                               create .memory/ and the CLAUDE.md paragraph
 memory stores                             the stores, their page counts, and anything not committed or pushed
 memory sync                               commit, pull, and push the remote stores
