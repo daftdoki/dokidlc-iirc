@@ -825,7 +825,6 @@ def test_load_stores_rejects_bad_config(tmp_path):
         '[stores.agent]\nkind = "remote"\n',
         'write = "nope"\n[stores.project]\nkind = "project"\n',
         '[stores.one]\nkind = "remote"\nurl = "u"\n[stores.two]\nkind = "remote"\nurl = "v"\n',
-        '[stores.project]\nkind = "project"\n[stores.second]\nkind = "project"\npath = "m2"\n',
         'not toml [',
     ]
     for text in bad:
@@ -1226,3 +1225,41 @@ def test_guard_denies_a_raw_read_in_a_remote_store():
         assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert "memory read STORE/a-page.md" in out["hookSpecificOutput"]["permissionDecisionReason"]
     assert run({"tool_name": "Read", "tool_input": {"file_path": page.replace("a-page.md", "index.md")}}) == ""
+
+
+def test_load_stores_rejects_two_project_stores(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "memory.toml").write_text('[stores.project]\nkind = "project"\n[stores.second]\nkind = "project"\npath = "m2"\n')
+    with pytest.raises(memory.ConfigError) as e:
+        memory.load_stores(tmp_path)
+    assert "at most one project store" in str(e.value)
+
+
+def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, capsys):
+    """The hook returns within its budget, and the reindex runs detached in its own session."""
+    import io, os, time
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    procs = []
+    real = memory.start_background
+    monkeypatch.setattr(memory, "start_background", lambda argv: procs.append(real(["sleep", "3"])))
+    _push_page(_other_clone(tmp_path, bare), "theirs.md")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup"})))
+    t0 = time.monotonic()
+    memory.main(["doctor", "--brief", "--hook"])
+    assert time.monotonic() - t0 < memory.BRIEF_PULL_BUDGET + 2      # did not wait for the 3 s child
+    p = procs[0]
+    try:
+        assert p.poll() is None and os.getsid(p.pid) != os.getsid(0)   # still running, in its own session
+    finally:
+        p.kill()
+    assert "Pulled 1 page" in capsys.readouterr().out
+
+
+def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    memory.write_config_file({"semantic": False})
+    (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "memory.toml").write_text('[stores.agent]\nkind = "remote"\nurl = "u"\n')
+    memory.main(["doctor", "--brief"])
+    assert "memory doctor --fix" in capsys.readouterr().out

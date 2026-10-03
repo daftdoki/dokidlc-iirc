@@ -1967,13 +1967,13 @@ def create_index(store: Store) -> str | None:
         return reason or push_store(store)
 
 
-def start_background(argv: list[str]) -> None:
+def start_background(argv: list[str]) -> subprocess.Popen | None:
     """Detached from the hook: no shared stdin or stdout, its own session, so the hook returns at once."""
     try:
-        subprocess.Popen(argv, cwd=ROOT, env=dict(os.environ, CLAUDE_PROJECT_DIR=str(ROOT)),
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return subprocess.Popen(argv, cwd=ROOT, env=dict(os.environ, CLAUDE_PROJECT_DIR=str(ROOT)),
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
-        pass
+        return None
 
 
 def pull_at_session_start() -> list[str]:
@@ -2146,7 +2146,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             emit("memory: not set up on this machine. Ask the creator whether embeddings come from ollama on this machine or on a remote host (semantic search, the default), or whether ollama cannot run here at all (string search fallback); then run `memory setup` with their answer, `memory init` if this repository has no .memory/, and `memory doctor --fix`.")
             return
         if not live_stores():
-            emit("memory: this repository has no .memory/. Ask the creator whether to create one; if yes, run `memory init`.")
+            if project_store() is None:
+                emit("memory: no store is on this machine yet. Run `memory doctor --fix` to clone the remote stores in .claude/memory.toml.")
+            else:
+                emit("memory: this repository has no .memory/. Ask the creator whether to create one; if yes, run `memory init`.")
             return
         found = max((f for f in (read_format(s.dir) for s in live_stores()) if f is not None), default=None)
         if found is not None and found > FORMAT:
