@@ -116,7 +116,9 @@ Four rules keep the field worth searching:
    repository in under a minute. A path, a version, or a config value
    alone is not a page.
 2. One finding per page, so a wrong page can be deleted without losing a
-   right one. One topic, under 8KB.
+   right one. One topic, under 8KB. A field is too large when the
+   session-start line counts near-duplicate pairs or reports a slow
+   start scan; the page count is information.
 3. Sources names a command you ran, a file you read at a commit, or a URL
    you read, with a date. "Observed" is not a source.
 4. A page about a workaround says what it works around, so the fix can

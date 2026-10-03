@@ -155,9 +155,12 @@ cannot. The plugin never pushes the project repository itself.
 - A remote store's clone sits on the agent's own machine. The guard
   refuses a raw read of its pages by pattern, which is a convention, not
   a boundary.
-- Past fifty pages the session-start line says to merge or delete before
-  writing more. Search stays cheap as the field grows; near-duplicate
-  pages make it name the wrong one.
+- The page count is never a warning. Search stays cheap as the field
+  grows; near-duplicate pages make it name the wrong one. `memory doctor`
+  names each pair of pages whose embeddings are 0.10 apart or closer, and
+  the session-start line counts them. The same line says when its scan
+  of cited files took more than 3 seconds; the scan costs about 19 ms
+  per cited file, and the hook times out at 10 seconds.
 - The plugin has to be installed once per machine. `.claude/settings.json`
   can enable it for every clone, but cannot install it.
 
