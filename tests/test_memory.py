@@ -1039,6 +1039,16 @@ def test_doctor_brief_counts_uncommitted(tmp_path, monkeypatch, capsys):
     assert "1 memory change not committed." in capsys.readouterr().out
 
 
+def test_brief_does_not_warn_on_page_count(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    for i in range(51):
+        _page(field, f"page-{i}.md")
+    memory.main(["doctor", "--brief"])
+    out = capsys.readouterr().out
+    assert out.startswith("memory: 51 pages") and "is a lot" not in out
+
+
 # --- remote stores ------------------------------------------------------------
 
 

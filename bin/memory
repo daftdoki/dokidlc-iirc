@@ -2303,8 +2303,6 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
-        if n > 50:
-            parts.append(f"{n} pages is a lot: merge or delete before writing more.")
         parts.append("A hook names matching pages when the creator prompts; read them. `memory search QUERY` before an install, a fix, or a design.")
         if source == "compact" and session_writes() == 0:
             parts.append("Context was just compacted and this session wrote no memory. If the summary above names a fix that took more than one attempt, write it now.")
