@@ -36,11 +36,14 @@ import contextlib
 import fcntl
 import hashlib
 import json
+import math
 import os
 import platform
 import re
 import shutil
 import socket
+import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -2217,6 +2220,79 @@ def uncommitted(store: Store) -> int:
 
 # --- doctor -----------------------------------------------------------------
 
+# --- near-duplicate pages -----------------------------------------------------
+
+NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
+VECTOR_FLOATS = 768
+
+
+def index_rows(columns: tuple[str, ...]) -> list[tuple]:
+    """(label, *columns) for each indexed page of each live store, from memoryfield-tool's own index.
+
+    memory.pin fixes the layout. A missing file, a missing table, or a locked
+    database gives no rows for that store, so a hook stays silent.
+    """
+    rows: list[tuple] = []
+    code = read_pin().get("model_code", "")
+    for store in live_stores():
+        path = cache_dir() / "memoryfield-tool" / "indexes" / store.field / f"{code}.sqlite3"
+        if not path.is_file():
+            continue
+        try:
+            con = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=0.2)
+            try:
+                found = con.execute(f"SELECT filename, {', '.join(columns)} FROM pages").fetchall()
+            finally:
+                con.close()
+        except sqlite3.Error:
+            continue
+        rows += [(page_label(store.name, r[0]), *r[1:]) for r in found if r[0] != "index.md"]
+    return rows
+
+
+def page_vectors() -> dict[str, list[float]]:
+    """Unit vector per page label. A blob of another size is left out."""
+    vectors: dict[str, list[float]] = {}
+    for label, blob in index_rows(("embedding",)):
+        if not isinstance(blob, bytes) or len(blob) != VECTOR_FLOATS * 4:
+            continue
+        v = struct.unpack(f"<{VECTOR_FLOATS}f", blob)
+        norm = math.sqrt(sum(x * x for x in v))
+        if norm:
+            vectors[label] = [x / norm for x in v]
+    return vectors
+
+
+def near_duplicates() -> list[tuple[float, str, str]]:
+    """Pairs of pages at or under NEAR_DUPLICATE, closest first.
+
+    All pairs cost about 17 microseconds each in Python, so the result is kept
+    per repository root beside a digest of the index's own hashes and computed
+    again only when a page was indexed anew.
+    """
+    hashes = sorted((label, h.hex() if isinstance(h, bytes) else str(h)) for label, h in index_rows(("sha256_hash",)))
+    if not hashes:
+        return []
+    digest = hashlib.sha256(json.dumps([NEAR_DUPLICATE, hashes]).encode()).hexdigest()
+    state = read_state_json("pairs.json")
+    entry = state.get(str(ROOT))
+    if isinstance(entry, dict) and entry.get("digest") == digest:
+        return [(d, a, b) for d, a, b in entry.get("pairs") or []]
+    vectors = page_vectors()
+    names = sorted(vectors)
+    pairs = []
+    for i, a in enumerate(names):
+        va = vectors[a]
+        for b in names[i + 1:]:
+            d = 1.0 - sum(x * y for x, y in zip(va, vectors[b]))
+            if d <= NEAR_DUPLICATE:
+                pairs.append((round(d, 3), a, b))
+    pairs.sort()
+    state[str(ROOT)] = {"digest": digest, "pairs": pairs}
+    write_state_json("pairs.json", state)
+    return pairs
+
+
 INDEX_TEMPLATE = """---
 title: Memory
 summary: What this agent has learned on its own, searched before investigating.
@@ -2303,6 +2379,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
+        close = len(near_duplicates())
+        if close:
+            parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: memory doctor names them; merge each or keep both.")
         parts.append("A hook names matching pages when the creator prompts; read them. `memory search QUERY` before an install, a fix, or a design.")
         if source == "compact" and session_writes() == 0:
             parts.append("Context was just compacted and this session wrote no memory. If the summary above names a fix that took more than one attempt, write it now.")
@@ -2375,6 +2454,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             print(f"note store {store.name} at {store.dir.relative_to(ROOT)} is outside the guard, which covers .memory/ and remote stores")
         n = uncommitted(store)
         report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "memory index commits them")
+
+    for d, first, second in near_duplicates():
+        print(f"note near-duplicate pages (distance {d:.3f}): {first} | {second}")
+    if semantic_enabled() and live_stores() and not index_rows(("filename",)):
+        print("note no index to compare pages with (memory index builds it)")
 
     claude_md = ROOT / "CLAUDE.md"
     report("CLAUDE.md has the memory paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "memory init")

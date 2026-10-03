@@ -1049,6 +1049,74 @@ def test_brief_does_not_warn_on_page_count(tmp_path, monkeypatch, capsys):
     assert out.startswith("memory: 51 pages") and "is a lot" not in out
 
 
+def _index(tmp_path, monkeypatch, vectors, table="pages"):
+    """memoryfield-tool's index for the project store: one row per page, 768 float32 values each."""
+    import sqlite3, struct
+    monkeypatch.setattr(memory, "cache_dir", lambda: tmp_path / "cache")
+    path = tmp_path / "cache" / "memoryfield-tool" / "indexes" / memory.field_name(tmp_path) / f"{memory.read_pin()['model_code']}.sqlite3"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.execute(f"CREATE TABLE {table} (filename TEXT PRIMARY KEY, frontmatter JSON NOT NULL, last_modified DATETIME NOT NULL, sha256_hash BLOB NOT NULL, embedding BLOB NOT NULL)")
+    for name, head in vectors.items():
+        blob = struct.pack("<768f", *(list(head) + [0.0] * (768 - len(head))))
+        con.execute(f"INSERT INTO {table} VALUES (?, '{{}}', '2026-10-03', ?, ?)", (name, name.encode(), blob))
+    con.commit(); con.close()
+    return path
+
+
+# a.md and b.md are 0.05 apart; far.md is at distance 1 from both; index.md never counts
+_CLOSE = {"a.md": (1.0, 0.0), "b.md": (0.95, 0.3122499), "far.md": (0.0, 0.0, 1.0), "index.md": (1.0, 0.0)}
+
+
+def test_near_duplicates_names_the_close_pair(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _index(tmp_path, monkeypatch, _CLOSE)
+    assert memory.near_duplicates() == [(0.05, "a.md", "b.md")]
+
+
+def test_near_duplicates_without_an_index_is_empty(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(memory, "cache_dir", lambda: tmp_path / "cache")
+    assert memory.near_duplicates() == []                      # no index file
+    _index(tmp_path, monkeypatch, _CLOSE, table="other")
+    assert memory.near_duplicates() == []                      # a layout the pinned tool does not write
+
+
+def test_near_duplicates_reuses_the_cached_result(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _index(tmp_path, monkeypatch, _CLOSE)
+    first = memory.near_duplicates()
+    calls = []
+    real = memory.page_vectors
+    monkeypatch.setattr(memory, "page_vectors", lambda: calls.append(1) or real())
+    assert memory.near_duplicates() == first and calls == []
+    other = tmp_path / "other"; other.mkdir()
+    memory.set_root(other)
+    assert memory.near_duplicates() == []                      # another repository, no index
+    memory.set_root(tmp_path)
+    assert str(tmp_path) in memory.read_state_json("pairs.json")
+    assert memory.near_duplicates() == first and calls == []
+
+
+def test_doctor_names_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    _index(tmp_path, monkeypatch, _CLOSE)
+    with pytest.raises(SystemExit):
+        memory.main(["doctor"])
+    assert "note near-duplicate pages (distance 0.050): a.md | b.md" in capsys.readouterr().out
+
+
+def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    memory.main(["doctor", "--brief"])
+    assert "near-duplicate" not in capsys.readouterr().out
+    _index(tmp_path, monkeypatch, _CLOSE)
+    memory.main(["doctor", "--brief"])
+    assert "1 near-duplicate pair: memory doctor names them; merge each or keep both." in capsys.readouterr().out
+
+
 # --- remote stores ------------------------------------------------------------
 
 
