@@ -2278,7 +2278,7 @@ def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]
     state = read_state_json("pairs.json")
     entry = state.get(str(ROOT))
     kept = entry.get("pairs") if isinstance(entry, dict) and entry.get("digest") == digest else None
-    if isinstance(kept, list) and all(isinstance(p, list) and len(p) == 3 for p in kept):
+    if isinstance(kept, list) and all(isinstance(p, list) and len(p) == 3 and isinstance(p[0], (int, float)) for p in kept):
         return [(p[0], p[1], p[2]) for p in kept]
     vectors = page_vectors()
     names = sorted(vectors)

@@ -1108,6 +1108,9 @@ def test_near_duplicates_survives_a_bad_cache_and_a_short_read(tmp_path, monkeyp
     state[str(tmp_path)]["pairs"] = [[0.05, "a.md"]]            # a shape this version never wrote
     memory.write_state_json("pairs.json", state)
     assert memory.near_duplicates() == first
+    state[str(tmp_path)]["pairs"] = [["x", "a.md", "b.md"]]     # a distance doctor could not print
+    memory.write_state_json("pairs.json", state)
+    assert memory.near_duplicates() == first
     memory.write_state_json("pairs.json", {})
     real = memory.page_vectors
     monkeypatch.setattr(memory, "page_vectors", lambda: {})     # the index was locked between the two reads
