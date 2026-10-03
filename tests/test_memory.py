@@ -1271,3 +1271,34 @@ def test_last_line_prefers_git_fatal_line():
     p = subprocess.CompletedProcess([], 128, "", "fatal: '/x/remote.git' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")
     assert memory.last_line(p) == "fatal: '/x/remote.git' does not appear to be a git repository"
     assert memory.last_line(subprocess.CompletedProcess([], 1, "", "")) == "git exited 1"
+
+
+# --- refs fire on cited content ------------------------------------------------
+
+
+def _cited(tmp_path, monkeypatch, body="intro\n\n## Alpha\n\nalpha text\n\n## Beta\n\nbeta text\n"):
+    """A project with docs/doc.md committed; returns its short sha."""
+    _project(tmp_path, monkeypatch)
+    (tmp_path / "docs" / "doc.md").write_text(body)
+    _git(tmp_path, "add", "docs/doc.md"); _git(tmp_path, "commit", "-qm", "doc")
+    return _git(tmp_path, "log", "-1", "--format=%h").strip()
+
+
+def test_ref_follows_a_rename(tmp_path, monkeypatch, capsys):
+    sha = _cited(tmp_path, monkeypatch)
+    _page(tmp_path / ".memory", "cites.md", extra=f"refs:\n- docs/doc.md@{sha}\n")
+    _git(tmp_path, "mv", "docs/doc.md", "docs/moved.md"); _git(tmp_path, "commit", "-qm", "move")
+    fm = memory.page_frontmatter("cites.md")
+    assert memory.suspicion(fm) == []
+    memory.main(["verify", "cites.md"])
+    assert memory.page_frontmatter("cites.md")["refs"][0].startswith("docs/moved.md@")
+
+
+def test_ref_changed_then_reverted_is_clean(tmp_path, monkeypatch):
+    sha = _cited(tmp_path, monkeypatch)
+    doc = tmp_path / "docs" / "doc.md"
+    original = doc.read_text()
+    doc.write_text(original + "edit\n"); _git(tmp_path, "commit", "-qam", "edit")
+    assert memory.ref_changed(f"docs/doc.md@{sha}", tmp_path)
+    doc.write_text(original); _git(tmp_path, "commit", "-qam", "revert")
+    assert memory.ref_changed(f"docs/doc.md@{sha}", tmp_path) is None

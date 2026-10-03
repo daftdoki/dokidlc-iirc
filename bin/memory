@@ -1200,8 +1200,50 @@ def url_status(url: str, timeout: float = URL_TIMEOUT) -> tuple[str, str] | None
     return None
 
 
+_RENAMES: dict[tuple[str, str], list[tuple[str, str]]] = {}
+
+
+def renames_since(sha: str, root: Path) -> list[tuple[str, str]]:
+    """(old, new) for each rename after SHA, oldest first, found commit by commit. One git call per sha per process.
+
+    Commit by commit, a move pairs its file at or near 100 %; comparing only SHA and HEAD
+    lets later edits push the pair under git's 50 % similarity threshold.
+    """
+    key = (sha, str(root))
+    if key not in _RENAMES:
+        proc = subprocess.run(["git", "log", "--reverse", "-M", "--name-status", "--diff-filter=R", "--format=", f"{sha}..HEAD"],
+                              cwd=root, capture_output=True, text=True)
+        moves = []
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[0].startswith("R"):
+                moves.append((parts[1], parts[2]))
+        _RENAMES[key] = moves
+    return _RENAMES[key]
+
+
+def exists_at_head(path: str, root: Path) -> bool:
+    return subprocess.run(["git", "cat-file", "-e", f"HEAD:{path}"], cwd=root, capture_output=True).returncode == 0
+
+
+def current_path(path: str, sha: str, root: Path) -> str | None:
+    """Where a file cited at SHA lives at HEAD: the same path, the end of its renames, or None when it is gone."""
+    if exists_at_head(path, root):
+        return path
+    now = path
+    for old, new in renames_since(sha, root):
+        if old == now:
+            now = new
+    return now if now != path and exists_at_head(now, root) else None
+
+
+def blob(rev: str, path: str, root: Path) -> str | None:
+    proc = subprocess.run(["git", "rev-parse", "-q", "--verify", f"{rev}:{path}"], cwd=root, capture_output=True, text=True)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
 def ref_changed(ref: str, root: Path | None = None) -> str | None:
-    """Reason text if the cited file changed since the cited commit, else None. URLs are never checked here."""
+    """Reason text if the cited text changed since the cited commit, else None. A move alone is no change. URLs are never checked here."""
     root = root or ROOT
     if is_url(ref):
         return None
@@ -1214,20 +1256,19 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     if not SHA_RE.match(sha):
         return f"{ref}: cited sha is not hex"
     try:
-        out = subprocess.run(
-            ["git", "log", "--oneline", f"{sha}..HEAD", "--", path],
-            cwd=root, capture_output=True, text=True, check=True,
-        ).stdout
+        if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True).returncode:
+            return f"{path}: cited commit {sha} not found in history"
     except FileNotFoundError:
         return None
-    except subprocess.CalledProcessError:
-        return f"{path}: cited commit {sha} not found in history"
-    n = len(out.splitlines())
-    if n:
-        return f"{path} changed since cited ({n} commit{'s' if n > 1 else ''})"
-    if not (root / path).exists():
+    now = current_path(path, sha, root)
+    if now is None:
         return f"{path} no longer exists"
-    return None
+    if blob(sha, path, root) == blob("HEAD", now, root):
+        return None          # same text, perhaps under a new name
+    out = subprocess.run(["git", "log", "--oneline", f"{sha}..HEAD", "--", path, now], cwd=root, capture_output=True, text=True).stdout
+    n = max(len(out.splitlines()), 1)
+    where = path if now == path else f"{path} (now {now})"
+    return f"{where} changed since cited ({n} commit{'s' if n > 1 else ''})"
 
 
 def age_days(fm: dict, now: datetime | None = None) -> int | None:
@@ -1540,12 +1581,17 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
 
 def refresh_ref(ref: str, store: Store) -> str:
+    """The ref as it is now: the file's current path, at its last commit."""
     if is_url(ref):
         return ref
     pid, rest = split_ref(ref)
     if pid is not None and pid != project_id():
         return ref
-    return fill_ref(rest.rsplit("@", 1)[0], store=store)
+    path = rest.rsplit("@", 1)[0]
+    if "@" in rest:
+        moved = current_path(path, rest.rsplit("@", 1)[1], ROOT)
+        path = moved or path
+    return fill_ref(path, store=store)
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
