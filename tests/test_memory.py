@@ -1049,11 +1049,11 @@ def test_brief_does_not_warn_on_page_count(tmp_path, monkeypatch, capsys):
     assert out.startswith("memory: 51 pages") and "is a lot" not in out
 
 
-def _index(tmp_path, monkeypatch, vectors, table="pages"):
+def _index(tmp_path, monkeypatch, vectors, table="pages", root=None):
     """memoryfield-tool's index for the project store: one row per page, 768 float32 values each."""
     import sqlite3, struct
     monkeypatch.setattr(memory, "cache_dir", lambda: tmp_path / "cache")
-    path = tmp_path / "cache" / "memoryfield-tool" / "indexes" / memory.field_name(tmp_path) / f"{memory.read_pin()['model_code']}.sqlite3"
+    path = tmp_path / "cache" / "memoryfield-tool" / "indexes" / memory.field_name(root or tmp_path) / f"{memory.read_pin()['model_code']}.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
     con.execute(f"CREATE TABLE {table} (filename TEXT PRIMARY KEY, frontmatter JSON NOT NULL, last_modified DATETIME NOT NULL, sha256_hash BLOB NOT NULL, embedding BLOB NOT NULL)")
@@ -1090,17 +1090,40 @@ def test_near_duplicates_reuses_the_cached_result(tmp_path, monkeypatch):
     real = memory.page_vectors
     monkeypatch.setattr(memory, "page_vectors", lambda: calls.append(1) or real())
     assert memory.near_duplicates() == first and calls == []
-    other = tmp_path / "other"; other.mkdir()
+    other = tmp_path / "other"; (other / ".memory").mkdir(parents=True)
+    _index(tmp_path, monkeypatch, {"c.md": (1.0, 0.0), "d.md": (0.96, 0.28)}, root=other)
     memory.set_root(other)
-    assert memory.near_duplicates() == []                      # another repository, no index
+    assert memory.near_duplicates() == [(0.04, "c.md", "d.md")] and calls == [1]
     memory.set_root(tmp_path)
-    assert str(tmp_path) in memory.read_state_json("pairs.json")
-    assert memory.near_duplicates() == first and calls == []
+    assert {str(tmp_path), str(other)} <= set(memory.read_state_json("pairs.json"))   # one root's write keeps the other's entry
+    assert memory.near_duplicates() == first and calls == [1]
+
+
+def test_near_duplicates_survives_a_bad_cache_and_a_short_read(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": True})
+    _index(tmp_path, monkeypatch, _CLOSE)
+    first = memory.near_duplicates()
+    state = memory.read_state_json("pairs.json")
+    state[str(tmp_path)]["pairs"] = [[0.05, "a.md"]]            # a shape this version never wrote
+    memory.write_state_json("pairs.json", state)
+    assert memory.near_duplicates() == first
+    memory.write_state_json("pairs.json", {})
+    real = memory.page_vectors
+    monkeypatch.setattr(memory, "page_vectors", lambda: {})     # the index was locked between the two reads
+    assert memory.near_duplicates() == []
+    monkeypatch.setattr(memory, "page_vectors", real)
+    assert memory.near_duplicates() == first                    # the short result was not kept
+    memory.write_state_json("pairs.json", {})
+    assert memory.near_duplicates(budget=0) == [] and memory.read_state_json("pairs.json") == {}
+    monkeypatch.setattr(memory, "near_duplicates", lambda budget=None: 1 / 0)
+    memory.main(["doctor", "--brief"])                          # a hook never fails on this signal
+    assert capsys.readouterr().out.startswith("memory: 0 pages")
 
 
 def test_doctor_names_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    memory.write_config_file({"semantic": False})
+    memory.write_config_file({"semantic": True})
     _index(tmp_path, monkeypatch, _CLOSE)
     with pytest.raises(SystemExit):
         memory.main(["doctor"])
@@ -1109,12 +1132,15 @@ def test_doctor_names_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
 
 def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    memory.write_config_file({"semantic": False})
+    memory.write_config_file({"semantic": True})
     memory.main(["doctor", "--brief"])
     assert "near-duplicate" not in capsys.readouterr().out
     _index(tmp_path, monkeypatch, _CLOSE)
     memory.main(["doctor", "--brief"])
     assert "1 near-duplicate pair: memory doctor names them; merge each or keep both." in capsys.readouterr().out
+    memory.write_config_file({"semantic": False})               # string mode: nothing refreshes the index
+    memory.main(["doctor", "--brief"])
+    assert "near-duplicate" not in capsys.readouterr().out
 
 
 def test_brief_reports_a_slow_scan(tmp_path, monkeypatch, capsys):

@@ -155,7 +155,7 @@ cannot. The plugin never pushes the project repository itself.
 - A remote store's clone sits on the agent's own machine. The guard
   refuses a raw read of its pages by pattern, which is a convention, not
   a boundary.
-- The page count is never a warning. Search stays cheap as the field
+- The page count is information. Search stays cheap as the field
   grows; near-duplicate pages make it name the wrong one. `memory doctor`
   names each pair of pages whose embeddings are 0.10 apart or closer, and
   the session-start line counts them. The same line says when its scan

@@ -2218,11 +2218,9 @@ def uncommitted(store: Store) -> int:
     return len([line for line in out.splitlines() if line.strip()])
 
 
-# --- doctor -----------------------------------------------------------------
-
 # --- near-duplicate pages -----------------------------------------------------
 
-SCAN_BUDGET = 5.0        # seconds for the session-start scan; the hook times out at 10 and a pull may take 5 more
+PAIR_BUDGET = 2.0        # seconds the session-start line may spend comparing pages; `memory doctor` has no limit
 NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
 VECTOR_FLOATS = 768
 
@@ -2264,35 +2262,45 @@ def page_vectors() -> dict[str, list[float]]:
     return vectors
 
 
-def near_duplicates() -> list[tuple[float, str, str]]:
+def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]:
     """Pairs of pages at or under NEAR_DUPLICATE, closest first.
 
     All pairs cost about 17 microseconds each in Python, so the result is kept
     per repository root beside a digest of the index's own hashes and computed
-    again only when a page was indexed anew.
+    again only when a page was indexed anew. Past `budget` seconds it gives up
+    with no pairs and keeps nothing; a run with no budget fills the cache.
     """
+    start = time.monotonic()
     hashes = sorted((label, h.hex() if isinstance(h, bytes) else str(h)) for label, h in index_rows(("sha256_hash",)))
     if not hashes:
         return []
     digest = hashlib.sha256(json.dumps([NEAR_DUPLICATE, hashes]).encode()).hexdigest()
     state = read_state_json("pairs.json")
     entry = state.get(str(ROOT))
-    if isinstance(entry, dict) and entry.get("digest") == digest:
-        return [(d, a, b) for d, a, b in entry.get("pairs") or []]
+    kept = entry.get("pairs") if isinstance(entry, dict) and entry.get("digest") == digest else None
+    if isinstance(kept, list) and all(isinstance(p, list) and len(p) == 3 for p in kept):
+        return [(p[0], p[1], p[2]) for p in kept]
     vectors = page_vectors()
     names = sorted(vectors)
     pairs = []
     for i, a in enumerate(names):
+        if budget is not None and time.monotonic() - start > budget:
+            return []
         va = vectors[a]
         for b in names[i + 1:]:
             d = 1.0 - sum(x * y for x, y in zip(va, vectors[b]))
             if d <= NEAR_DUPLICATE:
                 pairs.append((round(d, 3), a, b))
     pairs.sort()
-    state[str(ROOT)] = {"digest": digest, "pairs": pairs}
-    write_state_json("pairs.json", state)
+    if set(vectors) == {label for label, _ in hashes}:    # a short read, from a lock or an odd blob, is not kept
+        state[str(ROOT)] = {"digest": digest, "pairs": pairs}
+        write_state_json("pairs.json", state)
     return pairs
 
+
+# --- doctor -----------------------------------------------------------------
+
+SCAN_BUDGET = 5.0        # seconds for the session-start scan; the hook times out at 10 and a pull may take 5 more
 
 INDEX_TEMPLATE = """---
 title: Memory
@@ -2387,7 +2395,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append("Persistence: " + "; ".join(missing) + ".")
         if scan > SCAN_BUDGET:
             parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
-        close = len(near_duplicates())
+        try:
+            # string mode never refreshes the index, so its pairs would be stale
+            close = len(near_duplicates(PAIR_BUDGET)) if semantic_enabled() else 0
+        except Exception:   # a hook must never fail the session start
+            close = 0
         if close:
             parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: memory doctor names them; merge each or keep both.")
         parts.append("A hook names matching pages when the creator prompts; read them. `memory search QUERY` before an install, a fix, or a design.")
@@ -2463,10 +2475,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         n = uncommitted(store)
         report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "memory index commits them")
 
-    for d, first, second in near_duplicates():
-        print(f"note near-duplicate pages (distance {d:.3f}): {first} | {second}")
-    if semantic_enabled() and live_stores() and not index_rows(("filename",)):
-        print("note no index to compare pages with (memory index builds it)")
+    if semantic_enabled():
+        for d, first, second in near_duplicates():
+            print(f"note near-duplicate pages (distance {d:.3f}): {first} | {second}")
+        if live_stores() and not index_rows(("filename",)):
+            print("note no index to compare pages with (memory index builds it)")
 
     claude_md = ROOT / "CLAUDE.md"
     report("CLAUDE.md has the memory paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "memory init")
