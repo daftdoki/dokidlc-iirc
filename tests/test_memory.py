@@ -1117,6 +1117,18 @@ def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     assert "1 near-duplicate pair: memory doctor names them; merge each or keep both." in capsys.readouterr().out
 
 
+def test_brief_reports_a_slow_scan(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    memory.write_config_file({"semantic": False})
+    _page(field, "one.md")
+    memory.main(["doctor", "--brief"])
+    assert "start scan" not in capsys.readouterr().out
+    monkeypatch.setattr(memory, "SCAN_BUDGET", 0)
+    memory.main(["doctor", "--brief"])
+    out = capsys.readouterr().out
+    assert "The start scan took" in out and "over 0 cited files, past the 0 s budget; tell the creator." in out
+
+
 # --- remote stores ------------------------------------------------------------
 
 

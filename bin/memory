@@ -2222,6 +2222,7 @@ def uncommitted(store: Store) -> int:
 
 # --- near-duplicate pages -----------------------------------------------------
 
+SCAN_BUDGET = 3.0        # seconds for the session-start scan; the hook times out at 10 and a pull may take 5
 NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
 VECTOR_FLOATS = 768
 
@@ -2352,12 +2353,17 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             mode = "string search"
         counts: dict[str, int] = {}
         suspects = []
+        cited = 0
+        scan_start = time.monotonic()
         for page in pages:
             fm, _ = parse_page(page.read_text())
             for t in fm.get("topics") or []:
                 counts[str(t)] = counts.get(str(t), 0) + 1
+            if same_project(fm):
+                cited += sum(1 for ref in fm.get("refs") or [] if not is_url(str(ref)))
             if any(sig == "ref" for sig, _ in suspicion(fm)):   # git only; never check commands here
                 suspects.append(page.name)
+        scan = time.monotonic() - scan_start
         top = ", ".join(f"{t} {c}" for t, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
         parts = [f"memory: {n} page{'' if n == 1 else 's'}, {mode}."] + pulled_notes
         if len(STORES) > 1:
@@ -2379,6 +2385,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
+        if scan > SCAN_BUDGET:
+            parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
         close = len(near_duplicates())
         if close:
             parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: memory doctor names them; merge each or keep both.")
