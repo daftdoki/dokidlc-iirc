@@ -5,7 +5,8 @@ A Claude Code plugin that keeps what your agent learns in the repository, search
 It installs as `memory@dokidlc`. Pages are markdown files in `.memory/` in
 the [memoryfield](https://github.com/calpaterson/memoryfield-spec) format,
 so they travel with the code in git and any memoryfield tool can read
-them. Three parts: the `memory` command, which wraps
+them; a shared memory repository can hold more (see Stores and auto
+commit). Three parts: the `memory` command, which wraps
 [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool) with
 per-repository configuration, a guard on the embedding host, and a trust
 model; seven hooks that put the matching page in front of the agent as it
@@ -172,7 +173,7 @@ shows the two keys.
 ## Other docs
 
 - [INSTALL.md](INSTALL.md): every install step as a command, with the trap each one hides.
-- [docs/how-it-works.md](docs/how-it-works.md): the hooks, the page format and its keys, and how search ranks.
+- [docs/how-it-works.md](docs/how-it-works.md): the hooks, the stores, the page format and its keys, and how search ranks.
 - [skills/memory/SKILL.md](skills/memory/SKILL.md): the rules the agent follows for searching, writing, and doubt.
 - [skills/memory/evals/](skills/memory/evals/): the harness that measured the skill, and the numbers.
 - [docs/review-pass-recommendations.md](docs/review-pass-recommendations.md): a review of two fields after two weeks of use, with recommendations.

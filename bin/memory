@@ -1879,8 +1879,11 @@ def current_branch(repo: Path) -> str:
 
 
 def last_line(proc: subprocess.CompletedProcess[str]) -> str:
-    text = (proc.stderr or proc.stdout or "").strip()
-    return text.splitlines()[-1] if text else f"git exited {proc.returncode}"
+    """git's own reason: its first fatal or error line, else its last line."""
+    lines = [line.strip() for line in (proc.stderr or proc.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        return f"git exited {proc.returncode}"
+    return next((line for line in lines if line.startswith(("fatal:", "error:"))), lines[-1])
 
 
 def mark_own_rebase(repo: Path, on: bool) -> None:

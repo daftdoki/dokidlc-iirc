@@ -1264,3 +1264,10 @@ def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, mo
     (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "memory.toml").write_text('[stores.agent]\nkind = "remote"\nurl = "u"\n')
     memory.main(["doctor", "--brief"])
     assert "memory doctor --fix" in capsys.readouterr().out
+
+
+def test_last_line_prefers_git_fatal_line():
+    import subprocess
+    p = subprocess.CompletedProcess([], 128, "", "fatal: '/x/remote.git' does not appear to be a git repository\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n")
+    assert memory.last_line(p) == "fatal: '/x/remote.git' does not appear to be a git repository"
+    assert memory.last_line(subprocess.CompletedProcess([], 1, "", "")) == "git exited 1"
