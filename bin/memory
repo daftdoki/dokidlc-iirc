@@ -84,13 +84,14 @@ def project_root() -> Path:
 
 def set_root(root: Path) -> None:
     """Set the project root and load its stores. A bad store config is kept as CONFIG_ERROR; commands die on it, hooks stay quiet."""
-    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR
+    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS
     ROOT = Path(root).resolve()
     try:
         STORES, WRITE_DEFAULT = load_stores(ROOT)
+        SHOW_HOOKS = read_store_config(ROOT).get("show_hooks", False)
         CONFIG_ERROR = None
     except ConfigError as e:
-        STORES, WRITE_DEFAULT, CONFIG_ERROR = [], None, str(e)
+        STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
 
 
 def plugin_commit() -> str:
@@ -219,6 +220,7 @@ class ConfigError(Exception):
 STORES: list[Store] = []
 WRITE_DEFAULT: str | None = None
 CONFIG_ERROR: str | None = None
+SHOW_HOOKS = False   # show_hooks in .claude/memory.toml: the user also sees what the hooks tell the model
 
 
 def strip_ansi(text: str) -> str:
@@ -284,7 +286,9 @@ def load_stores(root: Path) -> tuple[list[Store], str | None]:
     """The stores .claude/memory.toml names, and its write default. No file: one project store at .memory."""
     root = Path(root).resolve()
     cfg = read_store_config(root)
-    if not cfg:
+    if not isinstance(cfg.get("show_hooks", False), bool):
+        raise ConfigError(f"{STORE_CONFIG}: show_hooks must be true or false")
+    if "stores" not in cfg and "write" not in cfg:
         return [Store("project", "project", root / ".memory", root, None, field_name(root))], None
     sections = cfg.get("stores")
     if not isinstance(sections, dict) or not sections:
@@ -857,10 +861,14 @@ PLAIN_STDOUT_EVENTS = {"SessionStart", "UserPromptSubmit", "UserPromptExpansion"
 
 
 def hook_output(event_name: str, text: str) -> str:
-    """What to print for a hook: plain text where Claude Code injects stdout, the JSON envelope elsewhere."""
-    if event_name in PLAIN_STDOUT_EVENTS:
+    """What to print for a hook: plain text where Claude Code injects stdout, the JSON envelope elsewhere.
+    With show_hooks, always the envelope, plus a systemMessage that shows the same text to the user."""
+    if not event_name or (event_name in PLAIN_STDOUT_EVENTS and not SHOW_HOOKS):   # no event: a person ran it
         return text
-    return json.dumps({"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": text}})
+    out: dict = {"hookSpecificOutput": {"hookEventName": event_name, "additionalContext": text}}
+    if SHOW_HOOKS:
+        out["systemMessage"] = text
+    return json.dumps(out)
 
 
 def read_event() -> dict:
@@ -948,7 +956,7 @@ def cmd_recall(args: argparse.Namespace) -> None:
         # the prompt text itself is not logged; it may hold secrets
         log_event("recall", hits=len(rows), pages=[r["filename"] for r in rows], via="prompt", chars=len(prompt))
         if line:
-            print(line)
+            print(hook_output("UserPromptSubmit", line))
     except SystemExit:
         return
     except Exception:  # a hook must never fail the prompt

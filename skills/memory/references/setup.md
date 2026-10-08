@@ -33,3 +33,12 @@ host, say exactly that and stop.
 The host is whatever the creator named; a guess is never right. `setup`
 runs once per machine: running it again overwrites their choice, so ask
 before a second run.
+
+## Showing hook lines to the creator
+
+The hooks put lines into your context that the creator does not see: the
+session brief, the pages a prompt or a failed command recalls, and the
+nudges to write a page. When the creator asks to see them, add
+`show_hooks = true` at the top of `.claude/memory.toml`, creating the file
+if it is missing, and commit it. Each line then also appears in their
+terminal. It takes effect at the next hook; no restart.

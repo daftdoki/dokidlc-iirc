@@ -141,6 +141,19 @@ wrote it; its refs and check run only in that project. When a push is
 rejected, the plugin rebases once; `memory sync` finishes the job when it
 cannot. The plugin never pushes the project repository itself.
 
+## Seeing what the hooks say
+
+The hooks tell the agent things you do not see: the session brief, the
+pages a prompt or a failed command recalls, and the nudges to write a
+page. To see each line as well, put this at the top of
+`.claude/memory.toml`:
+
+```toml
+show_hooks = true
+```
+
+A file that holds only this key keeps the default `.memory/` store.
+
 ## Caveats
 
 - The hooks fail open. A dead embedding host is skipped after a two-second

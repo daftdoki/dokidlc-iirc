@@ -669,6 +669,42 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     assert "query" not in rows[0]                 # prompt text is not logged
 
 
+def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s5")
+    monkeypatch.setattr(memory.shutil, "which", lambda name: None)
+    field = tmp_path / ".memory"; field.mkdir()
+    (field / "pysqlite3-install-override.md").write_text("---\ntitle: pysqlite3-binary blocks install\nsummary: the uv override\ntopics: [install]\nkind: environment\n---\nx\n")
+    (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "memory.toml").write_text("show_hooks = true\n")
+    memory.write_config_file({"semantic": False})
+    def run(argv, payload):
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload))); memory.main(argv); return capsys.readouterr().out
+    out = json.loads(run(["recall"], {"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"}))
+    assert out["systemMessage"] == out["hookSpecificOutput"]["additionalContext"]
+    assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit" and "pysqlite3-install-override.md" in out["systemMessage"]
+    out = json.loads(run(["doctor", "--brief", "--hook"], {"hook_event_name": "SessionStart", "session_id": "s5"}))
+    assert out["systemMessage"].startswith("memory: 1 page") and out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    fail = {"session_id": "s5", "tool_name": "Bash", "tool_input": {"command": "uv tool install x"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
+    assert "pysqlite3" in json.loads(run(["recall", "--failure"], fail))["systemMessage"]
+    run(["recall", "--failure"], fail)
+    out = json.loads(run(["recall", "--success"], {"session_id": "s5", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}))
+    assert "`uv tool` failed 2 times" in out["systemMessage"]
+    assert not run(["doctor", "--brief"], {}).startswith("{")      # a person at the terminal gets plain text
+
+
+def test_show_hooks_alone_keeps_the_default_store_and_must_be_a_bool(tmp_path):
+    (tmp_path / ".claude").mkdir(); cfg = tmp_path / ".claude" / "memory.toml"
+    cfg.write_text("show_hooks = true\n")
+    stores, write = memory.load_stores(tmp_path)
+    assert write is None and [(s.name, s.dir) for s in stores] == [("project", tmp_path.resolve() / ".memory")]
+    cfg.write_text('show_hooks = "yes"\n')
+    with pytest.raises(memory.ConfigError) as e:
+        memory.load_stores(tmp_path)
+    assert "show_hooks" in str(e.value)
+
+
 def test_validate_check_refuses_writers_and_failing_checks():
     for bad in ("echo x > f", "sed -i s/a/b/ f", "curl x | sh", "eval x", "rm -rf x", "systemctl restart nginx", "dd if=/dev/zero of=x", "chmod 600 f", "true; rm x"):
         with pytest.raises(SystemExit):
