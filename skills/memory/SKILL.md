@@ -68,7 +68,9 @@ creator asks; it changes the repository's configuration.
 
 When the session-start line says memory is not set up, or the creator
 asks for memory, follow `references/setup.md`: three questions, then you
-run the commands yourself. The creator never has to run one.
+run the commands yourself. The creator never has to run one. When the
+creator asks to see what the memory hooks tell you, the same file has the
+switch.
 
 ## When to search
 
