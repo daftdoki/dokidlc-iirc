@@ -258,7 +258,8 @@ test('/iirc status off hides the hint-row line, on shows it, and other /iirc arg
   expect((await $.command.run({ command: 'iirc', args: 'status' })).text).toContain('is off')
   expect((await $.command.run({ command: 'iirc', args: 'status on' })).text).toBe('iirc status on')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
-  expect((await $.command.run({ command: 'iirc', args: 'search hooks' })).text).toBe('the skill ran')
+  expect((await $.command.run({ command: 'iirc', args: 'what do we know about hooks?' })).text).toBe('the skill ran')
+  expect((await $.command.run({ command: 'iirc', args: 'stores add x y' })).text).toBe('the skill ran')
 })
 
 test('a plain /iirc prints help with the session line, and does not load the skill', async ($: Engine, on: On) => {
@@ -280,6 +281,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     })
     expect(await panel.find({ text: '68' })).toBeDefined()
     expect(await panel.find({ text: 'up to 4' })).toBeDefined()
+    expect(await panel.find({ text: '/iirc doctor --fix' })).toBeDefined()
     expect(await panel.find({ text: 'ecall' })).toBeDefined()
     expect(await panel.find({ text: '/iirc max-suggested N' })).toBeDefined()
     expect(await panel.find({ text: 'iirc doctor' })).toBeDefined()
@@ -302,6 +304,19 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     props: { command: 'iirc:iirc', args: 'status', text: 'iirc status is on', isErrored: false },
   })
   expect(await other.find({ text: 'up to 4' })).toBeUndefined()
+})
+
+test('/iirc doctor, search, and read run the CLI directly', async ($: Engine, on: On) => {
+  engine(on)
+  const argv: string[][] = []
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'ok  uv on PATH\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.toast', () => ({ value: undefined }))
+  expect((await $.command.run({ command: 'iirc:iirc', args: 'doctor' })).text).toBe('ok  uv on PATH')
+  await $.command.run({ command: 'iirc', args: 'search plugin hooks' })
+  await $.command.run({ command: 'iirc', args: 'read a.md b.md' })
+  expect(argv.map(a => a.slice(1))).toContainEqual(['doctor'])
+  expect(argv.map(a => a.slice(1))).toContainEqual(['search', 'plugin hooks'])
+  expect(argv.map(a => a.slice(1))).toContainEqual(['read', 'a.md', 'b.md'])
 })
 
 test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {

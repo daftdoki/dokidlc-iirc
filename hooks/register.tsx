@@ -43,6 +43,8 @@ const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
+// iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
+const DIRECT_RE = /^(doctor(?:\s+--fix)?|doubt(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|cost|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
@@ -51,6 +53,17 @@ const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
 // sample numbers for `/iirc demo`
 const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keyword', note: null }
 const DEMO_COUNTS: SessionCounts = { reads: 58, writes: 9, suggested: 42, used: 31 }
+// the commands /iirc runs directly, as the card and the text help list them
+const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
+  ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
+  ['doctor --fix', 'install or repair what doctor finds', 'MAINTENANCE'],
+  ['doubt', 'pages that may be wrong', 'MAINTENANCE'],
+  ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
+  ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
+  ['stats', 'how the pages are being used', 'MAINTENANCE'],
+  ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
+  ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
+]
 const KEEP = 200
 
 /**
@@ -165,6 +178,21 @@ async function showBrief($: EngineInterface, text: string) {
   }
 }
 
+/** Run one iirc command for the person and return what it printed. A search keeps its words as one query. */
+async function runDirect($: EngineInterface, args: string): Promise<string> {
+  const [verb, ...rest] = args.split(/\s+/)
+  const argv = verb === 'search' ? [verb, rest.join(' ')] : [verb, ...rest]
+  const slow = args === 'doctor --fix' || verb === 'sync'
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, ...argv], { cwd: await $.session.root(), timeoutMs: slow ? 600000 : 60000 })
+    if (['doctor', 'sync', 'index'].includes(verb)) refreshBrief($)
+    const out = `${ran.stdout}${ran.stderr}`.trim() || '(no output)'
+    return ran.exitCode === 0 ? out : `iirc ${args} exited ${ran.exitCode}:\n${out}`
+  } catch (err) {
+    return `iirc ${args} did not finish: ${String(err)}`
+  }
+}
+
 /** What a plain /iirc prints: the session's line, the two settings, and the forms /iirc takes. */
 async function helpText($: EngineInterface): Promise<string> {
   const s = await read($, status)
@@ -181,6 +209,7 @@ async function helpText($: EngineInterface): Promise<string> {
     `${head} · status ${shown} · max-suggested ${max}`,
     '/iirc status on|off       show or hide the line under the prompt',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
+    ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
   ].join('\n')
 }
@@ -283,6 +312,8 @@ export const register: Register = on => {
     if (!e.args.trim()) return { text: await helpText($) }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
+    const direct = DIRECT_RE.exec(e.args.trim())
+    if (direct) return { text: await runDirect($, direct[1]) }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
     if (maxArgs) {
       // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config
@@ -475,6 +506,18 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
       {heading('SETTINGS')}
       {setting('line under prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
+      {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
+        <Box key={group} flexDirection="column">
+          <Text> </Text>
+          {heading(group)}
+          {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => (
+            <Box key={cmd} flexDirection="row" paddingLeft={2}>
+              <Box width={24} flexShrink={0}><Text color="suggestion">{`/iirc ${cmd}`}</Text></Box>
+              <Text color="subtle">{what}</Text>
+            </Box>
+          ))}
+        </Box>
+      ))}
       <Text> </Text>
       <Box flexDirection="row">
         <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
