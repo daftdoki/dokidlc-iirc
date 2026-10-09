@@ -71,7 +71,7 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 
 | Part | Means |
 |---|---|
-| `●` | the theme's success color, green by default, when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates; red when iirc needs setup, an init, or a migration |
+| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates; red when iirc needs setup, an init, or a migration |
 | `[76] pages` | the pages in every store |
 | `[2/5] used` | of the pages recall suggested this session, how many were then read |
 | `[12] reads` | different pages this session read with `iirc read` or `iirc pull` |

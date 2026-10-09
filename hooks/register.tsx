@@ -40,7 +40,8 @@ const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)\b/
 const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
-const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
+// fixed red, yellow, green rather than the theme's, whose success color may be blue
+const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
@@ -378,12 +379,17 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
   const head: unknown[] = [
     <Text key="dot" color={tone}>● </Text>,
     <Text key="name" bold color="claude">iirc</Text>,
-    <Text key="gap">{'   '}</Text>,
-    <Text key="chip" bold color="inverseText" backgroundColor={tone}>
-      {` ${level === 'ok' ? 'all good' : level === 'warn' ? 'needs a look' : s ? s.note : 'no brief yet'} `}
-    </Text>,
+    <Text key="desc" color="subtle" italic>{'   what past sessions learned, found by meaning'}</Text>,
   ]
-  if (s && s.mode && s.mode !== 'semantic+keyword') head.push(<Text key="mode" color="warning">{`   ${s.mode} mode`}</Text>)
+  const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
+  const statusRow: unknown[] = [
+    <Box key="label" width={10} flexShrink={0}><Text bold color="subtle">STATUS</Text></Box>,
+    <Text key="chip" bold color="#0d1117" backgroundColor={tone}>{` ${chipText} `}</Text>,
+  ]
+  if (s && level !== 'ok' && s.fix) {
+    statusRow.push(<Text key="fixlead" color="subtle">{'   fix with '}</Text>, <Text key="fix" bold color="claude">{s.fix}</Text>)
+  }
+  if (s && s.mode && s.mode !== 'semantic+keyword') statusRow.push(<Text key="mode" color={LEVEL_COLOR.warn}>{`   ${s.mode} mode`}</Text>)
   const tiles: [string, string][] = s && s.pages !== null
     ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
     : []
@@ -407,12 +413,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
       <Box flexDirection="row">{head}</Box>
-      {s && level !== 'ok' && s.fix && (
-        <Box flexDirection="row" paddingLeft={2}>
-          <Text color={tone}>{'▸ run '}</Text>
-          <Text bold color="claude">{s.fix}</Text>
-        </Box>
-      )}
+      <Text> </Text>
+      <Box flexDirection="row">{statusRow}</Box>
       {tiles.length > 0 && <Text> </Text>}
       {tiles.length > 0 && (
         <Box flexDirection="row" paddingLeft={2}>

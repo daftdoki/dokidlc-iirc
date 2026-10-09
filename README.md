@@ -113,8 +113,8 @@ list the pages:
 ```
 
 The second line sits under the prompt for the whole session. Its circle is
-your theme's success color, green by default, when all is well; yellow or
-red, it ends with the command that fixes it, such as `· run iirc doubt`.
+green when all is well; yellow or red, it ends with the command that
+fixes it, such as `· run iirc doubt`.
 A plain `/iirc` prints that line and the commands that change it.
 [docs/ui.md](docs/ui.md) explains every part.
 
