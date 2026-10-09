@@ -16,15 +16,8 @@ const STOP =
 // Stand-ins for the engine beneath the plugin: it stores rows, runs tools, reads
 // files, and draws each row as plain text.
 function engine(on: On, toml = '') {
-  // Newer builds keep the row beneath the test's hook and want next(e); older
-  // ones have nothing there, so the stand-in answers with the row itself.
-  on('session.append', async ($, e, next) => {
-    try {
-      return await next(e)
-    } catch {
-      return { message: e.message, uuid: e.uuid }
-    }
-  })
+  // Needs the test kit of 2.1.290 or later, which keeps rows beneath this hook.
+  on('session.append', ($, e, next) => next(e))
   on('tool.call', () => ({ result: 'ok' }))
   on('session.root', () => ({ value: '/repo' }))
   on('fs.read', () => (toml ? { value: toml } : { deny: 'ENOENT' }))

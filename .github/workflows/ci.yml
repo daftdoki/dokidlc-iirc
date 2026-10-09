@@ -19,4 +19,9 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: claude --version
       - run: claude plugin validate .
-      - run: claude plugin test .
+      # the stable channel's test kit cannot stand in for session.append; the latest one can
+      - name: claude plugin test (latest channel)
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s latest
+          claude --version
+          claude plugin test .
