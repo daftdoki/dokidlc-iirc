@@ -439,6 +439,19 @@ def state_dir() -> Path:
     return base / "dokidlc-engrams"
 
 
+# --- the memory plugin's layout, before the rename -------------------------
+
+MIGRATION_LINE = "engrams: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `engrams migrate`."
+
+
+def old_layout(root: Path | None = None) -> list[tuple[Path, Path]]:
+    """(old, new) for each path the memory plugin left and the migration moves: the repository's store and config, and this machine's directories."""
+    root = root or ROOT
+    pairs = [(root / ".memory", root / ".engrams"), (root / ".claude" / "memory.toml", root / ".claude" / "engrams.toml")]
+    pairs += [(d.parent / "dokidlc-memory", d) for d in (config_file().parent, data_dir(), state_dir())]
+    return [(old, new) for old, new in pairs if old.exists() and not new.exists()]
+
+
 def read_state_json(name: str) -> dict:
     path = state_dir() / name
     try:
@@ -2346,6 +2359,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
         def emit(line: str) -> None:
             print(hook_output(hook, line))
+        if old_layout():
+            emit(MIGRATION_LINE)
+            return
         if not config_file().is_file():
             emit("engrams: not set up on this machine. Ask the creator whether embeddings come from ollama on this machine or on a remote host (semantic search, the default), or whether ollama cannot run here at all (string search fallback); then run `engrams setup` with their answer, `engrams init` if this repository has no .engrams/, and `engrams doctor --fix`.")
             return

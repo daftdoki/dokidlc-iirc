@@ -1540,3 +1540,37 @@ def test_names_are_engrams(tmp_path, monkeypatch):
     assert stores[0].dir == tmp_path / ".engrams"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "c")); monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "d")); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "s"))
     assert [engrams.config_file().parent.name, engrams.data_dir().name, engrams.state_dir().name] == ["dokidlc-engrams"] * 3
+
+
+MIGRATION_LINE = "engrams: this repository or machine still uses the memory plugin's layout."
+
+
+def _old_layout(root):
+    """A repository as the memory plugin left it: store, config, CLAUDE.md section, and settings."""
+    (root / ".memory").mkdir()
+    (root / ".memory" / "index.md").write_text("---\ntitle: Memory\n---\n\n<!-- memory format 1, written by memory abc1234 on 2026-10-01 -->\n")
+    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`; memory as a word stays.\n")
+    (root / ".claude").mkdir()
+    (root / ".claude" / "memory.toml").write_text('ui = true\n\n[stores.project]\nkind = "project"\npath = ".memory"\n')
+    (root / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"memory@dokidlc": True, "questlog@dokidlc": True}}, indent=2) + "\n")
+    (root / "CLAUDE.md").write_text("# Project\n\n## Memory <!-- memory -->\n\n`.memory/` holds what past sessions learned.\n\n## Other\n\nKept.\n")
+
+
+def _brief(argv, monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "session_id": "m"})))
+    engrams.main(argv)
+    return capsys.readouterr().out
+
+
+def test_doctor_brief_offers_migration(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    repo = tmp_path / "repo"; repo.mkdir(); _old_layout(repo)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    for argv in (["doctor", "--brief"], ["doctor", "--brief", "--hook"]):
+        assert MIGRATION_LINE in _brief(argv, monkeypatch, capsys)
+    machine = tmp_path / "machine"; machine.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(machine))
+    (Path(engrams.os.environ["XDG_DATA_HOME"]) / "dokidlc-memory").mkdir(parents=True)
+    for argv in (["doctor", "--brief"], ["doctor", "--brief", "--hook"]):
+        assert MIGRATION_LINE in _brief(argv, monkeypatch, capsys)

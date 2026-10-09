@@ -19,6 +19,7 @@ const briefShown = atom({ plugin: 'engrams', key: 'briefShown' } as const, null)
 const RECALL_RE = /engrams: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
 const STOP_RE = /engrams: before you stop, note that (.*?) failed and then worked/
+const MIGRATE_RE = /^engrams: this repository or machine still uses the memory plugin's layout/
 const BRIEF_RE = /engrams: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
@@ -58,6 +59,7 @@ export function parseBrief(text: string): { status: string; warnings: string[] }
   if (at < 0) return null
   const line = text.slice(at)
   const m = BRIEF_RE.exec(line)
+  if (!m && MIGRATE_RE.test(line)) return { status: '◆ engrams: needs migration', warnings: [] }
   if (!m) return { status: '◆ engrams: needs setup', warnings: [line.split('. ')[0].replace(/^engrams: /, '')] }
   const mode = m[2].startsWith('semantic') ? 'semantic' : m[2]
   const warnings = m[3]

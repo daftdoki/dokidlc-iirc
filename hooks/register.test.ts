@@ -60,6 +60,7 @@ test('parses the recovery nudge and the brief', () => {
     warnings: ['1 near-duplicate pair: engrams doctor names them; merge each or keep both.'],
   })
   expect(parseBrief('engrams: not set up on this machine. Ask the creator.')?.status).toBe('◆ engrams: needs setup')
+  expect(parseBrief("engrams: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `engrams migrate`.")?.status).toBe('◆ engrams: needs migration')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
