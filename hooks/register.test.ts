@@ -9,7 +9,7 @@ const RECALL =
 const RECOVERY =
   'iirc: `uv tool` failed 2 times this session before it worked. If the fix was not obvious from a file in the repository, write one `iirc write` page.'
 const BRIEF =
-  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. 1 near-duplicate pair: iirc doctor names them; merge each or keep both. A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.'
+  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ. A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.'
 const STOP =
   'iirc: before you stop, note that `uv tool` (2 failures) failed and then worked this session, and nothing was written to iirc.'
 
@@ -89,7 +89,7 @@ test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
     status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: 'iirc doctor' },
-    warnings: ['1 near-duplicate pair: iirc doctor names them; merge each or keep both.'],
+    warnings: ['1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.'],
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc setup` with their answer.')!.status
   expect(setup.level).toBe('error')
@@ -194,7 +194,7 @@ test('draws the brief in the hint row, toasts its warnings, and toasts the stop 
   const row = await hintRow($)
   expect(await row.find({ text: LINE })).toBeDefined()
   expect(await row.find({ text: 'engine row' })).toBeDefined()
-  expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.')
+  expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
 })
 
@@ -211,7 +211,7 @@ test('at session start, asks iirc for the brief and toasts its warnings once', a
   await clock.settle()
   expect(await waitFor($, LINE)).toBe(true)
   expect(String((argv[0] as string[])[0])).toContain('bin/iirc')
-  expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.'])
+  expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.'])
 })
 
 test('after a command that changes the brief, asks iirc for it again', async ($: Engine, on: On) => {

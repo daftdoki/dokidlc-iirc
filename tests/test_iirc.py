@@ -1182,6 +1182,20 @@ def test_near_duplicates_names_the_close_pair(tmp_path, monkeypatch):
     assert iirc.near_duplicates() == [(0.05, "a.md", "b.md")]
 
 
+def test_a_link_across_kinds_keeps_a_pair_apart(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _index(tmp_path, monkeypatch, _CLOSE)
+    page = lambda kind, body: f"---\ntitle: t\nsummary: s\ntopics: [x]\nkind: {kind}\n---\n{body}\n"
+    (tmp_path / ".iirc" / "a.md").write_text(page("decision", "When. See [[b]]."))
+    (tmp_path / ".iirc" / "b.md").write_text(page("procedure", "How."))
+    assert iirc.flagged_pairs() == []
+    (tmp_path / ".iirc" / "b.md").write_text(page("decision", "Also when."))   # same kind: a link is not enough
+    assert iirc.flagged_pairs() == [(0.05, "a.md", "b.md")]
+    (tmp_path / ".iirc" / "a.md").write_text(page("decision", "When."))
+    (tmp_path / ".iirc" / "b.md").write_text(page("procedure", "How."))        # different kinds, no link
+    assert iirc.flagged_pairs() == [(0.05, "a.md", "b.md")]
+
+
 def test_near_duplicates_without_an_index_is_empty(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "cache_dir", lambda: tmp_path / "cache")
@@ -1248,7 +1262,7 @@ def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     assert "near-duplicate" not in capsys.readouterr().out
     _index(tmp_path, monkeypatch, _CLOSE)
     iirc.main(["doctor", "--brief"])
-    assert "1 near-duplicate pair: iirc doctor names them; merge each or keep both." in capsys.readouterr().out
+    assert "1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ." in capsys.readouterr().out
     iirc.write_config_file({"semantic": False})               # string mode: nothing refreshes the index
     iirc.main(["doctor", "--brief"])
     assert "near-duplicate" not in capsys.readouterr().out

@@ -132,7 +132,11 @@ Four rules keep the field worth searching:
 2. One finding per page, so a wrong page can be deleted without losing a
    right one. One topic, under 8KB. A field is too large when the
    session-start line counts near-duplicate pairs or reports a slow
-   start scan; the page count is information.
+   start scan; the page count is information. For each pair `iirc doctor`
+   names, merge the two pages when they hold one finding. When they hold
+   two findings of different kinds, such as a decision and the procedure
+   that carries it out, keep both and link one to the other with
+   `[[name]]`; the pair then stops counting.
 3. Sources names a command you ran, a file you read at a commit, or a URL
    you read, with a date. "Observed" is not a source.
 4. A page about a workaround says what it works around, so the fix can

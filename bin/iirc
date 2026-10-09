@@ -2374,6 +2374,8 @@ def uncommitted(store: Store) -> int:
 
 PAIR_BUDGET = 2.0        # seconds the session-start line may spend comparing pages; `iirc doctor` has no limit
 NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
+DUPLICATE = 0.07         # a pair this close turns the brief yellow; a reworded copy of one finding measured 0.047,
+                         # two findings on one topic 0.088 (2026-10-08); pairs between are doctor notes only
 VECTOR_FLOATS = 768
 
 
@@ -2448,6 +2450,23 @@ def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]
         state[str(ROOT)] = {"digest": digest, "pairs": pairs}
         write_state_json("pairs.json", state)
     return pairs
+
+
+def kept_apart(a: str, b: str) -> bool:
+    """Two pages of different kinds, one linking the other with [[name]]: a pair kept on purpose."""
+    try:
+        (fa, ba), (fb, bb) = (parse_page((st.dir / name).read_text()) for st, name in (resolve_page(a), resolve_page(b)))
+    except (SystemExit, Exception):   # an unreadable page is never a reason to stay quiet
+        return False
+    if fa.get("kind") == fb.get("kind"):
+        return False
+    stem = lambda label: label.split("/")[-1].removesuffix(".md")
+    return f"[[{stem(b)}]]" in ba or f"[[{stem(a)}]]" in bb
+
+
+def flagged_pairs(budget: float | None = None) -> list[tuple[float, str, str]]:
+    """near_duplicates without the pairs kept apart on purpose."""
+    return [p for p in near_duplicates(budget) if not kept_apart(p[1], p[2])]
 
 
 # --- doctor -----------------------------------------------------------------
@@ -2552,11 +2571,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
         try:
             # string mode never refreshes the index, so its pairs would be stale
-            close = len(near_duplicates(PAIR_BUDGET)) if semantic_enabled() else 0
+            close = sum(1 for d, _, _ in flagged_pairs(PAIR_BUDGET) if d <= DUPLICATE) if semantic_enabled() else 0
         except Exception:   # a hook must never fail the session start
             close = 0
         if close:
-            parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each or keep both.")
+            parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.")
         parts.append("A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.")
         if source == "compact" and session_writes() == 0:
             parts.append("Context was just compacted and this session wrote no iirc. If the summary above names a fix that took more than one attempt, write it now.")
@@ -2631,8 +2650,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "iirc index commits them")
 
     if semantic_enabled():
-        for d, first, second in near_duplicates():
-            print(f"note near-duplicate pages (distance {d:.3f}): {first} | {second}")
+        for d, first, second in flagged_pairs():
+            what = "near-duplicate pages" if d <= DUPLICATE else "similar pages, below the warning"
+            print(f"note {what} (distance {d:.3f}): {first} | {second}")
         if live_stores() and not index_rows(("filename",)):
             print("note no index to compare pages with (iirc index builds it)")
 
