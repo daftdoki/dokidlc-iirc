@@ -66,6 +66,11 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
 ]
+// the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
+const TITLE = '#e6edf3'
+const TAGLINE = 'what past sessions learned, found by meaning'
+const TAGLINE_FROM = '#e8875f'
+const TAGLINE_TO = '#a78bfa'
 const KEEP = 200
 
 /**
@@ -423,10 +428,14 @@ export const register: Register = on => {
 
 /** The gauge color at position t, 0 to 1: red to amber to green. */
 function gaugeColor(t: number): string {
+  return t < 0.5 ? mix(GAUGE[0], GAUGE[1], t * 2) : mix(GAUGE[1], GAUGE[2], (t - 0.5) * 2)
+}
+
+/** The color a fraction t of the way from hex color a to hex color b. */
+function mix(a: string, b: string, t: number): string {
   const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
-  const [a, b, u] = t < 0.5 ? [GAUGE[0], GAUGE[1], t * 2] : [GAUGE[1], GAUGE[2], (t - 0.5) * 2]
   const [x, y] = [hex(a), hex(b)]
-  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * u).toString(16).padStart(2, '0')).join('')
+  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('')
 }
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
@@ -445,7 +454,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   // spaces lead each word: a Text's trailing space is not drawn
   for (const [k, word] of ['If', 'I', 'Recall', 'Correctly'].entries()) {
     head.push(<Text key={`i${k}`} bold color="claude">{(k > 0 ? ' ' : '') + word[0]}</Text>)
-    if (word.length > 1) head.push(<Text key={`w${k}`} color="subtle">{word.slice(1)}</Text>)
+    if (word.length > 1) head.push(<Text key={`w${k}`} bold color={TITLE}>{word.slice(1)}</Text>)
   }
 
   const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
@@ -505,7 +514,10 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
-        <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
+        {/* one Text per character, each a step along the gradient */}
+        {[...TAGLINE].map((ch, k) => (
+          <Text key={k} italic color={mix(TAGLINE_FROM, TAGLINE_TO, k / (TAGLINE.length - 1))}>{ch}</Text>
+        ))}
       </Box>
       {view === 'help' && helpBody}
       {view === 'home' && <Text> </Text>}
