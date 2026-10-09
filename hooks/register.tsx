@@ -406,7 +406,9 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 async function openPane($: EngineInterface) {
   const pct = await read($, paneWidth)
   const columns = pct !== null && terminalColumns ? Math.max(30, Math.round((terminalColumns * pct) / 100)) : undefined
-  return $.ui.open({ id: PANE, title: 'iirc', focus: true, ...(columns ? { columns } : {}) })
+  const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true, ...(columns ? { columns } : {}) })
+  $.ui.log(`iirc: pane open: width ${pct ?? 'auto'}%, terminal ${terminalColumns ?? 'unmeasured'}, columns asked ${columns ?? 'none'}: ${JSON.stringify(opened)}`)
+  return opened
 }
 
 /** The Session tab, with its numbers fresh. */
