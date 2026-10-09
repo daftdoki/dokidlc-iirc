@@ -41,7 +41,7 @@ const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)
 const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
-const PAGES_ARGS_RE = /^\s*pages(?:\s+(\S+))?\s*$/
+const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
 const KEEP = 200
@@ -236,14 +236,14 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
-  // `/iirc status on|off` turns the hint-row line on or off, and `/iirc pages N` sets how many pages
-  // recall names; every other /iirc goes to the skill.
+  // `/iirc status on|off` turns the hint-row line on or off, and `/iirc max-suggested N` sets how many
+  // pages recall suggests; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
-    const pagesArgs = PAGES_ARGS_RE.exec(e.args)
-    if (pagesArgs) {
+    const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
+    if (maxArgs) {
       // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config
-      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'pages', ...(pagesArgs[1] ? [pagesArgs[1]] : [])], {
+      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'max-suggested', ...(maxArgs[1] ? [maxArgs[1]] : [])], {
         cwd: await $.session.root(),
         timeoutMs: 15000,
       })

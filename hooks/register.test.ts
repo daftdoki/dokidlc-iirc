@@ -261,14 +261,14 @@ test('/iirc status off hides the hint-row line, on shows it, and other /iirc arg
   expect((await $.command.run({ command: 'iirc', args: 'search hooks' })).text).toBe('the skill ran')
 })
 
-test('/iirc pages N asks the CLI to keep the number', async ($: Engine, on: On) => {
+test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {
   engine(on)
   const argv: string[][] = []
-  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'recall names up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  expect((await $.command.run({ command: 'iirc:iirc', args: 'pages 5' })).text).toBe('recall names up to 5 pages')
-  expect(argv[0].slice(1)).toEqual(['pages', '5'])
-  await $.command.run({ command: 'iirc', args: 'pages' })
-  expect(argv[1].slice(1)).toEqual(['pages'])
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'recall suggests up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  expect((await $.command.run({ command: 'iirc:iirc', args: 'max-suggested 5' })).text).toBe('recall suggests up to 5 pages')
+  expect(argv[0].slice(1)).toEqual(['max-suggested', '5'])
+  await $.command.run({ command: 'iirc', args: 'max-suggested' })
+  expect(argv[1].slice(1)).toEqual(['max-suggested'])
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {

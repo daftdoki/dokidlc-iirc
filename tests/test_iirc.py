@@ -671,22 +671,22 @@ def test_recall_line_shows_the_match_and_its_rule():
     assert rows[0]["rule"] == "meaning"
 
 
-def test_pages_sets_how_many_pages_recall_names(tmp_path, monkeypatch, capsys):
+def test_max_suggested_sets_how_many_pages_recall_suggests(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     iirc.set_root(tmp_path); iirc.write_config_file({"semantic": True, "embedding_host": "http://h:1"})
-    assert iirc.recall_pages() == 3
+    assert iirc.max_suggested() == 3
     rows = [{"filename": f"p{i}.md", "summary": "s", "distance": 0.1, "via": ["semantic"]} for i in range(6)]
     assert len(iirc.recall_filter(rows)) == 3
-    iirc.main(["pages", "5"])
-    assert "up to 5 pages" in capsys.readouterr().out
-    assert iirc.recall_pages() == 5 and len(iirc.recall_filter(rows)) == 5
+    iirc.main(["max-suggested", "5"])
+    assert "suggests up to 5 pages" in capsys.readouterr().out
+    assert iirc.max_suggested() == 5 and len(iirc.recall_filter(rows)) == 5
     assert iirc.read_config()["embedding_host"] == "http://h:1"   # the other settings stay
-    iirc.main(["pages"])
-    assert "up to 5 pages" in capsys.readouterr().out
+    iirc.main(["max-suggested"])
+    assert "suggests up to 5 pages" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        iirc.main(["pages", "0"])
-    iirc.write_config_file({"recall_pages": "lots"})
-    assert iirc.recall_pages() == 3
+        iirc.main(["max-suggested", "0"])
+    iirc.write_config_file({"max_suggested": "lots"})
+    assert iirc.max_suggested() == 3
 
 
 def test_clip_cuts_at_a_word_boundary():

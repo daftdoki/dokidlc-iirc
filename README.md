@@ -173,8 +173,8 @@ plugin draws them for you:
 - Each suggested page shows how it matched: `[69% match, meaning+term]`
   (100% less its semantic distance, and the rule that let it through) or
   `[term match]`. The agent sees the same score in its line.
-  `/iirc pages N` sets how many pages recall names at most, 3 by default;
-  the number holds on that machine.
+  `/iirc max-suggested N` sets how many pages recall suggests at most, 3
+  by default; the number holds on that machine.
 - Warnings from the session-start check, and the nudge at stop, come as
   toasts.
 

@@ -27,7 +27,7 @@ iirc migrate                            move a repository and this machine from 
 iirc doctor --fix                       install or repair prerequisites; clone missing remote stores
 iirc init                               create .iirc/ and the CLAUDE.md paragraph
 iirc stores                             the stores, their page counts, and anything not committed or pushed
-iirc pages [N]                          how many pages the hook names at most (default 3); N sets it on this machine
+iirc max-suggested [N]                  how many pages the hook suggests at most (default 3); N sets it on this machine
 iirc sync                               commit, pull, and push the remote stores
 ```
 
