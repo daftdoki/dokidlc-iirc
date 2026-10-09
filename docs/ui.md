@@ -98,8 +98,9 @@ A plain `/iirc` draws a card in place of its output row:
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it; the card's border takes
   the same green, yellow, or red
-- the session's counts: pages, used, reads, and writes
-- RECALL HIT RATE: the share of suggested pages that were read, as a
+- the counts, under STORE (pages) and THIS SESSION (used, reads, and
+  writes)
+- RECALL HIT RATE, for this session: the share of suggested pages that were read, as a
   percentage and a bar that runs from red into green as it fills
 - a pointer to `/iirc help`
 

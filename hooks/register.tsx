@@ -535,6 +535,13 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       {view === 'home' && <Text> </Text>}
       {view === 'home' && <Box flexDirection="row">{statusRow}</Box>}
       {view === 'home' && tiles.length > 0 && <Text> </Text>}
+      {/* pages counts the store; the other tiles and the hit rate count this session */}
+      {view === 'home' && tiles.length > 0 && (
+        <Box flexDirection="row">
+          <Box width={15} flexShrink={0}>{heading('STORE')}</Box>
+          {heading('THIS SESSION')}
+        </Box>
+      )}
       {view === 'home' && tiles.length > 0 && (
         <Box flexDirection="row" paddingLeft={2}>
           {tiles.map(([n, label]) => (
@@ -548,7 +555,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       {view === 'home' && c.suggested > 0 && <Text> </Text>}
       {view === 'home' && c.suggested > 0 && (
         <Box flexDirection="row" width={BAR + 2}>
-          <Box flexGrow={1}>{heading('RECALL HIT RATE')}</Box>
+          <Box flexGrow={1}>{heading('RECALL HIT RATE · THIS SESSION')}</Box>
           <Text bold color={band}>{`${pct}%`}</Text>
         </Box>
       )}
