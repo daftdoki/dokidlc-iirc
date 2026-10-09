@@ -78,8 +78,8 @@ exit 2. Bump `FORMAT` only with a migration.
 `iirc migrate` (`cmd_migrate`, `old_layout`) moves a repository and a
 machine from the memory plugin's names. `doctor --brief` prints
 `MIGRATION_LINE` while `old_layout()` finds anything, and `register.tsx`
-shows it as `⚠ iirc: needs migration`. Remove both once no repository
-uses the old layout.
+shows it as a red `● iirc: needs migration` under the prompt. Remove both
+once no repository uses the old layout.
 
 ## Release
 

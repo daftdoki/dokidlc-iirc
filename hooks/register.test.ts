@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseBrief, parseRecall, parseRecovered } from './register'
+import { parseBrief, parseRecall, parseRecovered, statusText } from './register'
 
 const RECALL =
   'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -21,6 +21,11 @@ function engine(on: On, toml = '') {
   on('tool.call', () => ({ result: 'ok' }))
   on('session.root', () => ({ value: '/repo' }))
   on('fs.read', () => (toml ? { value: toml } : { deny: 'ENOENT' }))
+  on('ui.status', () => ({ value: undefined }))
+  on('command.run', () => ({ text: 'the skill ran' }))
+  const kept = new Map<string, unknown>()
+  on('store.get', ($, e) => ({ value: kept.get(e.key) }))
+  on('store.set', ($, e) => (kept.set(e.key, e.value), { value: undefined }))
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
     return h(Text, null, 'engine row')
@@ -45,6 +50,29 @@ async function promptRow($: Engine, uuid: string) {
   })
 }
 
+const LINE = 'iirc: [68] pages · [0] read · [semantic+keyword] mode'
+
+// The hint row as the terminal draws it under the prompt, mounted fresh each time.
+let mounts = 0
+function hintRow($: Engine) {
+  return $.ui.mount({
+    plugin: 'iirc',
+    surface: 'terminal',
+    component: 'PromptHint',
+    requestId: `hint-${++mounts}`,
+    props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
+  })
+}
+
+// Work the module starts on a timer lands a little after the clock settles.
+async function waitFor($: Engine, text: string) {
+  for (let i = 0; i < 30; i++) {
+    if (await (await hintRow($)).find({ text })) return true
+    await new Promise(r => setTimeout(r, 10))
+  }
+  return false
+}
+
 test('parses the recall line', () => {
   expect(parseRecall('UserPromptSubmit hook additional context: ' + RECALL)).toEqual([
     { name: 'alpha-page.md', summary: 'first summary (with parens)', isSuspect: false },
@@ -56,12 +84,16 @@ test('parses the recall line', () => {
 test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
-    status: '⚠ iirc: [68] pages · [semantic+keyword] mode',
+    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null },
     warnings: ['1 near-duplicate pair: iirc doctor names them; merge each or keep both.'],
   })
-  expect(parseBrief('iirc: not set up on this machine. Ask the creator.')?.status).toBe('⚠ iirc: needs setup')
-  expect(parseBrief('iirc: 1 page, string only. Topics: x 1.')?.status).toBe('⚠ iirc: [1] page · [keyword] mode')
-  expect(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")?.status).toBe('⚠ iirc: needs migration')
+  const setup = parseBrief('iirc: not set up on this machine. Ask the creator.')!.status
+  expect(setup.level).toBe('error')
+  expect(statusText(setup, 0)).toBe('iirc: needs setup')
+  const one = parseBrief('iirc: 1 page, string only. Topics: x 1.')!.status
+  expect(one.level).toBe('ok')
+  expect(statusText(one, 3)).toBe('iirc: [1] page · [3] read · [keyword] mode')
+  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, 0)).toBe('iirc: needs migration')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -130,56 +162,53 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('sets the status line and toasts the brief warnings, and toasts the stop nudge', async ($: Engine, on: On) => {
+test('draws the brief in the hint row, toasts its warnings, and toasts the stop nudge', async ($: Engine, on: On) => {
   engine(on)
-  const status: unknown[] = []
   const toast: unknown[] = []
-  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
+  expect(await (await hintRow($)).find({ text: 'iirc:' })).toBeUndefined()
   await hookRow($, 'SessionStart', BRIEF, 'h4')
   await hookRow($, 'Stop', STOP, 'h5')
-  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
+  const row = await hintRow($)
+  expect(await row.find({ text: LINE })).toBeDefined()
+  expect(await row.find({ text: 'engine row' })).toBeDefined()
   expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
 })
 
-test('at session start, asks iirc for the brief and shows it once', async ($: Engine, on: On) => {
+test('at session start, asks iirc for the brief and toasts its warnings once', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
-  const status: unknown[] = []
   const toast: unknown[] = []
   const argv: unknown[] = []
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('process.run', ($, e) => (argv.push(e.argv), { value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await clock.settle()
-  for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+  expect(await waitFor($, LINE)).toBe(true)
   expect(String((argv[0] as string[])[0])).toContain('bin/iirc')
-  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode', '⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
   expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.'])
 })
 
 test('after a command that changes the brief, asks iirc for it again', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
-  const status: unknown[] = []
-  on('process.run', () => ({ value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
+  const argv: string[][] = []
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.toast', () => ({ value: undefined }))
   await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 't4' })
+  await clock.settle()
+  expect(argv).toEqual([])
   await $.tool.call({ tool: 'Bash', command: '~/x/bin/iirc migrate', tool_use_id: 't5' })
   await clock.settle()
-  for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
-  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
+  expect(await waitFor($, LINE)).toBe(true)
 })
 
 test('after a read, counts the pages this session read', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
-  const status: unknown[] = []
   const argv: string[][] = []
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('session.id', () => ({ value: 's1' }))
@@ -187,16 +216,27 @@ test('after a read, counts the pages this session read', async ($: Engine, on: O
     argv.push([...e.argv])
     return e.argv.includes('stats') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'] })) : ran(BRIEF)
   })
-  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
   await $.tool.call({ tool: 'Bash', command: 'iirc doctor --brief', tool_use_id: 't6' })
   await clock.settle()
-  for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
+  expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+  expect(await waitFor($, 'iirc: [68] pages · [2] read · [semantic+keyword] mode')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
-  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode', '⚠ iirc: [68] pages · [2] read · [semantic+keyword] mode'])
+})
+
+test('/iirc status off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  await hookRow($, 'SessionStart', BRIEF, 'h7')
+  expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
+  expect((await $.command.run({ command: 'iirc', args: 'status off' })).text).toBe('iirc status off')
+  expect(await (await hintRow($)).find({ text: LINE })).toBeUndefined()
+  expect((await $.command.run({ command: 'iirc', args: 'status' })).text).toContain('is off')
+  expect((await $.command.run({ command: 'iirc', args: 'status on' })).text).toBe('iirc status on')
+  expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
+  expect((await $.command.run({ command: 'iirc', args: 'search hooks' })).text).toBe('the skill ran')
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {

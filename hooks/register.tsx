@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ResolveInput } from 'claude-code'
 
-import type { RecalledPage, ToolNote } from '../types'
+import type { IircStatus, RecalledPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
 // pages as a folding list under the prompt or the failed command, a pencil row
 // under a command that failed and then worked, the session brief and the count
-// of pages read this session on the status line, and warnings as toasts.
+// of pages read this session in the hint row under the prompt, and warnings as
+// toasts.
 // `ui = false` in .claude/iirc.toml turns it off.
 
 const byPrompt = atom({ plugin: 'iirc', key: 'byPrompt' } as const, {})
@@ -18,6 +19,7 @@ const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const readCount = atom({ plugin: 'iirc', key: 'readCount' } as const, 0)
+const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -29,6 +31,8 @@ const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)\b/
 const READS_RE = /\biirc\s+(read|pull)\b/
+const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
+const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -59,21 +63,28 @@ export function parseRecovered(text: string): ToolNote['recovered'] {
   return [...text.matchAll(RECOVERED_RE)].map(m => ({ command: m[1], failures: Number(m[2]) }))
 }
 
-/** The status line text and the warnings worth a toast, from the SessionStart line. */
-export function parseBrief(text: string): { status: string; warnings: string[] } | null {
+/** What the hint row shows and the warnings worth a toast, from the SessionStart line. */
+export function parseBrief(text: string): { status: IircStatus; warnings: string[] } | null {
   const at = text.indexOf('iirc: ')
   if (at < 0) return null
   const line = text.slice(at)
   const m = BRIEF_RE.exec(line)
-  if (!m && MIGRATE_RE.test(line)) return { status: '⚠ iirc: needs migration', warnings: [] }
-  if (!m) return { status: '⚠ iirc: needs setup', warnings: [line.split('. ')[0].replace(/^iirc: /, '')] }
+  const needs = (note: string) => ({ level: 'error' as const, pages: null, mode: null, note })
+  if (!m && MIGRATE_RE.test(line)) return { status: needs('needs migration'), warnings: [] }
+  if (!m) return { status: needs('needs setup'), warnings: [line.split('. ')[0].replace(/^iirc: /, '')] }
   // semantic search also matches terms; without an embedding host it matches terms alone
   const mode = m[2].startsWith('semantic') ? 'semantic+keyword' : 'keyword'
   const warnings = m[3]
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  return { status: `⚠ iirc: [${m[1]}] ${m[1] === '1' ? 'page' : 'pages'} · [${mode}] mode`, warnings }
+  return { status: { level: warnings.length > 0 ? 'warn' : 'ok', pages: Number(m[1]), mode, note: null }, warnings }
+}
+
+/** The hint row's text after the circle. */
+export function statusText(s: IircStatus, reads: number): string {
+  if (s.pages === null) return `iirc: ${s.note}`
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${reads}] read · [${s.mode}] mode`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -92,25 +103,16 @@ async function uiEnabled($: EngineInterface): Promise<boolean> {
   }
 }
 
-/** The brief on the status line, and its warnings as a toast once per distinct brief. */
+/** The brief in the hint row, and its warnings as a toast once per distinct brief. */
 async function showBrief($: EngineInterface, text: string) {
   const brief = parseBrief(text)
   if (!brief) return
   await update($, status, () => brief.status)
-  await drawStatus($)
   const warned = brief.warnings.join(' ')
   if (warned && (await read($, briefShown)) !== warned) {
     await update($, briefShown, () => warned)
     $.ui.toast(`iirc: ${brief.warnings.join(' ')}`)
   }
-}
-
-/** The brief's status, with the session's read count once the brief reports a page count. */
-async function drawStatus($: EngineInterface) {
-  const base = await read($, status)
-  if (base === null) return
-  const pages = /^⚠ iirc: \[\d+\] pages?/.exec(base)
-  $.ui.status(pages ? `${pages[0]} · [${await read($, readCount)}] read${base.slice(pages[0].length)}` : base)
 }
 
 /** Ask iirc how many distinct pages this session has read, from its log. */
@@ -126,7 +128,6 @@ function refreshReads($: EngineInterface) {
       const pages = (JSON.parse(ran.stdout) as { read?: unknown }).read
       if (!Array.isArray(pages)) return
       await update($, readCount, () => pages.length)
-      await drawStatus($)
     })().catch(() => {})
   })
 }
@@ -151,15 +152,19 @@ export const register: Register = on => {
   // nor $.session.messages() shows it, so ask iirc for the brief directly.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    $.ui.status(undefined)   // earlier versions drew the brief on the status line
     refreshBrief($)
     refreshReads($)
+    try {
+      if ((await $.store.get('isStatusShown')) === false) await update($, isStatusShown, () => false)
+    } catch {}   // the line stays on, the default
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) await update($, lastTool, () => e.tool_use_id)
     const result = await next(e)
-    // keep the status line's page count and read count current within the session
+    // keep the hint row's page count and read count current within the session
     if (e.tool === 'Bash') {
       if (CHANGES_BRIEF_RE.test(e.command)) refreshBrief($)
       if (READS_RE.test(e.command)) refreshReads($)
@@ -197,6 +202,37 @@ export const register: Register = on => {
     }
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
+
+  // `/iirc status on|off` turns the hint-row line on or off; every other /iirc goes to the skill.
+  on('command.run', async ($, e, next) => {
+    const m = STATUS_ARGS_RE.exec(e.args)
+    if ((e.command !== 'iirc' && e.command !== 'iirc:iirc') || !m) return next(e)
+    if (m[1]) {
+      const isOn = m[1] === 'on'
+      await $.store.set('isStatusShown', isOn)
+      await update($, isStatusShown, () => isOn)
+      return { text: `iirc status ${m[1]}` }
+    }
+    return { text: `iirc status is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc status on|off changes it` }
+  })
+
+  // The brief under the prompt, beside the engine's hint: a status line takes no color.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const s = await read($, status)
+    const original = await next(e)
+    if (s === null || !(await read($, isStatusShown))) return original
+    const reads = await read($, readCount)
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {original}
+        <Box flexDirection="row">
+          <Text color={LEVEL_COLOR[s.level]}>● </Text>
+          <Text color="subtle">{statusText(s, reads)}</Text>
+        </Box>
+      </Box>
+    )
+  })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const pages = (await read($, byPrompt))[e.requestId]

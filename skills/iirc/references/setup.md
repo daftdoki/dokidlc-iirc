@@ -38,8 +38,11 @@ before a second run.
 
 By default the plugin draws the hook lines for the creator: recalled pages
 under the prompt or failed command, a row when a command failed and then
-worked, and the brief and the session's read count on the status line. In `.claude/iirc.toml`,
-`ui = false` turns that off, and `show_hooks = true` also prints the raw
+worked, and a colored line under the prompt with the page count, the
+session's read count, and the search mode. The creator turns that one line
+on or off by typing `/iirc status on` or `/iirc status off`; it is on by
+default and the choice holds on that machine. In `.claude/iirc.toml`,
+`ui = false` turns all of it off, and `show_hooks = true` also prints the raw
 text you receive, for debugging. Add the key the creator asks for at the
 top of the file, creating it if it is missing, and commit it. It takes
 effect at the next hook; no restart.
