@@ -33,6 +33,8 @@ const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)
 const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
+// columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
+const PAGE_INDENT = 9
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -318,15 +320,80 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
         <Text color="suggestion">{label}</Text>
       </Button>
       {isOpen &&
-        pages.map((p, i) => (
-          <Box flexDirection="row" paddingLeft={2}>
-            <Text color="subtle">{i === pages.length - 1 ? '└─ ' : '├─ '}</Text>
-            <Text color={p.isSuspect ? 'warning' : 'success'}>◆ </Text>
-            <Text bold color="claude">{p.name.replace(/\.md$/, '')}</Text>
-            {p.isSuspect && <Text color="warning"> (suspect)</Text>}
-            <Text dimColor italic wrap="truncate-end">{'  ' + p.summary}</Text>
-          </Box>
-        ))}
+        pages.map((p, i) => {
+          const isLast = i === pages.length - 1
+          const pieces: Piece[] = [
+            { text: '◆ ', style: { color: p.isSuspect ? 'warning' : 'success' } },
+            { text: p.name.replace(/\.md$/, ''), style: { bold: true, color: 'claude' } },
+            ...(p.isSuspect ? [{ text: ' (suspect)', style: { color: 'warning' } } as Piece] : []),
+            { text: '  ' + p.summary, style: { dimColor: true, italic: true } },
+          ]
+          // wrap here, so each wrapped line keeps the tree's gutter; unmeasured, one line
+          const width = e.viewport ? e.viewport.columns - PAGE_INDENT : Infinity
+          return wrapPieces(pieces, width).map((line, j) => (
+            <Box key={`iirc-${id}-${i}-${j}`} flexDirection="row" paddingLeft={2}>
+              {/* a fixed column: a Text's trailing space is not drawn */}
+              <Box width={3} flexShrink={0}>
+                <Text color="subtle">{j > 0 ? (isLast ? ' ' : '│') : isLast ? '└─' : '├─'}</Text>
+              </Box>
+              {line.map(piece => (
+                <Text {...piece.style} wrap="truncate-end">
+                  {piece.text}
+                </Text>
+              ))}
+            </Box>
+          ))
+        })}
     </Box>
   )
+}
+
+/** Text with its style, so a wrapped line keeps each part's color. */
+type Piece = { text: string; style: { color?: 'success' | 'warning' | 'claude'; bold?: boolean; dimColor?: boolean; italic?: boolean } }
+
+/** Word-wraps styled pieces into lines no wider than `width` cells; a word longer than a line is split. */
+export function wrapPieces(pieces: Piece[], width: number): Piece[][] {
+  const lines: Piece[][] = [[]]
+  let used = 0
+  const put = (text: string, style: Piece['style']) => {
+    const line = lines[lines.length - 1]
+    const last = line[line.length - 1]
+    if (last && last.style === style) last.text += text
+    else line.push({ text, style })
+    used += text.length
+  }
+  for (const piece of pieces) {
+    for (const token of piece.text.split(/(\s+)/)) {
+      if (!token) continue
+      const isSpace = /^\s+$/.test(token)
+      if (used + token.length > width) {
+        if (isSpace) {
+          lines.push([])
+          used = 0
+          continue
+        }
+        if (used > 0) {
+          lines.push([])
+          used = 0
+        }
+        let rest = token
+        while (rest.length > width) {
+          put(rest.slice(0, width), piece.style)
+          lines.push([])
+          used = 0
+          rest = rest.slice(width)
+        }
+        put(rest, piece.style)
+      } else if (!(isSpace && used === 0 && lines.length > 1)) {
+        put(token, piece.style)
+      }
+    }
+  }
+  // a space where the line broke belongs to neither line
+  for (const line of lines) {
+    const last = line[line.length - 1]
+    if (last) last.text = last.text.trimEnd()
+    if (last && !last.text) line.pop()
+  }
+  return lines.filter(line => line.length > 0)
 }

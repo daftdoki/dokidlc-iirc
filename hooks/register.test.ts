@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseBrief, parseRecall, parseRecovered, statusText } from './register'
+import { parseBrief, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 
 const RECALL =
   'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -94,6 +94,17 @@ test('parses the recovery nudge and the brief', () => {
   expect(one.level).toBe('ok')
   expect(statusText(one, { reads: 3, writes: 1 })).toBe('iirc: [1] page · [3] reads · [1] writes · [keyword] mode')
   expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0 })).toBe('iirc: needs migration')
+})
+
+test('wraps page lines by word and keeps each part styled', () => {
+  const name = { color: 'claude' as const, bold: true }
+  const dim = { dimColor: true, italic: true }
+  const lines = wrapPieces([{ text: 'alpha-page', style: name }, { text: '  one two three four', style: dim }], 16)
+  expect(lines.map(l => l.map(p => p.text).join(''))).toEqual(['alpha-page  one', 'two three four'])
+  expect(lines[0][0].style).toBe(name)
+  expect(lines[1][0].style).toBe(dim)
+  expect(wrapPieces([{ text: 'abcdefghij', style: dim }], 4).map(l => l[0].text)).toEqual(['abcd', 'efgh', 'ij'])
+  expect(wrapPieces([{ text: 'short line', style: dim }], Infinity)).toHaveLength(1)
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
