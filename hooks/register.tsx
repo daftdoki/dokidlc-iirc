@@ -406,7 +406,10 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   if (stops.length === 0) return
   const c = await read($, cursor)
   const at = isPage ? c.page : c.session
-  const next = step === 'start' ? 0 : step === 'end' ? stops.length - 1 : Math.max(0, Math.min(stops.length - 1, at + step))
+  // a cursor scrolled out of view comes back first: the first j after the pane opens lands on the first page name
+  const atRow = sessionRowStops.indexOf(stops[at] ?? '')
+  const isHidden = !isPage && atRow >= 0 && (atRow < c.sessionTop || atRow >= c.sessionTop + paneRows)
+  const next = step === 'start' ? 0 : step === 'end' ? stops.length - 1 : isHidden ? at : Math.max(0, Math.min(stops.length - 1, at + step))
   const key = stops[next]
   if (key === undefined) return
   if (isPage) {
@@ -433,14 +436,12 @@ async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
-  // the first page name must show: in a short pane the list starts low enough to hold it
-  const firstStop = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
-  const firstRow = firstStop ? sessionRowStops.indexOf(firstStop) : -1
-  await update($, cursor, x => ({ ...x, session: 0, sessionTop: firstRow >= paneRows ? firstRow - paneRows + 1 : 0 }))
+  // the pane opens at its top, the counts first; j brings the first page name into view
+  await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
   await $.ui.open({ id: PANE, title: 'iirc', focus: true })
-  // put the ring on the first page name, so j, k, and Enter work at once
+  // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
-  if (first) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
+  if (first && sessionRowStops.indexOf(first) < paneRows) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
 }
 
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */

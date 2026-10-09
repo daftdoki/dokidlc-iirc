@@ -624,7 +624,7 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
     props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 8 }, view: {} },
   })
   expect(await view.find({ text: '↑ 1 above' })).toBeUndefined()
-  for (let i = 0; i < 8; i++) await view.press({ key: 'key-j' })
+  for (let i = 0; i < 9; i++) await view.press({ key: 'key-j' })   // the first j brings the first name into view
   expect(await view.find({ key: 'tab-session' })).toBeDefined()              // the header stays
   expect(await view.find({ key: 'key-q' })).toBeDefined()
   expect(await view.find({ key: 'open-s-p8.md' })).toBeDefined()             // the cursor's row is in view
