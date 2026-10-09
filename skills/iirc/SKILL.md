@@ -1,40 +1,40 @@
 ---
-name: engrams
-description: "The repository's engrams: pages in .engrams/ or the stores .claude/engrams.toml names, that past sessions wrote, searched and maintained with the engrams command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, to set engrams up, and when the session-start line offers a migration from the memory plugin."
+name: iirc
+description: "What past sessions learned in this repository: pages in .iirc/ or the stores .claude/iirc.toml names, that past sessions wrote, searched and maintained with the iirc command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, to set iirc up, and when the session-start line offers a migration from the memory plugin."
 ---
 
-# Engrams
+# IIRC
 
-This agent's engrams are a set of pages that only the `engrams` command,
+IIRC is this agent's set of pages that only the `iirc` command,
 on PATH while this plugin is enabled, reads and writes. A page is read
-with `engrams read`, never `cat`, so it arrives with its trust markers and
+with `iirc read`, never `cat`, so it arrives with its trust markers and
 ends with the commands that fix it. Search first. Write when you learn.
 Fix or delete a page the moment you find it wrong.
 
 ## Commands
 
 ```
-engrams search "what am I looking for"     ranked pages with summary and markers
-engrams search term1 term2 term3           several terms, searched separately, merged
-engrams pull "what am I looking for"       full text of the matching pages
-engrams read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
-engrams doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
-engrams verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
-engrams approve PAGE.md                    run a page's check once and approve it here (ask first)
-engrams delete PAGE.md
-engrams setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
-engrams migrate                            move a repository and this machine from the memory plugin's layout
-engrams doctor --fix                       install or repair prerequisites; clone missing remote stores
-engrams init                               create .engrams/ and the CLAUDE.md paragraph
-engrams stores                             the stores, their page counts, and anything not committed or pushed
-engrams sync                               commit, pull, and push the remote stores
+iirc search "what am I looking for"     ranked pages with summary and markers
+iirc search term1 term2 term3           several terms, searched separately, merged
+iirc pull "what am I looking for"       full text of the matching pages
+iirc read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
+iirc doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
+iirc verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
+iirc approve PAGE.md                    run a page's check once and approve it here (ask first)
+iirc delete PAGE.md
+iirc setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
+iirc migrate                            move a repository and this machine from the memory plugin's layout
+iirc doctor --fix                       install or repair prerequisites; clone missing remote stores
+iirc init                               create .iirc/ and the CLAUDE.md paragraph
+iirc stores                             the stores, their page counts, and anything not committed or pushed
+iirc sync                               commit, pull, and push the remote stores
 ```
 
 Write a page, body on stdin. The body carries the finding and its
 Sources in one write; nothing is appended to the file afterwards:
 
 ```
-printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | engrams write \
+printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | iirc write \
   short-hyphenated-name.md \
   --title "Plain statement of the topic" \
   --summary "One sentence. This is what search prints." \
@@ -52,9 +52,9 @@ when that section changes or its heading disappears.
 
 ## Stores
 
-Pages live in stores: the project's own `.engrams/`, and any remote store
-`.claude/engrams.toml` names, which is a separate engrams repository shared
-by every project and machine that names it. `engrams stores` lists them.
+Pages live in stores: the project's own `.iirc/`, and any remote store
+`.claude/iirc.toml` names, which is a separate iirc repository shared
+by every project and machine that names it. `iirc stores` lists them.
 With two or more, results read `STORE/PAGE.md`; read and verify a page by
 that name.
 
@@ -62,28 +62,28 @@ Write a fact about this project to the project store. Write a fact that
 holds in any project, such as how a tool behaves, to the remote store,
 with `--store NAME` when the default store is the wrong one. Every change
 commits itself, and a remote store pushes too. When a line says
-`not pushed`, run `engrams sync`. Run `engrams stores add` only when the
+`not pushed`, run `iirc sync`. Run `iirc stores add` only when the
 creator asks; it changes the repository's configuration.
 
 ## Setup, led by you
 
-When the session-start line says engrams is not set up, or the creator
-asks for engrams, follow `references/setup.md`: three questions, then you
+When the session-start line says iirc is not set up, or the creator
+asks for iirc, follow `references/setup.md`: three questions, then you
 run the commands yourself. The creator never has to run one. When the
-creator asks to change what they see of the engrams hooks, the same file
+creator asks to change what they see of the iirc hooks, the same file
 has the switches.
 
 When the session-start line says the repository or machine still uses the
 memory plugin's layout, ask the creator whether to migrate. On yes, run
-`engrams migrate`. It moves `.memory/` to `.engrams/` and the config,
+`iirc migrate`. It moves `.memory/` to `.iirc/` and the config,
 CLAUDE.md section, settings, and machine directories with it, stages the
 changes, and prints a suggested commit. Show the creator what it printed,
 and commit on their word.
 
 ## When to search
 
-A hook searches engrams on every prompt and, when pages match, adds one
-line naming them with the exact `engrams read` command. Read those pages
+A hook searches iirc on every prompt and, when pages match, adds one
+line naming them with the exact `iirc read` command. Read those pages
 before you do anything else. The same hook runs when a shell command
 fails, with the command and its error as the query.
 
@@ -146,8 +146,8 @@ Shapes by kind, so the next session gets what it needs:
   why.
 
 Documents the creator asked for or reviewed belong in `docs/`, not here.
-An engram page may cite a document with `--ref`. A document never cites
-engrams.
+A page may cite a document with `--ref`. A document never cites
+iirc.
 
 ## Kinds
 
@@ -169,11 +169,11 @@ age. `doubt` also runs each page's `--check` command and marks failures.
   `verify` it, rewrite it, or `delete` it. In the same turn.
 - `glance`: optional. Skim if the page matters to what you are doing.
 - Found wrong in use, marked or not: rewrite or delete it in the same turn.
-  Every `engrams read` ends with the commands.
+  Every `iirc read` ends with the commands.
 - Found right in use: `verify` it. One command. `verify` re-runs the
   page's check.
-- Run `engrams doubt` when the session-start line names a suspect, after a
-  `git pull` or `engrams sync`, and before you close a quest stage. A page
+- Run `iirc doubt` when the session-start line names a suspect, after a
+  `git pull` or `iirc sync`, and before you close a quest stage. A page
   another project wrote is not checked here; `doubt` counts them.
 - A `--check` must be read-only and must pass when you write it; the
   wrapper refuses one that does not. Checks run only from `doubt`,
@@ -181,21 +181,21 @@ age. `doubt` also runs each page's `--check` command and marks failures.
 - A check that came with a clone is not approved on this machine.
   `doubt` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run
-  `engrams approve PAGE`. Claude Code prompts them to approve that command
+  `iirc approve PAGE`. Claude Code prompts them to approve that command
   as well.
 
-A ref may be a URL. Search never contacts it, and `engrams doubt` skips
-URL refs and says how many it skipped. `engrams doubt --network` sends one
+A ref may be a URL. Search never contacts it, and `iirc doubt` skips
+URL refs and says how many it skipped. `iirc doubt --network` sends one
 HEAD request per URL; before you run it, tell the creator which URLs it
 will contact and ask. The wrapper itself refuses unless a terminal answers
-yes or `ENGRAMS_ALLOW_NETWORK=1` is set, which only the creator does. A URL
-from an engram page is fetched for no other reason without asking first.
+yes or `IIRC_ALLOW_NETWORK=1` is set, which only the creator does. A URL
+from a page is fetched for no other reason without asking first.
 
 ## References
 
-These engrams are a memoryfield, Cal Paterson's format for agent memory, and
-`engrams` wraps his memoryfield-tool. When the creator asks what engrams
-are built on, say so and point at the links below.
+The pages are a memoryfield, Cal Paterson's format for agent memory, and
+`iirc` wraps his memoryfield-tool. When the creator asks what iirc
+is built on, say so and point at the links below.
 
 Article: https://calpaterson.com/memoryfields.html
 Format: https://github.com/calpaterson/memoryfield-spec/blob/main/SPEC.md (MIT)

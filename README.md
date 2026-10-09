@@ -1,19 +1,19 @@
-# dokidlc-skill-engrams
+# dokidlc-skill-iirc
 
 A Claude Code plugin that keeps what your agent learns in the repository, searchable by meaning.
 
-It installs as `engrams@dokidlc`. Pages are markdown files in `.engrams/` in
+It installs as `iirc@dokidlc`. Pages are markdown files in `.iirc/` in
 the [memoryfield](https://github.com/calpaterson/memoryfield-spec) format,
 so they travel with the code in git and any memoryfield tool can read
-them; a shared engrams repository can hold more (see Stores and auto
-commit). Three parts: the `engrams` command, which wraps
+them; a shared iirc repository can hold more (see Stores and auto
+commit). Three parts: the `iirc` command, which wraps
 [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool) with
 per-repository configuration, a guard on the embedding host, and a trust
 model; seven hooks that put the matching page in front of the agent as it
 works; and a skill that says when to search, when to write, and what to
 do with a page found wrong.
 
-With it enabled, the agent works engrams on its own. Every prompt you send
+With it enabled, the agent works iirc on its own. Every prompt you send
 is searched, and when pages match, one line names them with the command to
 read each; a shell command that fails is searched with its error text. The
 agent writes a page when something took more than one attempt. A page
@@ -21,8 +21,8 @@ cites files at a commit, so when a cited file changes, search marks the
 page suspect and the agent reads the diff, then verifies, rewrites, or
 deletes it in the same turn.
 
-Nothing in engrams needs your approval, and nothing you asked for goes
-there. Engrams is what the agent learned by itself; documents you review
+Nothing in iirc needs your approval, and nothing you asked for goes
+there. IIRC is what the agent learned by itself; documents you review
 stay in `docs/`.
 
 ## Why another memory system?
@@ -45,11 +45,11 @@ alone is only a hint.
 | Belongs in | Examples |
 |---|---|
 | Claude Code's memory | this machine's hostname, local paths, your tone preference, a fact true only here |
-| `.engrams/` (this plugin) | the tool that fails to install on macOS and the fix, the port a service listens on and why, the trust model you chose |
+| `.iirc/` (this plugin) | the tool that fails to install on macOS and the fix, the port a service listens on and why, the trust model you chose |
 | `docs/` | anything you asked for or reviewed: designs, research, decisions with their reasoning |
 
-An engram page may cite a document in `docs/`. A document never cites
-engrams.
+A page may cite a document in `docs/`. A document never cites
+iirc.
 
 ## Status
 
@@ -64,7 +64,7 @@ pinned commits.
 - [ollama](https://ollama.com) with the `nomic-embed-text` model, on this
   machine or on a host you can reach. Without it, a string-search fallback
   still works, and finds identifiers but not paraphrase.
-- A git repository. Engrams only persists if `.engrams/` is committed.
+- A git repository. IIRC only persists if `.iirc/` is committed.
 
 ## Installation
 
@@ -72,18 +72,18 @@ Once per machine, in Claude Code:
 
 ```
 /plugin marketplace add daftdoki/dokidlc-plugins
-claude plugin install engrams@dokidlc
+claude plugin install iirc@dokidlc
 ```
 
 A repository that used the memory plugin needs one more step. At session
-start the agent offers the migration, and on your yes it runs `engrams migrate`.
-The migration moves `.memory/`, `.claude/memory.toml`, the CLAUDE.md section, the `memory@dokidlc` setting, and this machine's `dokidlc-memory` directories to their engrams names.
+start the agent offers the migration, and on your yes it runs `iirc migrate`.
+The migration moves `.memory/`, `.claude/memory.toml`, the CLAUDE.md section, the `memory@dokidlc` setting, and this machine's `dokidlc-memory` directories to their iirc names.
 It stages the changes and prints a suggested commit. It never commits.
 
-Then open a session in a repository and say "set up engrams". The agent
+Then open a session in a repository and say "set up iirc". The agent
 asks whether you want semantic search or the string fallback, and where
-the embedding model runs. It then runs `engrams setup`, `engrams init`, and
-`engrams doctor --fix`, which installs memoryfield-tool at the pinned
+the embedding model runs. It then runs `iirc setup`, `iirc init`, and
+`iirc doctor --fix`, which installs memoryfield-tool at the pinned
 commit and, for a local model on macOS, ollama and the model. You commit
 what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
 run yourself, for a bootstrap script or a container.
@@ -93,14 +93,14 @@ run yourself, for a bootstrap script or a container.
 Mostly you do nothing. Each session starts with one line:
 
 ```
-engrams: 59 pages, semantic via 127.0.0.1:11434. Topics: claude-code 20, questlog 17, decisions 9, plugin 8. 3 suspect: diff-pass-with-old-value-grep-finds-the-missed-copy.md, ... (cited file changed).
+iirc: 59 pages, semantic via 127.0.0.1:11434. Topics: claude-code 20, questlog 17, decisions 9, plugin 8. 3 suspect: diff-pass-with-old-value-grep-finds-the-missed-copy.md, ... (cited file changed).
 ```
 
 Ask a question and the agent searches. "Do you remember anything about
 installing this on a mac?" runs:
 
 ```
-$ engrams search "why does install fail on a mac"
+$ iirc search "why does install fail on a mac"
 pysqlite3-install-override.md: Why memoryfield-tool needs a uv overrides file on macOS and arm64 Linux (distance 0.366; via semantic, install, mac)
 project-settings-do-not-install-plugins.md: Since 2.1.195 settings only enable plugins; each machine runs claude plugin install once ... (distance 0.409; via semantic, install, fail, mac)
 ```
@@ -108,42 +108,42 @@ project-settings-do-not-install-plugins.md: Since 2.1.195 settings only enable p
 Each line says how the page was found. "Remember that the NAS keeps its
 live firmware in /etc/default_config" makes the agent write a page with a
 title, a one-line summary, topics, a kind, and a Sources section. "What in
-engrams might be out of date?" runs `engrams doubt`. The full command list
-is in `engrams --help`; the rules the agent follows are in
-[skills/engrams/SKILL.md](skills/engrams/SKILL.md).
+iirc might be out of date?" runs `iirc doubt`. The full command list
+is in `iirc --help`; the rules the agent follows are in
+[skills/iirc/SKILL.md](skills/iirc/SKILL.md).
 
 ## Stores and auto commit
 
-Every change the agent makes to engrams is committed at once. `write`,
+Every change the agent makes to iirc is committed at once. `write`,
 `verify`, `delete`, and `index` each commit the store's directory and
 nothing else, so your own staged and unstaged work stays out of the
 commit. No commit is made during a merge or rebase, and the
 session-start line counts anything left uncommitted.
 
-By default the only store is `.engrams/` in the project. A remote store is
+By default the only store is `.iirc/` in the project. A remote store is
 a separate git repository that several projects or machines share: the
-plugin clones it under `~/.local/share/dokidlc-engrams/stores/` and pushes
-after every commit. `.claude/engrams.toml` lists the stores:
+plugin clones it under `~/.local/share/dokidlc-iirc/stores/` and pushes
+after every commit. `.claude/iirc.toml` lists the stores:
 
 ```toml
-write = "agent"          # the store `engrams write` uses without --store
+write = "agent"          # the store `iirc write` uses without --store
 
 [stores.project]
 kind = "project"
-path = ".engrams"
+path = ".iirc"
 
 [stores.agent]
 kind = "remote"
-url = "git@github.com:you/agent-engrams.git"
+url = "git@github.com:you/agent-iirc.git"
 ```
 
 Create the remote repository, then ask the agent to add it; it runs
-`engrams stores add agent URL --default`, which writes that file, clones
+`iirc stores add agent URL --default`, which writes that file, clones
 the repository, and commits the config. Search reads every store, and
 with two or more each result names its store, as in
 `agent/ollama-host.md`. A page in a remote store records which project
 wrote it; its refs and check run only in that project. When a push is
-rejected, the plugin rebases once; `engrams sync` finishes the job when it
+rejected, the plugin rebases once; `iirc sync` finishes the job when it
 cannot. The plugin never pushes the project repository itself.
 
 ## Seeing what the hooks say
@@ -151,16 +151,16 @@ cannot. The plugin never pushes the project repository itself.
 The hooks tell the agent things you do not see. A hooks module in the same
 plugin draws them for you:
 
-- Under your prompt, `+ [2] engrams retrieved`. Click the `+` to list
-  the pages, with a yellow diamond on a page engrams suspects is stale.
+- Under your prompt, `+ [2] pages retrieved`. Click the `+` to list
+  the pages, with a yellow diamond on a page iirc suspects is stale.
 - Under a failed command, the pages its error recalled, in the same form.
 - Under a command that failed and then worked, a row saying the agent was
   asked to write a page.
 - On the status line, the page count and the search mode. Warnings from the
   session-start check, and the nudge at stop, come as toasts.
 
-Both switches live in `.claude/engrams.toml`. A file that holds only these
-keys keeps the default `.engrams/` store.
+Both switches live in `.claude/iirc.toml`. A file that holds only these
+keys keeps the default `.iirc/` store.
 
 ```toml
 ui = false          # turn the drawn rows off (default: on)
@@ -176,15 +176,15 @@ show_hooks = true   # also print the raw text each hook gives the agent (default
 - The semantic index lives in the machine's cache directory, not the
   repository. A fresh clone rebuilds it on first use.
 - A check command that arrived with a clone runs only after the agent asks
-  you and runs `engrams approve`. Until then `doubt` lists it and `verify`
+  you and runs `iirc approve`. Until then `doubt` lists it and `verify`
   refuses the page.
-- URLs in a page's refs are contacted only by `engrams doubt --network`,
+- URLs in a page's refs are contacted only by `iirc doubt --network`,
   which asks you first.
 - A remote store's clone sits on the agent's own machine. The guard
   refuses a raw read of its pages by pattern, which is a convention, not
   a boundary.
 - The page count is information. Search stays cheap as the field
-  grows; near-duplicate pages make it name the wrong one. `engrams doctor`
+  grows; near-duplicate pages make it name the wrong one. `iirc doctor`
   names each pair of pages whose embeddings are 0.10 apart or closer, and
   the session-start line counts them. The same line says when its scan
   of cited files took more than 5 seconds; the scan costs about 19 ms
@@ -194,8 +194,8 @@ show_hooks = true   # also print the raw text each hook gives the agent (default
 
 ## Configuration
 
-Your setup choices live in `~/.config/dokidlc-engrams/config.toml`; say so
-and the agent runs `engrams setup` again. An `OLLAMA_HOST` exported in the
+Your setup choices live in `~/.config/dokidlc-iirc/config.toml`; say so
+and the agent runs `iirc setup` again. An `OLLAMA_HOST` exported in the
 shell turns semantic search on and overrides the host. To enable the
 plugin for everyone who clones the repository, add the marketplace and
 the plugin to `.claude/settings.json` by hand; [INSTALL.md](INSTALL.md)
@@ -205,15 +205,15 @@ shows the two keys.
 
 - [INSTALL.md](INSTALL.md): every install step as a command, with the trap each one hides.
 - [docs/how-it-works.md](docs/how-it-works.md): the hooks, the stores, the page format and its keys, and how search ranks.
-- [skills/engrams/SKILL.md](skills/engrams/SKILL.md): the rules the agent follows for searching, writing, and doubt.
-- [skills/engrams/evals/](skills/engrams/evals/): the harness that measured the skill, and the numbers.
+- [skills/iirc/SKILL.md](skills/iirc/SKILL.md): the rules the agent follows for searching, writing, and doubt.
+- [skills/iirc/evals/](skills/iirc/evals/): the harness that measured the skill, and the numbers.
 - [docs/review-pass-recommendations.md](docs/review-pass-recommendations.md): a review of two fields after two weeks of use, with recommendations.
 - [DEVELOPMENT.md](DEVELOPMENT.md): working on the plugin itself.
 
 ## Support
 
 File a bug or ask a question in
-[GitHub issues](https://github.com/daftdoki/dokidlc-skill-engrams/issues).
+[GitHub issues](https://github.com/daftdoki/dokidlc-skill-iirc/issues).
 
 ## Built on memoryfields
 
@@ -223,7 +223,7 @@ specification](https://github.com/calpaterson/memoryfield-spec) (MIT),
 [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool)
 (AGPL-3.0-or-later), and [his skill for
 agents](https://github.com/calpaterson/memoryfield-skill) (MIT). The tool
-is installed as published at the commit in `engrams.pin`; nothing from it is
+is installed as published at the commit in `iirc.pin`; nothing from it is
 copied here.
 
 ## License

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds the three fixture repositories the engrams skill evals run in.
-# Each is a git repo with a .engrams/ field written through the plugin copy,
+# Builds the three fixture repositories the iirc skill evals run in.
+# Each is a git repo with a .iirc/ field written through the plugin copy,
 # so pages carry real embeddings, refs, and commit stamps.
 # Run through setup.sh, which sets MEMORY_EVAL_WORKSPACE and builds the plugin copies first.
 set -eu
@@ -17,14 +17,14 @@ newrepo() {
   git init -q && git config user.email fixture@test && git config user.name fixture
   printf '__pycache__/\n*.pyc\n.DS_Store\n' > .gitignore
   mkdir -p .claude
-  printf '{\n  "enabledPlugins": {"engrams@dokidlc": true}\n}\n' > .claude/settings.json
+  printf '{\n  "enabledPlugins": {"iirc@dokidlc": true}\n}\n' > .claude/settings.json
 }
 
 commit() { git add -A && git commit -qm "$1"; }
 
-page() {  # page NAME TITLE SUMMARY TOPICS KIND [extra engrams write args...]; body on stdin
+page() {  # page NAME TITLE SUMMARY TOPICS KIND [extra iirc write args...]; body on stdin
   n=$1; t=$2; s=$3; tp=$4; k=$5; shift 5
-  engrams write "$n" --title "$t" --summary "$s" --topics "$tp" --kind "$k" "$@"
+  iirc write "$n" --title "$t" --summary "$s" --topics "$tp" --kind "$k" "$@"
 }
 
 # ---------------------------------------------------------------- ledger ----
@@ -111,8 +111,8 @@ class ReportTest(unittest.TestCase):
 EOF
 printf 'tests/fixtures/sample.db\n' >> .gitignore
 commit "ledger: report, tests, seed"
-engrams init >/dev/null
-commit "engrams init"
+iirc init >/dev/null
+commit "iirc init"
 page ledger-tests-need-make-db.md \
   "The ledger tests fail with 'no such table: entries' until make db has run" \
   "sqlite creates an empty sample.db on connect, so the error is a missing table, not a missing file; run make db first" \
@@ -156,7 +156,7 @@ page ruff-config-lives-in-pyproject.md \
 
 - pyproject.toml, read 2026-09-09
 EOF
-commit "engrams: four pages"
+commit "iirc: four pages"
 cd "$W"
 
 # ------------------------------------------------------------ syncproj ----
@@ -236,8 +236,8 @@ EOF
 printf '.sync/\n' >> .gitignore
 printf 'pid 48213 since 2026-09-18T07:12Z\n' > .sync/lock
 commit "syncproj: sync script, docs, profiles"
-engrams init >/dev/null
-commit "engrams init"
+iirc init >/dev/null
+commit "iirc init"
 page syncproj-state-json-is-read-by-the-report-tool.md \
   "The report tool reads .sync/state.json and expects a records list" \
   "Do not change the state.json shape without updating tools/report.py in the reports repo" \
@@ -258,7 +258,7 @@ page syncproj-store-port-7433.md \
 
 - scripts/profiles.json, read 2026-09-15
 EOF
-commit "engrams: two pages"
+commit "iirc: two pages"
 cd "$W"
 
 # ----------------------------------------------------------- devserver ----
@@ -304,8 +304,8 @@ if __name__ == "__main__":
     HTTPServer((HOST, PORT), Handler).serve_forever()
 EOF
 commit "devserver: app, settings, docs"
-engrams init >/dev/null
-commit "engrams init"
+iirc init >/dev/null
+commit "iirc init"
 page dev-server-port.md \
   "The dev server listens on 127.0.0.1:8080 and answers /healthz" \
   "Port 8080, health at /healthz returns ok; see docs/config.md" \
@@ -337,7 +337,7 @@ The creator set the dashboard's poll interval to 5 seconds on 2026-09-09 and ask
 
 - Conversation with the creator, 2026-09-09
 EOF
-commit "engrams: three pages"
+commit "iirc: three pages"
 # the change that makes dev-server-port.md suspect
 sed -i '' 's/port \*\*8080\*\*/port **9090**/' docs/config.md
 cat >> docs/config.md <<'EOF'
@@ -351,5 +351,5 @@ cd "$W"
 
 echo "fixtures built under $REPOS"
 for r in ledger syncproj devserver; do
-  (cd "$REPOS/$r" && echo "-- $r: $(git rev-parse --short HEAD)" && engrams doctor --brief </dev/null)
+  (cd "$REPOS/$r" && echo "-- $r: $(git rev-parse --short HEAD)" && iirc doctor --brief </dev/null)
 done

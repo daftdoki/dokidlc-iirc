@@ -1,4 +1,4 @@
-# How engrams works
+# How iirc works
 
 The hooks the plugin registers, the shape of a page, and how search ranks.
 The README says what the plugin does and how to get it running; this is
@@ -11,37 +11,37 @@ page's check command.
 
 | When | What the agent sees |
 |---|---|
-| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, engrams changes not committed or not pushed, the count of near-duplicate pairs that `engrams doctor` names, and the scan time when it passed 5 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
-| Every prompt you send | If pages match, one line naming up to three with the `engrams read` command for each. Short prompts, one-word answers, and slash commands are skipped. At most 400 bytes. |
+| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, iirc changes not committed or not pushed, the count of near-duplicate pairs that `iirc doctor` names, and the scan time when it passed 5 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
+| Every prompt you send | If pages match, one line naming up to three with the `iirc read` command for each. Short prompts, one-word answers, and slash commands are skipped. At most 400 bytes. |
 | A shell command fails | The same line, searched with the error text. Silent when the error says nothing but an exit code. |
 | A shell command works after failing twice | A reminder to write the fix as a procedure page, once per command. |
 | The agent is about to stop | Once per session, only when a command failed twice then worked and nothing was written: write it, or say there is nothing worth a page. |
-| The agent runs `engrams doubt --network` or `engrams approve` | Claude Code asks you to approve it. |
-| The agent opens a page file raw, with `cat`, `head`, `sed`, `tail`, `less`, or `more`, or with the Read tool | The call is refused and the agent is told to use `engrams read`, which prints the page with its trust markers and the commands that fix it, and to run `engrams doctor --fix` if that command itself fails. |
+| The agent runs `iirc doubt --network` or `iirc approve` | Claude Code asks you to approve it. |
+| The agent opens a page file raw, with `cat`, `head`, `sed`, `tail`, `less`, or `more`, or with the Read tool | The call is refused and the agent is told to use `iirc read`, which prints the page with its trust markers and the commands that fix it, and to run `iirc doctor --fix` if that command itself fails. |
 
 ## Stores
 
-`.claude/engrams.toml` lists the stores; without it there is one, the
-project store at `.engrams/`. A store is one memoryfield field, so
+`.claude/iirc.toml` lists the stores; without it there is one, the
+project store at `.iirc/`. A store is one memoryfield field, so
 memoryfield-tool searches them all in one call.
 
 | Store | Where | Committed | Pushed |
 |---|---|---|---|
-| project (at most one) | a directory in the project repository, `.engrams` by default | yes | never |
-| remote | a clone at `~/.local/share/dokidlc-engrams/stores/NAME-HASH`, HASH from the URL | yes | after every commit |
+| project (at most one) | a directory in the project repository, `.iirc` by default | yes | never |
+| remote | a clone at `~/.local/share/dokidlc-iirc/stores/NAME-HASH`, HASH from the URL | yes | after every commit |
 
 Each command that changes a store commits that store's whole directory
-with a pathspec commit, `engrams: write NAME` and so on, under a per-store
+with a pathspec commit, `iirc: write NAME` and so on, under a per-store
 lock so two sessions on one machine never collide in git. A commit to a
-remote store carries a `Engrams-Project:` trailer and is pushed; a
+remote store carries a `IIRC-Project:` trailer and is pushed; a
 rejected push is rebased once and pushed again, and a conflict leaves the
-local commit for `engrams sync`. A page written to a remote store gets
+local commit for `iirc sync`. A page written to a remote store gets
 `project:` in its frontmatter, the project's `origin` normalized to
 `host/owner/repo`, and its file refs read `PROJECT:path@sha`. Suspicion,
 checks, and `verify` act only on pages of the current project. Search
 ranks the current project's pages first and hides nothing.
 
-## Engrams pages
+## IIRC pages
 
 The agent writes pages. You rarely will. Each page is one topic, under
 8KB, with frontmatter that search and the trust rules read:
@@ -75,12 +75,12 @@ goes silent, because the client has no timeout.
 | `verified` | When the agent last confirmed the page is still true. |
 
 Every page ends with a Sources section. It says where the fact came from,
-so a later session can check it. `engrams write` refuses a body without
+so a later session can check it. `iirc write` refuses a body without
 one.
 
 A check written on this machine is approved here when it is written. A
 check that arrived with a clone runs only after the agent asks you and
-runs `engrams approve` for that page, so a page from someone else cannot
+runs `iirc approve` for that page, so a page from someone else cannot
 run a command on your machine unasked.
 
 URLs in `refs` are never contacted by search. The agent checks them only
@@ -133,7 +133,7 @@ page that both searches found is the page to trust.
 Some machines cannot run or reach ollama. On such a machine, tell the
 agent to use string search. Then only string search runs. The agent
 searches for the words a page contains, not for the question. It tells
-you when it finds nothing. Engrams works, but not as well.
+you when it finds nothing. IIRC works, but not as well.
 
 ### The semantic index
 
@@ -141,5 +141,5 @@ Semantic search reads an index. memoryfield-tool builds the index from the
 pages and keeps it in the cache directory of the machine. The index is not
 in the repository. The wrapper updates the index after each write. On a
 fresh clone, the wrapper builds the index again. You can delete the index
-at any time and lose nothing. The pages in `.engrams/` are the only source
+at any time and lose nothing. The pages in `.iirc/` are the only source
 of truth.

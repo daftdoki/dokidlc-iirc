@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dokidlc-skill-engrams"
+name = "dokidlc-skill-iirc"
 version = "0.0.0"
 source = { virtual = "." }
 

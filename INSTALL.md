@@ -1,6 +1,6 @@
-# Installing engrams by hand
+# Installing iirc by hand
 
-The agent can do all of this for you. Say "set up engrams" in a session and
+The agent can do all of this for you. Say "set up iirc" in a session and
 it holds a short conversation, then runs the commands. This document is for
 the case where you want to run them yourself, or where you are writing a
 bootstrap script for a new agent repository.
@@ -15,23 +15,23 @@ first if it is new, then run everything below from inside it. Both of
 these work:
 
 - A Claude Code session opened in the target repository. The plugin puts
-  `engrams` on PATH while it is enabled.
+  `iirc` on PATH while it is enabled.
 - A terminal with the working directory inside the target repository. The
   command is at
-  `~/.claude/plugins/cache/dokidlc/engrams/<commit>/bin/engrams`.
+  `~/.claude/plugins/cache/dokidlc/iirc/<commit>/bin/iirc`.
 
 ## Per machine, once
 
 ### 1. Check the prerequisites
 
-Claude Code 2.1.195 or later, `uv` on PATH, and git. `engrams doctor` exits
+Claude Code 2.1.195 or later, `uv` on PATH, and git. `iirc doctor` exits
 1 at the first check without `uv`.
 
 ### 2. Add the marketplace and install the plugin
 
 ```sh
 claude plugin marketplace add git@github.com:daftdoki/dokidlc-plugins.git
-claude plugin install engrams@dokidlc
+claude plugin install iirc@dokidlc
 ```
 
 Use the full `git@` URL, not the `daftdoki/dokidlc-plugins` shorthand.
@@ -44,32 +44,32 @@ shorthand is fine on a machine that already has github.com in
 ### 3. Choose the search mode
 
 ```sh
-engrams setup --local                      # ollama on this machine
-engrams setup --host http://frame:11434    # ollama on another host
-engrams setup --substring                  # no ollama available
+iirc setup --local                      # ollama on this machine
+iirc setup --host http://frame:11434    # ollama on another host
+iirc setup --substring                  # no ollama available
 ```
 
-Pass a flag. `cmd_setup` in `bin/engrams` calls `sys.stdin.isatty()` and
+Pass a flag. `cmd_setup` in `bin/iirc` calls `sys.stdin.isatty()` and
 stops with "not a terminal" when it gets neither flags nor a tty. The
 Claude Code Bash tool gives it no tty, so the interactive prompts only
 work from a real terminal. The answer goes to
-`~/.config/dokidlc-engrams/config.toml`.
+`~/.config/dokidlc-iirc/config.toml`.
 
 ### 4. Install the dependencies
 
 ```sh
-engrams doctor --fix
+iirc doctor --fix
 ```
 
-This installs memoryfield-tool from the commit in `engrams.pin`, with an
+This installs memoryfield-tool from the commit in `iirc.pin`, with an
 overrides file that drops `pysqlite3-binary`. That package ships a Linux
 x86_64 wheel only, and the tool falls back to stdlib sqlite3 without it.
-See `install_tool()` in `bin/engrams`. On macOS, when the embedding host is
+See `install_tool()` in `bin/iirc`. On macOS, when the embedding host is
 local and does not answer, `--fix` also runs `brew install ollama` and
 `brew services start ollama`, then pulls `nomic-embed-text`. On Linux it
 prints the one ollama command to run.
 
-Doctor exits 1 here, and that is expected. The repository has no `.engrams/`
+Doctor exits 1 here, and that is expected. The repository has no `.iirc/`
 yet, so the field, CLAUDE.md, and persistence rows report FAIL. Only four
 rows must read `ok` at this point: `uv on PATH`, `memoryfield-tool`,
 `embedding host`, and `model nomic-embed-text`. The rest turn green at step
@@ -80,17 +80,17 @@ rows must read `ok` at this point: `uv on PATH`, `memoryfield-tool`,
 ### 5. Make it a git repository
 
 Run `git init` if it is new, and add a `.gitignore`. Ignore Python caches
-and editor clutter. Do not ignore `.engrams/`. `git_checks()` reports an
-ignored `.engrams/` as a persistence failure.
+and editor clutter. Do not ignore `.iirc/`. `git_checks()` reports an
+ignored `.iirc/` as a persistence failure.
 
 ### 6. Create the field
 
 ```sh
-engrams init
+iirc init
 ```
 
-This creates `.engrams/index.md` from the template, appends the
-`## Engrams <!-- engrams -->` section to `CLAUDE.md`, and runs `git add` on
+This creates `.iirc/index.md` from the template, appends the
+`## IIRC <!-- iirc -->` section to `CLAUDE.md`, and runs `git add` on
 both. Do not edit inside that marked section. `cmd_init` rewrites it
 whenever the plugin's text moves on. The top half of `index.md` is yours.
 The half below `<!-- generated below -->` is regenerated after every write.
@@ -104,11 +104,11 @@ Write `.claude/settings.json` by hand:
   "extraKnownMarketplaces": {
     "dokidlc": { "source": { "source": "github", "repo": "daftdoki/dokidlc-plugins" } }
   },
-  "enabledPlugins": { "engrams@dokidlc": true }
+  "enabledPlugins": { "iirc@dokidlc": true }
 }
 ```
 
-`claude plugin install engrams@dokidlc -s project` writes only
+`claude plugin install iirc@dokidlc -s project` writes only
 `enabledPlugins`. It leaves out `extraKnownMarketplaces` when this machine
 already knows the marketplace, and then the file resolves nowhere on a
 clone.
@@ -116,25 +116,25 @@ clone.
 ### 8. Commit the three paths
 
 ```sh
-git add .engrams .claude/settings.json CLAUDE.md && git commit
+git add .iirc .claude/settings.json CLAUDE.md && git commit
 ```
 
-These three are the `PERSISTED` tuple in `bin/engrams`. Doctor checks that
-each one is tracked. Engrams only survives a clone if they are committed.
+These three are the `PERSISTED` tuple in `bin/iirc`. Doctor checks that
+each one is tracked. IIRC only survives a clone if they are committed.
 
 ### 9. Confirm
 
 ```sh
-engrams doctor
+iirc doctor
 ```
 
 Every row should read `ok`, including "field validates". The last line
 names the index cache directory. That cache is derived, never committed,
-and `engrams index` rebuilds it.
+and `iirc index` rebuilds it.
 
 ## What project settings do not do
 
 Settings declare intent. They install nothing. Someone who clones the new
-repository on another machine still needs steps 1 to 4 before `engrams` is
+repository on another machine still needs steps 1 to 4 before `iirc` is
 on PATH. Put those commands in the repository's own bootstrap script if the
 agent runs in a container.

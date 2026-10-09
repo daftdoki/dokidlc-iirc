@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one engrams-skill eval headlessly in a fresh fixture copy.
+"""Run one iirc-skill eval headlessly in a fresh fixture copy.
 
     MEMORY_EVAL_WORKSPACE=... run_eval.py --iteration 1 --eval search-before-debug --condition new_skill --run 1
 
@@ -13,8 +13,8 @@ Copies the fixture, points the plugin copy at it with --plugin-dir, runs
   timing.json           duration and tokens from the result event
   outputs/answer.md     the final assistant text
   outputs/transcript.md tool calls in order, for the viewer
-  outputs/engrams-after/ the .engrams/ field after the run
-  outputs/engrams-log.jsonl  the plugin's own log for the run
+  outputs/iirc-after/ the .iirc/ field after the run
+  outputs/iirc-log.jsonl  the plugin's own log for the run
   outputs/repo.diff     what changed in the fixture
 """
 import argparse
@@ -29,7 +29,7 @@ from pathlib import Path
 W = Path(os.environ.get("MEMORY_EVAL_WORKSPACE") or sys.exit("set MEMORY_EVAL_WORKSPACE; see setup.sh"))
 EVALS = json.loads((Path(__file__).resolve().parent.parent / "evals.json").read_text())
 PLUGIN = {"new_skill": W / "plugin-live", "without_skill": W / "plugin-noskill", "old_skill": W / "plugin-snapshot"}
-WITH_SKILL_PREFIX = "The `engrams` skill for this repository is at {skill}. Read it before you start.\n\n"
+WITH_SKILL_PREFIX = "The `iirc` skill for this repository is at {skill}. Read it before you start.\n\n"
 
 
 def clean_path() -> str:
@@ -83,11 +83,11 @@ def main() -> None:
     env.pop("CLAUDE_PROJECT_DIR", None)
     env.pop("CLAUDECODE", None)
     # warm the field's index for this copy so the first recall hook does not time out
-    subprocess.run(["engrams", "search", "warm"], cwd=repo, env=env, capture_output=True, stdin=subprocess.DEVNULL)
+    subprocess.run(["iirc", "search", "warm"], cwd=repo, env=env, capture_output=True, stdin=subprocess.DEVNULL)
 
     prompt = ev["prompt"]
     if a.condition != "without_skill":
-        prompt = WITH_SKILL_PREFIX.format(skill=plugin / "skills" / "engrams" / "SKILL.md") + prompt
+        prompt = WITH_SKILL_PREFIX.format(skill=plugin / "skills" / "iirc" / "SKILL.md") + prompt
     (run_dir / "prompt.txt").write_text(prompt)
     cmd = [
         "claude", "-p", "--model", a.model, "--plugin-dir", str(plugin), "--setting-sources", "project",
@@ -120,10 +120,10 @@ def main() -> None:
     md, answer = render_transcript(events)
     (out / "transcript.md").write_text(md)
     (out / "answer.md").write_text(answer + "\n")
-    if (repo / ".engrams").is_dir():
-        shutil.copytree(repo / ".engrams", out / "engrams-after")
-    logs = list((state / "dokidlc-engrams").glob("*.jsonl")) if (state / "dokidlc-engrams").is_dir() else []
-    (out / "engrams-log.jsonl").write_text("".join(p.read_text() for p in logs))
+    if (repo / ".iirc").is_dir():
+        shutil.copytree(repo / ".iirc", out / "iirc-after")
+    logs = list((state / "dokidlc-iirc").glob("*.jsonl")) if (state / "dokidlc-iirc").is_dir() else []
+    (out / "iirc-log.jsonl").write_text("".join(p.read_text() for p in logs))
     diff = subprocess.run(["git", "status", "--short"], cwd=repo, capture_output=True, text=True).stdout
     diff += "\n" + subprocess.run(["git", "diff"], cwd=repo, capture_output=True, text=True).stdout
     (out / "repo.diff").write_text(diff)

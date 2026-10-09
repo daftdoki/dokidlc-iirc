@@ -1,7 +1,7 @@
 [project]
-name = "dokidlc-skill-engrams"
+name = "dokidlc-skill-iirc"
 version = "0.0.0"
-description = "Test harness for the engrams plugin. The plugin itself is bin/engrams and skills/."
+description = "Test harness for the iirc plugin. The plugin itself is bin/iirc and skills/."
 requires-python = ">=3.12"
 
 [dependency-groups]
