@@ -151,7 +151,6 @@ The `command.run` handler in
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
 | `/iirc status-line` | Whether the line under the prompt is on or off. |
 | `/iirc status-line on`, `/iirc status-line off` | Shows or hides that line, on this machine. |
-| `/iirc pane-width`, `/iirc pane-width 90\|50\|33\|auto` | The pane's width when docked, as a share of the terminal, on this machine; `auto` leaves it to Claude Code. |
 | `/iirc max-suggested` | How many pages recall suggests at most. |
 | `/iirc max-suggested N` | Sets that number, 1 to 10, on this machine. |
 | `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails. |
@@ -192,7 +191,6 @@ words. That includes the commands that need a question first:
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
 | the line under the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc status-line on` or `off`. |
-| the pane's width | the hooks module's store, this machine | auto | 90, 50, 33, auto | The docked pane's share of the terminal; a width you drag the pane to wins. | `/iirc pane-width 50`. |
 | `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc doubt --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | the environment | `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` | paths | Where the machine config, the index, the remote clones, and the records live. | When your machine moves them. |
 

@@ -40,12 +40,6 @@ const PANE = 'iirc'
 // a tab label past this many characters is cut
 const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
-// the pane's share of the terminal when docked, in percent; null leaves Claude Code's own share
-const paneWidth = atom({ plugin: 'iirc', key: 'paneWidth' } as const, null as number | null)
-const PANE_WIDTHS = [90, 50, 33] as const
-const PANE_WIDTH_ARGS_RE = /^\s*pane-width(?:\s+(90|50|33|auto))?\s*$/
-// the terminal's width, as the last drawing measured it: an open needs columns, and only drawings see the viewport
-let terminalColumns: number | null = null
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
@@ -281,9 +275,8 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `status-line ${shown} · max-suggested ${max} · pane-width ${(await read($, paneWidth)) ?? 'auto'}`,
+    `status-line ${shown} · max-suggested ${max}`,
     '/iirc status-line on|off  show or hide the line under the prompt',
-    '/iirc pane-width 90|50|33|auto  the pane\'s share of the terminal when docked',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
@@ -301,7 +294,7 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
-  const opened = await openPane($)
+  const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
   let page: ShownPage | null = null
   let error: string | null = null
@@ -402,20 +395,13 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
 }
 
-/** Open the pane, asking for the person's share of the terminal when one is set: a request a dragged width overrides. */
-async function openPane($: EngineInterface) {
-  const pct = await read($, paneWidth)
-  const columns = pct !== null && terminalColumns ? Math.max(30, Math.round((terminalColumns * pct) / 100)) : undefined
-  return $.ui.open({ id: PANE, title: 'iirc', focus: true, ...(columns ? { columns } : {}) })
-}
-
 /** The Session tab, with its numbers fresh. */
 async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
-  await openPane($)
+  await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   // put the ring on the first page name, so j, k, and Enter work at once
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
   if (first) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
@@ -500,8 +486,6 @@ export const register: Register = on => {
     $.clock.after(0, () => void refreshHealth($))
     try {
       if ((await $.store.get('isStatusShown')) === false) await update($, isStatusShown, () => false)
-      const width = await $.store.get('paneWidth')
-      if (typeof width === 'number') await update($, paneWidth, () => width)
     } catch {}   // the line stays on, the default
     return result
   })
@@ -576,19 +560,6 @@ export const register: Register = on => {
       })
       return { text: (ran.stdout || ran.stderr).trim() }
     }
-    const w = PANE_WIDTH_ARGS_RE.exec(e.args)
-    if (w) {
-      if (!w[1]) {
-        const pct = await read($, paneWidth)
-        return { text: `iirc pane-width is ${pct === null ? 'auto' : `${pct}%`}; /iirc pane-width 90|50|33|auto changes it` }
-      }
-      const pct = w[1] === 'auto' ? null : Number(w[1])
-      await $.store.set('paneWidth', pct)
-      await update($, paneWidth, () => pct)
-      // an open pane takes the new width now
-      if ((await $.ui.panes()).some(pane => pane.id === PANE)) await openPane($)
-      return { text: `iirc pane-width ${w[1] === 'auto' ? 'auto: Claude Code\'s own share' : `${pct}% of the terminal, when docked`}` }
-    }
     const m = STATUS_LINE_ARGS_RE.exec(e.args)
     if (!m) return next(e)
     if (m[1]) {
@@ -610,15 +581,14 @@ export const register: Register = on => {
     }
     if (!isIirc || !['', 'status', 'help', 'demo', 'demo status'].includes(args) || e.props.isErrored) return next(e)
     const view: CardView = args === 'help' ? 'help' : args.endsWith('status') ? 'status' : 'home'
-    if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH, null)
-    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health), await read($, paneWidth))
+    if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
+    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const r = await read($, reader)
     const c = await read($, cursor)
     const { Box, Text } = $.ui.resolve(e)
-    if (e.viewport) terminalColumns = e.viewport.columns
     // the keys row wraps in a narrow pane, and the header grows by a row
     paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0))
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
@@ -671,7 +641,6 @@ export const register: Register = on => {
 
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (e.viewport) terminalColumns = e.viewport.columns
     const s = await read($, status)
     const original = await next(e)
     if (s === null || !(await read($, isStatusShown))) return original
@@ -752,7 +721,7 @@ function mix(a: string, b: string, t: number): string {
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
 // The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
-function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null, width: number | null) {
+function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
   const { Box, Text } = $.ui.resolve(e)
   if (s) s = liveStatus(s, c)
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
@@ -863,7 +832,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
-      {setting('pane width', width === null ? 'auto' : `${width}%`, '/iirc pane-width 90|50|33')}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>

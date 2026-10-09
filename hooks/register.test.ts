@@ -635,24 +635,3 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   await view.press({ key: 'key-q' })
   expect(closed).toEqual(['iirc'])
 })
-
-test('/iirc pane-width sets the docked pane to a share of the terminal, keeps it, and reopens an open pane', async ($: Engine, on: On) => {
-  engine(on)
-  const opens: (number | undefined)[] = []
-  on('ui.open', ($, e) => (opens.push(e.columns), { value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'iirc', title: 'iirc', isShown: true }] }))
-  on('session.id', () => ({ value: 's1' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  // a drawing measures the terminal: 200 columns
-  await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'PromptHint', requestId: 'hint-w', viewport: { columns: 200, rows: 50 }, props: { isDraft: false, isWorking: false, hint: '' } } as never)
-  expect((await $.command.run({ command: 'iirc', args: 'pane-width' })).text).toContain('is auto')
-  expect((await $.command.run({ command: 'iirc', args: 'pane-width 33' })).text).toContain('33% of the terminal')
-  expect(opens.at(-1)).toBe(66)
-  expect((await $.command.run({ command: 'iirc', args: 'pane-width 90' })).text).toContain('90%')
-  expect(opens.at(-1)).toBe(180)
-  await $.command.run({ command: 'iirc', args: 'pane' })
-  expect(opens.at(-1)).toBe(180)
-  expect((await $.command.run({ command: 'iirc', args: 'pane-width auto' })).text).toContain('auto')
-  expect(opens.at(-1)).toBeUndefined()
-  expect((await $.command.run({ command: 'iirc', args: 'pane-width 40' })).text).toBe('the skill ran')   // not one of the three
-})
