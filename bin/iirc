@@ -962,31 +962,32 @@ def recall_verdicts(rows: list[dict]) -> list[dict]:
     out = []
     kept = 0
     for rank, r in enumerate(rows):
-        via = r.get("via") or []
-        sem = "semantic" in via and isinstance(r.get("distance"), (int, float))   # the tool's own fallback rows carry no distance
-        rare = r.get("rare_terms") or []
-        head = r.get("head_terms") or []
-        d = r.get("distance") if isinstance(r.get("distance"), (int, float)) else None
-        # an identifier, or a rare word of five letters or more that names the page itself
-        strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 for t in head)
-        rule = reason = None
-        if sem and strong_term and d is not None and d <= RECALL["both"]:
-            rule = "meaning+term"
-        elif sem and d is not None and d <= RECALL["semantic_only"]:
-            rule = "meaning"
-        elif not sem and any(IDENTIFIER_RE.search(t) for t in rare):
-            rule = "term"
-        elif sem and d is not None and d <= RECALL["both"]:
-            reason = "needs_term"     # close enough had a strong term backed it
-        elif sem:
-            reason = "too_far"
-        else:
-            reason = "plain_word" if rare else "common_term"
+        rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], RECALL)
         if rule is not None:
             reason = "passed" if kept < max_suggested() else "over_max"
             kept += reason == "passed"
         out.append({**r, "rank": rank, "rule": rule, "verdict": reason})
     return out
+
+
+def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict[str, float]) -> tuple[str | None, str | None]:
+    """(rule, None) when the gate lets a candidate through under these knobs, else (None, why it refused).
+    `iirc tune sweep` calls it with other knobs, so the sweep and the hook share one gate."""
+    d = distance if isinstance(distance, (int, float)) else None
+    sem = "semantic" in via and d is not None   # the tool's own fallback rows carry no distance
+    # an identifier, or a rare word of five letters or more that names the page itself
+    strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 for t in head)
+    if sem and strong_term and d <= knobs["both"]:
+        return "meaning+term", None
+    if sem and d <= knobs["semantic_only"]:
+        return "meaning", None
+    if not sem and any(IDENTIFIER_RE.search(t) for t in rare):
+        return "term", None
+    if sem and d <= knobs["both"]:
+        return None, "needs_term"     # close enough had a strong term backed it
+    if sem:
+        return None, "too_far"
+    return None, "plain_word" if rare else "common_term"
 
 
 def clean(text: str, limit: int = 160) -> str:
