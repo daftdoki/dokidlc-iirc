@@ -42,7 +42,7 @@ const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)
 const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
-const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
+const STATUS_LINE_ARGS_RE = /^\s*status-line(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
 const DIRECT_RE = /^(doctor(?:\s+--fix)?|doubt(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|cost|topics|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
@@ -215,8 +215,8 @@ async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<stri
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands`
   return [
-    `status ${shown} · max-suggested ${max}`,
-    '/iirc status on|off       show or hide the line under the prompt',
+    `status-line ${shown} · max-suggested ${max}`,
+    '/iirc status-line on|off  show or hide the line under the prompt',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
@@ -313,12 +313,13 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
-  // A plain `/iirc` prints help, `/iirc status on|off` turns the hint-row line on or off, and
+  // A plain `/iirc` or `/iirc status` shows the home card, `/iirc help` the commands,
+  // `/iirc status-line on|off` turns the hint-row line on or off, and
   // `/iirc max-suggested N` sets how many pages recall suggests; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
     // bare or `help`, it is help; the skill loads by itself when a task needs it
-    if (!e.args.trim()) return { text: await helpText($, 'home') }
+    if (!e.args.trim() || e.args.trim() === 'status') return { text: await helpText($, 'home') }
     if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
@@ -333,15 +334,15 @@ export const register: Register = on => {
       })
       return { text: (ran.stdout || ran.stderr).trim() }
     }
-    const m = STATUS_ARGS_RE.exec(e.args)
+    const m = STATUS_LINE_ARGS_RE.exec(e.args)
     if (!m) return next(e)
     if (m[1]) {
       const isOn = m[1] === 'on'
       await $.store.set('isStatusShown', isOn)
       await update($, isStatusShown, () => isOn)
-      return { text: `iirc status ${m[1]}` }
+      return { text: `iirc status-line ${m[1]}` }
     }
-    return { text: `iirc status is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc status on|off changes it` }
+    return { text: `iirc status-line is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc status-line on|off changes it` }
   })
 
   // A plain /iirc draws its help as a panel in place of the text row.
@@ -352,7 +353,7 @@ export const register: Register = on => {
       const report = parseDoctor(e.props.text)
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
     }
-    if (!isIirc || (args !== '' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
+    if (!isIirc || (args !== '' && args !== 'status' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
     const view = args === 'help' ? 'help' : 'home'
     if (args === 'demo') return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3)
     return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
@@ -497,7 +498,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
     <Box flexDirection="column">
       <Text> </Text>
       {heading('SETTINGS')}
-      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
+      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">

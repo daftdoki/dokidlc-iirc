@@ -83,14 +83,15 @@ The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 `migrate`, `setup`, `init`, and `doctor`, and after each recall. A status
 line cannot carry color, so the line sits in the hint row.
 
-`/iirc status off` hides it and `/iirc status on` brings it back;
-`/iirc status` says which.
+`/iirc status-line off` hides it and `/iirc status-line on` brings it
+back; `/iirc status-line` says which. `/iirc status` shows the home card,
+the same as a plain `/iirc`.
 
 ## A plain `/iirc`, and `/iirc help`
 
 ![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
 
-A plain `/iirc` draws a card in place of its output row:
+A plain `/iirc`, or `/iirc status`, draws a card in place of its output row:
 
 - the name, "If I Recall Correctly", and what the plugin does
 - ASK IN WORDS: `/iirc` followed by a request, such as

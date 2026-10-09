@@ -248,15 +248,15 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
 })
 
-test('/iirc status off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
+test('/iirc status-line off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
   await hookRow($, 'SessionStart', BRIEF, 'h7')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
-  expect((await $.command.run({ command: 'iirc', args: 'status off' })).text).toBe('iirc status off')
+  expect((await $.command.run({ command: 'iirc', args: 'status-line off' })).text).toBe('iirc status-line off')
   expect(await (await hintRow($)).find({ text: LINE })).toBeUndefined()
-  expect((await $.command.run({ command: 'iirc', args: 'status' })).text).toContain('is off')
-  expect((await $.command.run({ command: 'iirc', args: 'status on' })).text).toBe('iirc status on')
+  expect((await $.command.run({ command: 'iirc', args: 'status-line' })).text).toContain('is off')
+  expect((await $.command.run({ command: 'iirc', args: 'status-line on' })).text).toBe('iirc status-line on')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'what do we know about hooks?' })).text).toBe('the skill ran')
   expect((await $.command.run({ command: 'iirc', args: 'stores add x y' })).text).toBe('the skill ran')
@@ -272,7 +272,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
-  expect(helpText).toContain('status on · max-suggested 4')
+  expect(helpText).toContain('status-line on · max-suggested 4')
   expect(helpText).toContain('/iirc max-suggested N')
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({
@@ -303,9 +303,15 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     surface: 'terminal',
     component: 'CommandOutput',
     requestId: 'not-help',
-    props: { command: 'iirc:iirc', args: 'status', text: 'iirc status is on', isErrored: false },
+    props: { command: 'iirc:iirc', args: 'status-line', text: 'iirc status-line is on', isErrored: false },
   })
   expect(await other.find({ text: 'up to 4' })).toBeUndefined()
+  const status = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'status',
+    props: { command: 'iirc', args: 'status', text: 'x', isErrored: false },
+  })
+  expect(await status.find({ text: '68' })).toBeDefined()   // /iirc status draws the home card
+  expect((await $.command.run({ command: 'iirc', args: 'status' })).text).toContain('/iirc help')
 })
 
 test('/iirc doctor, search, and read run the CLI directly', async ($: Engine, on: On) => {

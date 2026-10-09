@@ -163,7 +163,7 @@ agent follows are in [skills/iirc/SKILL.md](skills/iirc/SKILL.md).
 |---|---|---|
 | search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc setup` again |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
-| the line under the prompt | the plugin's store, per machine | `/iirc status on` or `off` |
+| the line under the prompt | the plugin's store, per machine | `/iirc status-line on` or `off` |
 | the drawn rows; the raw hook text | `.claude/iirc.toml`, `ui` and `show_hooks` | editing the file |
 | the stores | `.claude/iirc.toml` | `iirc stores add`, see [how-it-works.md](docs/how-it-works.md#adding-a-remote-store) |
 
