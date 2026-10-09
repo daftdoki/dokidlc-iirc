@@ -1937,14 +1937,16 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     iirc.main(["tune", "gather"])
     out = capsys.readouterr().out
     assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 3 candidates to judge (transcript)" in out
-    s1 = json.loads((st / "tune" / "s1.json").read_text())
+    text = (st / "tune" / "s1.json").read_text()
+    s1 = json.loads(text)
+    assert len(text.splitlines()) == 2 + len(s1["recalls"])   # one recall per line
     assert s1["conditions"][0]["knobs"] == {"semantic_only": 0.28, "both": 0.34}
     r1, r2, r3 = s1["recalls"]
     assert r1["key"] == "r1" and r1["prompt"] == {"text": "why does the build fail on this machine after the upgrade", "from": "prompts file"}
     assert r1["suggested"] == [{"page": "a.md", "score": "75% match, meaning", "read_turns_later": 0},
                                {"page": "b.md", "score": "70% match, meaning+term", "read_turns_later": 1}]
-    assert [(c["page"], c["distance"], c["verdict"], c["judge"]) for c in r1["candidates"]] == [
-        ("a.md", 0.25, "passed", True), ("b.md", 0.3, "passed", True), ("c.md", 0.38, "too_far", True), ("d.md", 0.45, "too_far", False)]
+    assert [(c["page"], c["distance"], c["verdict"]) for c in r1["candidates"]] == [("a.md", 0.25, "passed"), ("b.md", 0.3, "passed"), ("c.md", 0.38, "too_far")]
+    assert r1["candidates_left_out"] == 1   # d.md, 0.45, beyond both + TUNE_NEAR
     assert r1["next_tools"] == [{"tool": "Bash", "input": "iirc read a.md"}]
     assert r1["searches"] == [{"query": "build failure", "pages": ["c.md"]}] and r1["read_unsuggested"] == ["c.md"]
     assert r2["via"] == "failure" and r2["failed"]["command"] == "make build" and "boom" in r2["failed"]["error"]

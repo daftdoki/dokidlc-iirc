@@ -19,15 +19,19 @@ stop.
 
 ## 2. Judge
 
-Read each evidence file in full. Each entry in `recalls` holds the
-prompt (or, for `via: failure`, the failed command and its error), the
-suggested pages, every candidate with its distance and `verdict`, and
-the outcome: `read_turns_later` per suggested page, `next_tools`,
-`searches`, and `read_unsuggested`.
+Read each evidence file in full. Its first line holds the session and
+its conditions; each later line is one recall. A file can run to
+hundreds of kilobytes, so read twenty lines at a time with
+`sed -n '2,21p' FILE`, which never cuts a long line. Each recall holds
+the prompt (or, for `via: failure`, the failed command, its error, and
+the subagent that ran it), the suggested pages, the candidates worth
+judging with their distance and `verdict`, and the outcome:
+`read_turns_later` per suggested page, `next_tools`, `searches`, and
+`read_unsuggested`.
 
-Judge every candidate marked `"judge": true`, and every page in
-`read_unsuggested`. Read each page with `iirc read` before you judge it.
-Label one pair at a time:
+Judge every page in `candidates` and every page in `read_unsuggested`.
+Read each page with `iirc read` before you judge it. Label one pair at
+a time:
 
 - `relevant`: the page would have helped with that prompt. Decide from
   the prompt and from what the agent did next, not from the score.

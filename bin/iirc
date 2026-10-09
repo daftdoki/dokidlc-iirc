@@ -3194,12 +3194,14 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
         j = next((j for j in range(i + 1, len(rows)) if rows[j]["cmd"] in ("read", "pull") and p in {base(x) for x in rows[j].get("pages") or []}), None)
         sugg.append({"page": p, "score": score, "read_turns_later": None if j is None else sum(1 for t in turns if i < t < j)})
     out["suggested"] = sugg
+    # only the candidates worth judging, so a session's file stays small enough to read; the sweep reads the eval rows itself
+    cands = evals.get(r.get("recall_id") or "", [])
     out["candidates"] = [{
         "page": c.get("page"), "store": c.get("store"), "rank": c.get("rank"),
-        "distance": round(c["distance"], 4) if isinstance(c.get("distance"), (int, float)) else None,
-        "rule": c.get("rule"), "verdict": c.get("verdict"), "rare_terms": c.get("rare_terms") or [], "head_terms": c.get("head_terms") or [],
-        "judge": worth_judging(c, knobs),
-    } for c in evals.get(r.get("recall_id") or "", [])]
+        "distance": round(c["distance"], 3) if isinstance(c.get("distance"), (int, float)) else None,
+        "rule": c.get("rule"), "verdict": c.get("verdict"),
+    } for c in cands if worth_judging(c, knobs)]
+    out["candidates_left_out"] = len(cands) - len(out["candidates"])
     out["next_tools"] = [{"tool": t["tool"], "input": t["input"]} for t in (tx or {}).get("tools", [])
                          if t["ts"] is not None and start <= t["ts"] < end][:TUNE_TOOLS] if tx else None
     out["searches"] = [{"query": w.get("query"), "pages": w.get("pages") or []} for w in window if w["cmd"] == "search"]
@@ -3257,11 +3259,13 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
     for s in chosen:
         ev = gather_session(s, sessions[s], evals)
         path = tune_dir() / f"{safe_name(s)}.json"
-        path.write_text(json.dumps(ev, indent=1) + "\n")
+        # one recall per line, so the agent can read the file in parts
+        head = json.dumps({k: v for k, v in ev.items() if k != "recalls"})[:-1]
+        path.write_text(head + ', "recalls": [\n' + ",\n".join(json.dumps(r, ensure_ascii=False) for r in ev["recalls"]) + "\n]}\n")
         n = len(ev["recalls"])
         total += n
         sugg = sum(len(r["suggested"]) for r in ev["recalls"])
-        judge = sum(c["judge"] for r in ev["recalls"] for c in r["candidates"])
+        judge = sum(len(r["candidates"]) for r in ev["recalls"])
         source = "transcript" if ev["transcript"] else "no transcript"
         print(f"{path}: {n} recalls, {sugg} pages suggested, {judge} candidates to judge ({source})")
     print(f"{len(chosen)} session{'s' if len(chosen) != 1 else ''}, {total} recalls")
