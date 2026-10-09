@@ -77,6 +77,8 @@ const FRAME = '#a78bfa'
 const RULE = 9 + TAGLINE.length
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
+// the help card's command column: the longest command, /iirc status-line on|off, is 24, plus a gap
+const CMD_COL = 26
 const KEEP = 200
 
 /**
@@ -465,11 +467,12 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   }
 
   const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
-  // a section title: an orange bar and the text in the tagline's violet; the space leads, as a trailing one is not drawn
+  // a section title: an orange bar and the text in the tagline's violet, each in a box that will not shrink,
+  // or the text wraps under the bar
   const heading = (text: string) => (
-    <Box flexDirection="row">
-      <Text color={TAGLINE_FROM}>▍</Text>
-      <Text bold color={HEADING}>{' ' + text}</Text>
+    <Box flexDirection="row" flexShrink={0}>
+      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
     </Box>
   )
   const statusRow: unknown[] = [
@@ -495,14 +498,14 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   // command first, in the same column as the MAINTENANCE and LOOK UP rows
   const setting = (label: string, value: string, command: string) => (
     <Box key={label} flexDirection="row" paddingLeft={2}>
-      <Box width={24} flexShrink={0}><Text color="suggestion">{command}</Text></Box>
+      <Box width={CMD_COL} flexShrink={0}><Text color="suggestion">{command}</Text></Box>
       <Box width={24} flexShrink={0}><Text color="subtle">{label}</Text></Box>
       <Text bold color="claude">{value}</Text>
     </Box>
   )
   const command = (cmd: string, what: string) => (
     <Box key={cmd} flexDirection="row" paddingLeft={2}>
-      <Box width={24} flexShrink={0}><Text color="suggestion">{cmd}</Text></Box>
+      <Box width={CMD_COL} flexShrink={0}><Text color="suggestion">{cmd}</Text></Box>
       <Text color="subtle">{what}</Text>
     </Box>
   )
@@ -632,11 +635,12 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
     : level === 'warn'
       ? `▲ ${r.ok.length} pass, ${r.notes.length} ${r.notes.length === 1 ? 'note' : 'notes'}`
       : `✔ all ${total} checks pass`
-  // a section title: an orange bar and the text in the tagline's violet; the space leads, as a trailing one is not drawn
+  // a section title: an orange bar and the text in the tagline's violet, each in a box that will not shrink,
+  // or the text wraps under the bar
   const heading = (text: string) => (
-    <Box flexDirection="row">
-      <Text color={TAGLINE_FROM}>▍</Text>
-      <Text bold color={HEADING}>{' ' + text}</Text>
+    <Box flexDirection="row" flexShrink={0}>
+      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
     </Box>
   )
   const row = (key: string, mark: string, color: string, text: string, dim = false) => (
