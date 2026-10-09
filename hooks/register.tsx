@@ -1004,7 +1004,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
   }
-  const inner = Math.max(...widths)
+  // as wide as the widest row, but never wider than the terminal: past that, rows wrap inside the frame
+  const room = (e as { viewport?: { columns: number } }).viewport?.columns
+  const inner = Math.min(Math.max(...widths), room ? room - 4 : Infinity)
   // home: how to ask, where the rest is, and the two numbers worth a glance
   const homeBody = (
     <Box flexDirection="column">
@@ -1062,7 +1064,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     </Box>
   )
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start" width={inner + 4}>
+    <Box key="card" flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start" width={inner + 4}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>

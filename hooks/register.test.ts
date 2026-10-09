@@ -668,3 +668,17 @@ test('transcript reader: /iirc session draws the session tab as a card; with /ii
   expect(await pageCard.find({ text: ' finding ' })).toBeDefined()
   expect(await pageCard.find({ key: 'para-1' })).toBeDefined()
 })
+
+
+test('the status card is never wider than the terminal', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  const mount = (requestId: string, columns: number) => $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId,
+    viewport: { columns, rows: 30 }, props: { command: 'iirc', args: 'demo status', text: 'x', isErrored: false } } as never)
+  const widthOf = async (requestId: string, columns: number) => {
+    const card = await (await mount(requestId, columns)).find({ key: 'card' })
+    return (card as { props?: { width?: number } } | undefined)?.props?.width
+  }
+  expect(await widthOf('narrow', 40)).toBe(40)
+  expect(await widthOf('wide', 200)).toBeLessThan(200)          // a wide terminal: as wide as the widest row
+})
