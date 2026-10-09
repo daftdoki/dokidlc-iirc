@@ -683,3 +683,18 @@ test('the status card is never wider than the terminal', async ($: Engine, on: O
   expect(await widthOf('narrow', 40)).toBe(40)
   expect(await widthOf('wide', 200)).toBeLessThan(200)          // a wide terminal: as wide as the widest row
 })
+
+
+test('without the keys, the pane says so and how to get them', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const pane = (requestId: string, isFocused: boolean) => $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
+    props: { title: 'iirc', isFocused, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+  })
+  const off = await pane('iirc', false)
+  expect(await off.find({ text: 'keys off ' })).toBeDefined()
+  expect(await off.find({ key: 'key-j' })).toBeUndefined()
+})

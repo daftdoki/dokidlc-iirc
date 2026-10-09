@@ -665,7 +665,7 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     // the keys row wraps in a narrow pane, and the header grows by a row
     // and one row spare: a single row too many and Claude Code scrolls the window to the focus, taking the header with it
-    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0) - 1)
+    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.isFocused && e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0) - 1)
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
     let items: unknown[]
     let top: number
@@ -695,7 +695,7 @@ export const register: Register = on => {
     }
     return (
       <Box flexDirection="column">
-        {drawTabs($, e, r, e.props.bodyColumns, e.viewport?.columns, `${e.props.scroll.bodyRows}${e.viewport ? `/${e.viewport.rows}` : ''}`)}
+        {drawTabs($, e, r, e.props.bodyColumns, e.viewport?.columns, `${e.props.scroll.bodyRows}${e.viewport ? `/${e.viewport.rows}` : ''}`, e.props.isFocused)}
         <Text color="subtle">{top > 0 ? `  ↑ ${top} above` : ' '}</Text>
         {items.slice(top, end) as never}
       </Box>
@@ -1229,7 +1229,7 @@ function chip($: EngineInterface, e: ResolveInput, key: string, text: string, co
 const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb6ff', procedure: '#57ab5a', environment: '#d4a72c' }
 
 /** The pane's fixed header: its tabs as chips with the iirc mark, the gradient rule, and the keys. */
-function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number, terminal?: number, rows?: string) {
+function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number, terminal?: number, rows?: string, isFocused = true) {
   const { Box, Button, Text } = $.ui.resolve(e)
   const name = r.loading ?? r.page?.name
   const isPage = r.tab === 'page' && !!name
@@ -1257,14 +1257,22 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
             </Button>
           )}
         </Box>
-        <Text color={LEVEL_COLOR.ok}>● </Text>
+        {/* the mark is green while the pane holds the keys, gray while they are the prompt's */}
+        <Text color={isFocused ? LEVEL_COLOR.ok : 'inactive'}>● </Text>
         <Text bold color="claude">iirc</Text>
         {/* the pane's width, and the terminal's when known: drag the edge to change it */}
         <Text color="subtle">{` · ${columns}${terminal ? `/${terminal}` : ''} cols${rows ? ` × ${rows} rows` : ''}`}</Text>
       </Box>
       {gradientRule($, e, columns)}
+      {/* without the keys, the legend says how to get them: the keys do nothing until the pane has them */}
+      {!isFocused && (
+        <Box flexDirection="row">
+          <Text color={LEVEL_COLOR.warn}>{'keys off '}</Text>
+          <Text color="subtle">{'· click the pane, or ctrl+x tab, to use j k g e'}</Text>
+        </Box>
+      )}
       {/* the vi keys: each a Button, since a hotkey belongs to one; the row is also their legend */}
-      <Box flexDirection="row" flexWrap="wrap">
+      {isFocused && <Box flexDirection="row" flexWrap="wrap">
         {key('j', 'down', () => void moveCursor($, 1))}
         {key('k', 'up', () => void moveCursor($, -1))}
         {key('g', 'top', () => void moveCursor($, 'start'))}
@@ -1272,7 +1280,7 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
         {key('h', 'session', () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
         {key('l', 'page', () => void update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x)))}
         {key('q', 'close', () => void $.ui.close({ id: PANE }).catch(() => undefined))}
-      </Box>
+      </Box>}
     </Box>
   )
 }

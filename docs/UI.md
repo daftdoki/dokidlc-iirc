@@ -162,7 +162,9 @@ that closes it. Under it, a row of keys:
 | `1`, `2`, `x`, `b` | the session tab, the page tab, close the page | the same, and `b` goes back |
 | `q` | close the pane | close the pane |
 
-The keys work while the pane has the keyboard. The pane asks for it when
+The keys work while the pane has the keyboard. Without it, the `●` beside
+`iirc` turns gray and the keys row reads `keys off · click the pane, or
+ctrl+x tab, to use j k g e`. The pane asks for it when
 it opens, and Claude Code gives it unless you were typing at the prompt;
 a click on the pane, or `ctrl+x` then Tab, gives it too. A `›` marks
 where `j` and `k` stand, and the pane opens with it on the first page
