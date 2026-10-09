@@ -1270,11 +1270,6 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
         {/* the mark is green while the pane holds the keys, gray while they are the prompt's */}
         <Text color={isFocused ? LEVEL_COLOR.ok : 'inactive'}>● </Text>
         <Text bold color="claude">iirc</Text>
-        <Text>{'  '}</Text>
-        {/* Claude Code's own × on the frame cannot be styled; this one is the pane's, plain to see */}
-        <Button key="pane-close" plain onPress={() => void $.ui.close({ id: PANE }).catch(() => undefined)}>
-          <Text bold color="#0d1117" backgroundColor={LEVEL_COLOR.error}>{' ✕ '}</Text>
-        </Button>
       </Box>
       {/* without the keys, the legend says how to get them: the keys do nothing until the pane has them */}
       {!isFocused && (

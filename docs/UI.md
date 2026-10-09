@@ -172,8 +172,8 @@ pane. Shift is not a separate key here, so the end is `e`, not `G`.
 The tab row and the keys stay at the top; the wheel, the arrows, and the
 page keys scroll the content under them, and `↑ N above` says how much
 has scrolled away. Esc hands the keys back to the prompt and leaves the
-pane open; `q`, the red `✕` at the right of the tab row, Claude Code's
-`ctrl+x x`, or the frame's close mark closes it.
+pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
+closes it.
 
 The session tab lists this session's pages; the counts are on `/iirc status`
 and `/iirc session`, so the pane's few rows go to the list:
