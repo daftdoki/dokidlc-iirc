@@ -432,9 +432,12 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 }
 
 /** The Session tab, with its numbers fresh. */
-async function openSession($: EngineInterface) {
-  refreshCounts($)
-  await refreshHealth($)
+async function openSession($: EngineInterface, isDemo = false) {
+  if (isDemo) await loadDemoSession($)
+  else {
+    refreshCounts($)
+    await refreshHealth($)
+  }
   // `/iirc pane` starts fresh: the session tab, and no page tab left from before
   await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
@@ -443,6 +446,24 @@ async function openSession($: EngineInterface) {
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
   if (first && sessionRowStops.indexOf(first) < paneRows) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
+}
+
+/** Sample session numbers over this repository's real pages, for a screenshot: the names open as they would in a session. */
+async function loadDemoSession($: EngineInterface) {
+  let names: string[] = []
+  try {
+    const ran = await $.process.run(['ls', `${await $.session.root()}/.iirc`], { timeoutMs: 5000 })
+    names = ran.stdout.split('\n').filter(n => n.endsWith('.md') && n !== 'index.md').slice(0, 12)
+  } catch {}
+  const used = names.slice(0, 6)
+  const unread = names.slice(6, 10)
+  const written = names.slice(10, 12)
+  await update($, sessionPages, () => ({ read: used, written, suggested: [...used, ...unread], used, gone: [] }))
+  await update($, counts, () => ({
+    reads: used.length + 3, writes: written.length, suggested: used.length + unread.length, used: used.length,
+    missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: { all: 68, read: 74, unread: 55 }, timeouts: 0,
+  }))
+  await update($, health, () => DEMO_HEALTH)
 }
 
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
@@ -608,8 +629,9 @@ export const register: Register = on => {
       const sp = await read($, sessionPages)
       return { text: `this session: ${sp.suggested.length} pages suggested, ${sp.used.length} read; ${sp.written.length} written` }
     }
-    if (e.args.trim() === 'pane') {
-      await openSession($)
+    if (e.args.trim() === 'pane' || e.args.trim() === 'pane demo') {
+      // `pane demo` fills the session tab with sample numbers over real pages, for screenshots
+      await openSession($, e.args.trim() === 'pane demo')
       return { text: 'iirc pane opened: this session\'s pages; a page name opens it in a reader tab' }
     }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
