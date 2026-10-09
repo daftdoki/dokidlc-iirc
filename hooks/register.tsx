@@ -18,7 +18,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0 })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0 })
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
@@ -55,8 +55,10 @@ export function parseRecall(text: string): RecalledPage[] {
     const isSuspect = entry.includes('`iirc verify ')
     let rest = entry.slice(entry.indexOf('`', entry.indexOf(name)) + 1).trim()
     if (rest.startsWith('(')) rest = rest.slice(1)
-    const cut = isSuspect ? rest.lastIndexOf(') (') : rest.lastIndexOf(')')
-    pages.push({ name, summary: (cut >= 0 ? rest.slice(0, cut) : rest).trim(), isSuspect })
+    // (summary) [how it matched] (suspect: ...), the last two optional
+    const match = /\) \[([^\]]+)\]/.exec(rest)
+    const cut = match ? match.index : isSuspect ? rest.lastIndexOf(') (') : rest.lastIndexOf(')')
+    pages.push({ name, summary: (cut >= 0 ? rest.slice(0, cut) : rest).trim(), isSuspect, ...(match ? { match: match[1] } : {}) })
   }
   return pages
 }
@@ -86,7 +88,7 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
 /** The hint row's text after the circle. */
 export function statusText(s: IircStatus, c: SessionCounts): string {
   if (s.pages === null) return `iirc: ${s.note}`
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode`
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -127,9 +129,9 @@ function refreshCounts($: EngineInterface) {
         timeoutMs: 15000,
       })
       if (ran.exitCode !== 0) return
-      const { read: reads, written } = JSON.parse(ran.stdout) as { read?: unknown; written?: unknown }
-      if (!Array.isArray(reads) || !Array.isArray(written)) return
-      await update($, counts, () => ({ reads: reads.length, writes: written.length }))
+      const got = JSON.parse(ran.stdout) as Record<string, unknown>
+      const n = (key: string) => (Array.isArray(got[key]) ? (got[key] as unknown[]).length : 0)
+      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used') }))
     })().catch(() => {})
   })
 }
@@ -189,10 +191,12 @@ export const register: Register = on => {
       const pages = parseRecall(text)
       const prompt = await read($, lastPrompt)
       if (pages.length > 0 && prompt !== null) await update($, byPrompt, map => keepLast(map, prompt, pages))
+      if (pages.length > 0) refreshCounts($)
     } else if (event === 'PostToolUse' || event === 'PostToolUseFailure') {
       const tool = await read($, lastTool)
       const pages = parseRecall(text)
       const recovered = parseRecovered(text)
+      if (pages.length > 0) refreshCounts($)
       if (tool !== null && (pages.length > 0 || recovered.length > 0)) {
         await update($, byTool, map => keepLast(map, tool, { pages, recovered }))
       }
@@ -326,6 +330,7 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
             { text: '◆ ', style: { color: p.isSuspect ? 'warning' : 'success' } },
             { text: p.name.replace(/\.md$/, ''), style: { bold: true, color: 'claude' } },
             ...(p.isSuspect ? [{ text: ' (suspect)', style: { color: 'warning' } } as Piece] : []),
+            ...(p.match ? [{ text: `  [${p.match}]`, style: { color: 'suggestion' } } as Piece] : []),
             { text: '  ' + p.summary, style: { dimColor: true, italic: true } },
           ]
           // wrap here, so each wrapped line keeps the tree's gutter; unmeasured, one line
@@ -349,7 +354,7 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
 }
 
 /** Text with its style, so a wrapped line keeps each part's color. */
-type Piece = { text: string; style: { color?: 'success' | 'warning' | 'claude'; bold?: boolean; dimColor?: boolean; italic?: boolean } }
+type Piece = { text: string; style: { color?: 'success' | 'warning' | 'claude' | 'suggestion'; bold?: boolean; dimColor?: boolean; italic?: boolean } }
 
 /** Word-wraps styled pieces into lines no wider than `width` cells; a word longer than a line is split. */
 export function wrapPieces(pieces: Piece[], width: number): Piece[][] {

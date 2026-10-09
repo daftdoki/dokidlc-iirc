@@ -50,7 +50,7 @@ async function promptRow($: Engine, uuid: string) {
   })
 }
 
-const LINE = 'iirc: [68] pages · [0] reads · [0] writes · [semantic+keyword] mode'
+const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · [semantic+keyword] mode'
 
 // The hint row as the terminal draws it under the prompt, mounted fresh each time.
 let mounts = 0
@@ -78,6 +78,10 @@ test('parses the recall line', () => {
     { name: 'alpha-page.md', summary: 'first summary (with parens)', isSuspect: false },
     { name: 'beta.md', summary: 'second one', isSuspect: true },
   ])
+  expect(parseRecall('iirc: 2 pages may apply. Read before you investigate: `iirc read a.md` (one (x)) [69% match, meaning+term] · `iirc read b.md` (two…) [term match] (suspect: 3 days; if it holds, `iirc verify b.md`)')).toEqual([
+    { name: 'a.md', summary: 'one (x)', isSuspect: false, match: '69% match, meaning+term' },
+    { name: 'b.md', summary: 'two…', isSuspect: true, match: 'term match' },
+  ])
   expect(parseRecall('nothing here')).toEqual([])
 })
 
@@ -89,11 +93,11 @@ test('parses the recovery nudge and the brief', () => {
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0 })).toBe('iirc: needs setup')
+  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0 })).toBe('iirc: needs setup')
   const one = parseBrief('iirc: 1 page, string only. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
-  expect(statusText(one, { reads: 3, writes: 1 })).toBe('iirc: [1] page · [3] reads · [1] writes · [keyword] mode')
-  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0 })).toBe('iirc: needs migration')
+  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2 })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
+  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0 })).toBe('iirc: needs migration')
 })
 
 test('wraps page lines by word and keeps each part styled', () => {
@@ -226,7 +230,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   on('session.id', () => ({ value: 's1' }))
   on('process.run', ($, e) => {
     argv.push([...e.argv])
-    return e.argv.includes('stats') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'], written: ['c.md'] })) : ran(BRIEF)
+    return e.argv.includes('stats') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'], written: ['c.md'], suggested: ['a.md', 'd.md', 'e.md'], used: ['a.md'] })) : ran(BRIEF)
   })
   on('ui.toast', () => ({ value: undefined }))
   await $.tool.call({ tool: 'Bash', command: 'iirc doctor --brief', tool_use_id: 't6' })
@@ -234,7 +238,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  expect(await waitFor($, 'iirc: [68] pages · [2] reads · [1] writes · [semantic+keyword] mode')).toBe(true)
+  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · [semantic+keyword] mode')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
 })
 

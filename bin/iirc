@@ -808,7 +808,7 @@ def row_current(r: dict) -> bool:
 RECALL_MIN_PROMPT = 40
 RECALL_SEMANTIC_ONLY = 0.28      # a semantic hit alone must be this close
 RECALL_BOTH = 0.34               # a semantic hit backed by a strong term must be this close
-RECALL_MAX_BYTES = 400
+RECALL_MAX_BYTES = 480
 IDENTIFIER_RE = re.compile(r"[0-9._-]")
 ANSWER_RE = re.compile(r"^(yes|yeah|no|nope|ok|okay|agreed?|go( ahead)?|sure|done|thanks?|correct)\b", re.I)
 
@@ -837,16 +837,25 @@ def recall_filter(rows: list[dict]) -> list[dict]:
         # an identifier, or a rare word of five letters or more that names the page itself
         strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 for t in head)
         if sem and strong_term and d is not None and d <= RECALL_BOTH:
-            keep.append(r)
+            keep.append({**r, "rule": "meaning+term"})
         elif sem and d is not None and d <= RECALL_SEMANTIC_ONLY:
-            keep.append(r)
+            keep.append({**r, "rule": "meaning"})
         elif not sem and strong_term:
-            keep.append(r)
+            keep.append({**r, "rule": "term"})
     return keep[:3]
 
 
 def clean(text: str, limit: int = 160) -> str:
     return re.sub(r"[\x00-\x1f\x7f]+", " ", str(text)).strip()[:limit]
+
+
+def match_text(r: dict) -> str:
+    """How well a recalled page matched: 100% less its semantic distance, and the rule that let it through."""
+    d = r.get("distance")
+    rule = r.get("rule", "term")
+    if rule == "term" or not isinstance(d, (int, float)):
+        return "term match"
+    return f"{round((1 - d) * 100)}% match, {rule}"
 
 
 def clip(text: str, limit: int) -> str:
@@ -870,7 +879,7 @@ def recall_line(rows: list[dict]) -> str:
         tail = ""
         if signals:
             tail = " (" + marker(signals).strip() + f"; if it holds, `iirc verify {name}`)"
-        parts.append(f"`iirc read {name}` ({clip(r.get('summary', ''), 90)}){tail}")
+        parts.append(f"`iirc read {name}` ({clip(r.get('summary', ''), 90)}) [{match_text(r)}]{tail}")
 
     def render(ps: list[str]) -> str:
         return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read before you investigate: " + " · ".join(ps)
@@ -966,19 +975,21 @@ def cmd_recall(args: argparse.Namespace) -> None:
             if not terms:
                 return
             query = " ".join([first] + terms).strip()
-            rows = recall_filter(hybrid_search(query))
-            line = recall_line(rows)
-            log_event("recall", hits=len(rows), pages=[r["filename"] for r in rows], via="failure", chars=len(query))
+            passed = recall_filter(hybrid_search(query))
+            line = recall_line(passed)
+            rows = passed[: line.count("`iirc read ")]   # hits counts what passed; pages, what the line kept
+            log_event("recall", hits=len(passed), pages=[r["filename"] for r in rows], scores=[match_text(r) for r in rows], via="failure", chars=len(query))
             if line:
                 print(hook_output("PostToolUseFailure", line))
             return
         prompt = str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or "")
         if not recall_worthy(prompt):
             return
-        rows = recall_filter(hybrid_search(prompt))
-        line = recall_line(rows)
+        passed = recall_filter(hybrid_search(prompt))
+        line = recall_line(passed)
+        rows = passed[: line.count("`iirc read ")]   # hits counts what passed; pages, what the line kept
         # the prompt text itself is not logged; it may hold secrets
-        log_event("recall", hits=len(rows), pages=[r["filename"] for r in rows], via="prompt", chars=len(prompt))
+        log_event("recall", hits=len(passed), pages=[r["filename"] for r in rows], scores=[match_text(r) for r in rows], via="prompt", chars=len(prompt))
         if line:
             print(hook_output("UserPromptSubmit", line))
     except SystemExit:
@@ -2649,7 +2660,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
         rows = [r for r in read_log(session=args.session or session_id()) if r.get("repo") == str(ROOT)]
         read = sorted({p for r in rows if r["cmd"] in ("read", "pull") for p in r.get("pages") or []})
         written = sorted({r["page"] for r in rows if r["cmd"] == "write" and r.get("page")})
-        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written}))
+        # a suggested page counts as used once the session read or pulled it; names compare without a store prefix
+        suggested = sorted({p for r in rows if r["cmd"] == "recall" for p in r.get("pages") or []})
+        used = sorted(set(suggested) & {p.split("/")[-1] for p in read})
+        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}

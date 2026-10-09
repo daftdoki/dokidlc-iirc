@@ -653,6 +653,24 @@ def test_recall_line_names_read_commands_and_is_bounded(tmp_path, monkeypatch):
     assert iirc.recall_line([]) == ""
 
 
+def test_stats_session_counts_suggested_pages_used(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s6"); iirc.set_root(tmp_path)
+    iirc.log_event("recall", hits=2, pages=["a.md", "b.md"], via="prompt"); iirc.log_event("recall", hits=1, pages=["c.md"], via="failure")
+    iirc.log_event("read", pages=["b.md", "z.md"])
+    iirc.main(["stats", "--session", "s6"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["suggested"] == ["a.md", "b.md", "c.md"] and out["used"] == ["b.md"]
+
+
+def test_recall_line_shows_the_match_and_its_rule():
+    assert iirc.match_text({"distance": 0.31, "rule": "meaning+term"}) == "69% match, meaning+term"
+    assert iirc.match_text({"distance": 0.2, "rule": "meaning"}) == "80% match, meaning"
+    assert iirc.match_text({"rule": "term"}) == "term match"
+    rows = iirc.recall_filter([{"filename": "a.md", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
+    assert rows[0]["rule"] == "meaning"
+
+
 def test_clip_cuts_at_a_word_boundary():
     summary = "Hook lines arrive as session.append hook-context rows; a Bash call in a collapsed ToolGroup draws no ToolUse row"
     assert iirc.clip(summary, 90) == "Hook lines arrive as session.append hook-context rows; a Bash call in a collapsed…"
@@ -813,7 +831,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"]}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": []}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 
