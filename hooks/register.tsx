@@ -511,6 +511,17 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
         </Box>
       )}
       <Text> </Text>
+      <Box flexDirection="row">
+        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
+        <Text color="suggestion">/iirc &lt;request&gt;</Text>
+      </Box>
+      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
+        <Box key={example} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor italic>{example}</Text>
+        </Box>
+      ))}
+      <Text> </Text>
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
@@ -524,17 +535,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
               <Text color="subtle">{what}</Text>
             </Box>
           ))}
-        </Box>
-      ))}
-      <Text> </Text>
-      <Box flexDirection="row">
-        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
-        <Text color="suggestion">/iirc &lt;request&gt;</Text>
-      </Box>
-      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
-        <Box key={example} flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          <Text dimColor italic>{example}</Text>
         </Box>
       ))}
     </Box>
