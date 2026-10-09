@@ -3118,7 +3118,9 @@ def cmd_stats(args: argparse.Namespace) -> None:
     if args.session is not None:
         # one session, for the line under the prompt
         summary = session_summary(args.session or session_id())
-        print(json.dumps({k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}))
+        # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
+        gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
+        print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "gone": gone}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}

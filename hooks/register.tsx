@@ -22,7 +22,7 @@ const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
-const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [] } as SessionPages)
+const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
 // 144 columns; tabs inside one pane switch with no open at all
@@ -294,7 +294,7 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
       env: { CLAUDE_CODE_SESSION_ID: await $.session.id() },   // the person's read lands in this session's log
     })
     if (ran.exitCode === 0) page = JSON.parse(ran.stdout) as ShownPage
-    else error = (ran.stderr || ran.stdout).trim() || `iirc show ${ref} exited ${ran.exitCode}`
+    else error = `could not open ${ref}: ${(ran.stderr || ran.stdout).trim().replace(/^iirc: /, '') || `iirc show exited ${ran.exitCode}`}`
   } catch (err) {
     error = `iirc show ${ref} did not finish: ${String(err)}`
   }
@@ -362,7 +362,7 @@ function refreshCounts($: EngineInterface) {
       const missed = Array.isArray(got.missed) ? (got.missed as [string, number][]) : []
       const match = { ...NO_MATCH, ...(got.match as Partial<MatchAverages> | undefined) }
       const list = (key: string) => (Array.isArray(got[key]) ? (got[key] as string[]) : [])
-      await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used') }))
+      await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
       await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
     })().catch(() => {})
@@ -1033,11 +1033,13 @@ function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: S
   const used = new Set(sp.used)
   // read pages first, then the unread ones most often suggested
   const suggested = [...sp.suggested].sort((a, b) => Number(used.has(b)) - Number(used.has(a)) || (times.get(b) ?? 0) - (times.get(a) ?? 0))
+  const gone = new Set(sp.gone)
   const row = (key: string, mark: string, color: string, name: string, tail: string) => (
     <Box key={key} flexDirection="row" paddingLeft={2}>
       <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
-      {pageLink($, e, `open-${key}`, name)}
-      <Text color="subtle">{tail}</Text>
+      {/* a page renamed or deleted since is no link: there is nothing to open */}
+      {gone.has(name) ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
+      <Text color="subtle">{gone.has(name) ? '  renamed or deleted' : tail}</Text>
     </Box>
   )
   return (

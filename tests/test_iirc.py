@@ -943,7 +943,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "gone": ["f.md"]}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

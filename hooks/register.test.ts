@@ -483,7 +483,7 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
     }
     if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: ['old.md'], stores: [] }))
     if (e.argv.includes('stats')) {
-      return ran(JSON.stringify({ read: ['a.md'], written: ['w.md'], suggested: ['a.md', 'n.md'], used: ['a.md'], missed: [['n.md', 3]], match: {}, timeouts: 0 }))
+      return ran(JSON.stringify({ read: ['a.md'], written: ['w.md'], suggested: ['a.md', 'n.md', 'old-name.md'], used: ['a.md'], missed: [['n.md', 3]], match: {}, timeouts: 0, gone: ['old-name.md'] }))
     }
     return ran(BRIEF)
   })
@@ -499,6 +499,8 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
   expect(await view.find({ text: 'w' })).toBeDefined()                       // written
   expect(await view.find({ key: 'open-x-old.md' })).toBeDefined()           // suspect
   expect(await view.find({ key: 'tab-page' })).toBeUndefined()              // no page tab until a page is open
+  expect(await view.find({ text: '  renamed or deleted' })).toBeDefined()
+  expect(await view.find({ key: 'open-s-old-name.md' })).toBeUndefined()    // a renamed page is no link
   await view.press({ key: 'open-s-a.md' })
   expect(shown).toEqual(['a.md'])
   expect(opened).toEqual(['iirc:iirc', 'iirc:iirc'])                        // the same pane, never a second one
