@@ -158,10 +158,9 @@ export const register: Register = on => {
     if (e.agentId === undefined) await update($, lastTool, () => e.tool_use_id)
     const result = await next(e)
     // keep the status line's page count and read count current within the session
-    const command = (e.input as { command?: unknown } | undefined)?.command
-    if (e.tool === 'Bash' && typeof command === 'string') {
-      if (CHANGES_BRIEF_RE.test(command)) refreshBrief($)
-      if (READS_RE.test(command)) refreshReads($)
+    if (e.tool === 'Bash') {
+      if (CHANGES_BRIEF_RE.test(e.command)) refreshBrief($)
+      if (READS_RE.test(e.command)) refreshReads($)
     }
     return result
   })

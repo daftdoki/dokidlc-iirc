@@ -86,9 +86,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
   test(`draws recalled pages and a recovery row under a tool row on ${surface}`, async ($: Engine, on: On) => {
     engine(on)
-    await $.tool.call({ tool: 'Bash', input: { command: 'uv tool install x' }, tool_use_id: 't1' })
+    await $.tool.call({ tool: 'Bash', command: 'uv tool install x', tool_use_id: 't1' })
     await hookRow($, 'PostToolUseFailure', RECALL, 'h2')
-    await $.tool.call({ tool: 'Bash', input: { command: 'uv tool install x --fix' }, tool_use_id: 't2' })
+    await $.tool.call({ tool: 'Bash', command: 'uv tool install x --fix', tool_use_id: 't2' })
     await hookRow($, 'PostToolUse', RECOVERY, 'h3')
     const failed = await $.ui.mount({
       plugin: 'iirc',
@@ -168,8 +168,8 @@ test('after a command that changes the brief, asks iirc for it again', async ($:
   on('process.run', () => ({ value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  await $.tool.call({ tool: 'Bash', input: { command: 'git status' }, tool_use_id: 't4' })
-  await $.tool.call({ tool: 'Bash', input: { command: '~/x/bin/iirc migrate' }, tool_use_id: 't5' })
+  await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 't4' })
+  await $.tool.call({ tool: 'Bash', command: '~/x/bin/iirc migrate', tool_use_id: 't5' })
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
   expect(status).toEqual(['◆ iirc 68 · semantic · 0 read'])
@@ -188,10 +188,10 @@ test('after a read, counts the pages this session read', async ($: Engine, on: O
   })
   on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
   on('ui.toast', () => ({ value: undefined }))
-  await $.tool.call({ tool: 'Bash', input: { command: 'iirc doctor --brief' }, tool_use_id: 't6' })
+  await $.tool.call({ tool: 'Bash', command: 'iirc doctor --brief', tool_use_id: 't6' })
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
-  await $.tool.call({ tool: 'Bash', input: { command: 'iirc read a.md b.md' }, tool_use_id: 't7' })
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
