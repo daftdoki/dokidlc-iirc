@@ -1894,6 +1894,7 @@ def _tune_fixture(tmp_path, monkeypatch):
         {"ts": "2026-10-08T10:01:00Z", "session": "s1", "repo": r, "cmd": "skipped", "reason": "short"},
         {"ts": "2026-10-08T10:02:00Z", "session": "s1", "repo": r, "cmd": "recall", "hits": 0, "pages": [], "via": "failure", "recall_id": "r2", "tool_use_id": "tu2"},
         {"ts": "2026-10-08T10:03:00Z", "session": "s1", "repo": r, "cmd": "read", "pages": ["b.md"]},
+        {"ts": "2026-10-08T10:02:31Z", "session": "s1", "repo": r, "cmd": "recall", "hits": 0, "pages": [], "via": "failure", "recall_id": "r3", "tool_use_id": "tu3"},
         {"ts": "2026-10-08T10:00:00Z", "session": "elsewhere", "repo": "/other", "cmd": "recall", "pages": ["a.md"], "via": "prompt"},
     ])
     _jsonl(st / "prompts" / "s1.jsonl", [{"ts": "2026-10-08T10:00:05Z", "prompt_hash": iirc.prompt_hash(first), "excerpt": first, "recall_id": "r1"}])
@@ -1919,6 +1920,10 @@ def _tune_fixture(tmp_path, monkeypatch):
         tool("2026-10-08T10:01:50.000Z", "tu2", "make build"),
         user("2026-10-08T10:01:51.000Z", [{"type": "tool_result", "tool_use_id": "tu2", "content": "Exit code 2\nboom: no rule"}]),
     ])
+    _jsonl(tx_dir / "s1" / "subagents" / "agent-x.jsonl", [
+        tool("2026-10-08T10:02:30.000Z", "tu3", "npm test", isSidechain=True),
+        user("2026-10-08T10:02:31.000Z", [{"type": "tool_result", "tool_use_id": "tu3", "content": [{"type": "text", "text": "Exit code 1\nmissing module"}]}], isSidechain=True),
+    ])
     _jsonl(tx_dir / "s0.jsonl", [
         user("2026-10-01T09:00:00.100Z", "<command-name>/clear</command-name>"),
         user("2026-10-01T09:00:05.300Z", "how do I install the old tool here"),   # same second as the recall row: still the one before it
@@ -1931,10 +1936,10 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
     iirc.main(["tune", "gather"])
     out = capsys.readouterr().out
-    assert "2 sessions, 3 recalls" in out and "s1.json: 2 recalls, 2 pages suggested, 3 candidates to judge (transcript)" in out
+    assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 3 candidates to judge (transcript)" in out
     s1 = json.loads((st / "tune" / "s1.json").read_text())
     assert s1["conditions"][0]["knobs"] == {"semantic_only": 0.28, "both": 0.34}
-    r1, r2 = s1["recalls"]
+    r1, r2, r3 = s1["recalls"]
     assert r1["key"] == "r1" and r1["prompt"] == {"text": "why does the build fail on this machine after the upgrade", "from": "prompts file"}
     assert r1["suggested"] == [{"page": "a.md", "score": "75% match, meaning", "read_turns_later": 0},
                                {"page": "b.md", "score": "70% match, meaning+term", "read_turns_later": 1}]
@@ -1943,7 +1948,9 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     assert r1["next_tools"] == [{"tool": "Bash", "input": "iirc read a.md"}]
     assert r1["searches"] == [{"query": "build failure", "pages": ["c.md"]}] and r1["read_unsuggested"] == ["c.md"]
     assert r2["via"] == "failure" and r2["failed"]["command"] == "make build" and "boom" in r2["failed"]["error"]
-    assert r2["next_tools"][0]["input"] == "make build" and r2["candidates"] == []
+    assert r2["next_tools"][0]["input"] == "make build" and r2["candidates"] == [] and r2["subagent"] is None
+    # a subagent's failure logs under the parent session; its command is in the subagent's own file
+    assert r3["subagent"] == "agent-x" and r3["failed"] == {"command": "npm test", "error": "Exit code 1 missing module"}
     s0 = json.loads((st / "tune" / "s0.json").read_text())
     old = s0["recalls"][0]
     assert old["key"] == "2026-10-01T09:00:05Z" and old["recall_id"] is None
@@ -1959,7 +1966,7 @@ def test_tune_done_makes_gather_skip_a_session(tmp_path, monkeypatch, capsys):
     row = iirc.read_log()[-1]
     assert (row["cmd"], row["tuned"], row["session"]) == ("tuned", "s0", "tuner")
     iirc.main(["tune", "gather"])
-    assert "1 session, 2 recalls" in capsys.readouterr().out and not (st / "tune" / "s0.json").exists()
+    assert "1 session, 3 recalls" in capsys.readouterr().out and not (st / "tune" / "s0.json").exists()
     iirc.main(["tune", "gather", "--session", "s0"])   # named, a tuned session is gathered again
     assert "1 session, 1 recalls" in capsys.readouterr().out
     with pytest.raises(SystemExit):

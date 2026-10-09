@@ -3069,8 +3069,9 @@ def block_text(content) -> str | None:
     return None
 
 
-def read_transcript(path: Path) -> dict:
-    """The main thread's prompts and tool calls, and every tool result by id. One pass per session."""
+def read_transcript(path: Path, sidechain: bool = False) -> dict:
+    """The main thread's prompts and tool calls, and every tool result by id. One pass per file.
+    With sidechain, a subagent's file, whose every row is a sidechain row."""
     prompts: list[dict] = []
     tools: list[dict] = []
     results: dict[str, str] = {}
@@ -3079,7 +3080,7 @@ def read_transcript(path: Path) -> dict:
             r = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(r, dict) or r.get("isSidechain"):
+        if not isinstance(r, dict) or (r.get("isSidechain") and not sidechain):
             continue
         ts = parse_ts(r.get("timestamp"))
         content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
@@ -3149,7 +3150,8 @@ def worth_judging(c: dict, knobs: dict[str, float]) -> bool:
     return isinstance(d, (int, float)) and d <= max(knobs.values()) + TUNE_NEAR
 
 
-def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None, pf: list[dict], evals: dict[str, list[dict]], knobs: dict[str, float]) -> dict:
+def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None, pf: list[dict], evals: dict[str, list[dict]], knobs: dict[str, float],
+                    subs: list[dict]) -> dict:
     """One recall: what it was asked, what it suggested and refused, and what the session did next."""
     r = rows[i]
     ts = parse_ts(r["ts"]) or 0.0
@@ -3158,6 +3160,9 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
     out: dict = {"key": r.get("recall_id") or r["ts"], "ts": r["ts"], "via": r.get("via"), "recall_id": r.get("recall_id")}
     start = ts
     if r.get("via") == "failure":
+        # a subagent's failed command logs under the parent session; its tool call is in the subagent's file
+        tx = next((t for t in [tx, *subs] if t and any(u["id"] == r.get("tool_use_id") for u in t["tools"])), tx)
+        out["subagent"] = tx.get("agent") if tx else None
         use = next((t for t in (tx or {}).get("tools", []) if t["id"] and t["id"] == r.get("tool_use_id")), None)
         out["failed"] = {"command": use["input"] if use else None,
                          "error": clip((tx or {}).get("results", {}).get(r.get("tool_use_id"), ""), 200) if use else None}
@@ -3207,12 +3212,17 @@ def gather_session(session: str, rows: list[dict], evals: dict[str, list[dict]])
     """The evidence file for one session: its conditions and one entry per recall."""
     path = transcript_for(session, rows)
     tx = read_transcript(path) if path else None
+    ids = {u["id"] for u in (tx or {}).get("tools", [])}
+    subs = []
+    if path and any(r["cmd"] == "recall" and r.get("tool_use_id") and r["tool_use_id"] not in ids for r in rows):
+        for f in sorted(path.with_suffix("").glob("**/*.jsonl")):
+            subs.append({**read_transcript(f, sidechain=True), "agent": f.stem})
     pf = read_prompts_file(session)
     # the turns as the hook saw them: every prompt it searched for or passed by
     turns = [i for i, r in enumerate(rows) if r["cmd"] == "skipped" or (r["cmd"] == "recall" and r.get("via") == "prompt")]
     conds = [{k: r[k] for k in CONDITION_KEYS if k in r} for r in rows if r["cmd"] in ("start", "session")]
     knobs = next((c["knobs"] for c in reversed(conds) if isinstance(c.get("knobs"), dict)), RECALL)
-    recalls = [recall_evidence(i, rows, turns, tx, pf, evals, knobs) for i, r in enumerate(rows) if r["cmd"] == "recall"]
+    recalls = [recall_evidence(i, rows, turns, tx, pf, evals, knobs, subs) for i, r in enumerate(rows) if r["cmd"] == "recall"]
     return {"session": session, "repo": str(ROOT), "gathered": now_iso(), "transcript": str(path) if path else None,
             "prompts_file": bool(pf), "conditions": conds, "recalls": recalls}
 
