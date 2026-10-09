@@ -1,10 +1,10 @@
 {
-  "name": "memory",
-  "description": "A per-agent memory built on Cal Paterson's memoryfields: markdown pages in .memory/, searched semantically through memoryfield-tool, with suspicion instead of expiry.",
+  "name": "engrams",
+  "description": "Engrams for one agent: markdown pages in .engrams/, built on Cal Paterson's memoryfields, searched semantically through memoryfield-tool, with suspicion instead of expiry.",
   "author": {
     "name": "DaftDoki"
   },
   "license": "MIT",
-  "homepage": "https://github.com/daftdoki/dokidlc-skill-memory",
+  "homepage": "https://github.com/daftdoki/dokidlc-skill-engrams",
   "types": "./types/index.d.ts"
 }

@@ -12,7 +12,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dokidlc-skill-memory"
+name = "dokidlc-skill-engrams"
 version = "0.0.0"
 source = { virtual = "." }
 

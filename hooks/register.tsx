@@ -7,19 +7,19 @@ import type { RecalledPage, ToolNote } from '../types'
 // catches each line as its row is stored and draws it for the person: recalled
 // pages as a folding list under the prompt or the failed command, a pencil row
 // under a command that failed and then worked, the session brief on the status
-// line, and warnings as toasts. `ui = false` in .claude/memory.toml turns it off.
+// line, and warnings as toasts. `ui = false` in .claude/engrams.toml turns it off.
 
-const byPrompt = atom({ plugin: 'memory', key: 'byPrompt' } as const, {})
-const byTool = atom({ plugin: 'memory', key: 'byTool' } as const, {})
-const open = atom({ plugin: 'memory', key: 'open' } as const, {})
-const lastPrompt = atom({ plugin: 'memory', key: 'lastPrompt' } as const, null)
-const lastTool = atom({ plugin: 'memory', key: 'lastTool' } as const, null)
-const briefShown = atom({ plugin: 'memory', key: 'briefShown' } as const, null)
+const byPrompt = atom({ plugin: 'engrams', key: 'byPrompt' } as const, {})
+const byTool = atom({ plugin: 'engrams', key: 'byTool' } as const, {})
+const open = atom({ plugin: 'engrams', key: 'open' } as const, {})
+const lastPrompt = atom({ plugin: 'engrams', key: 'lastPrompt' } as const, null)
+const lastTool = atom({ plugin: 'engrams', key: 'lastTool' } as const, null)
+const briefShown = atom({ plugin: 'engrams', key: 'briefShown' } as const, null)
 
-const RECALL_RE = /memory: \d+ pages? may apply\. Read before you investigate: (.*)/
+const RECALL_RE = /engrams: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
-const STOP_RE = /memory: before you stop, note that (.*?) failed and then worked/
-const BRIEF_RE = /memory: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
+const STOP_RE = /engrams: before you stop, note that (.*?) failed and then worked/
+const BRIEF_RE = /engrams: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 const KEEP = 200
@@ -37,9 +37,9 @@ export function parseRecall(text: string): RecalledPage[] {
   if (!m) return []
   const pages: RecalledPage[] = []
   for (const entry of m[1].split(' · ')) {
-    const name = /`memory read ([^`]+)`/.exec(entry)?.[1]
+    const name = /`engrams read ([^`]+)`/.exec(entry)?.[1]
     if (!name) continue
-    const isSuspect = entry.includes('`memory verify ')
+    const isSuspect = entry.includes('`engrams verify ')
     let rest = entry.slice(entry.indexOf('`', entry.indexOf(name)) + 1).trim()
     if (rest.startsWith('(')) rest = rest.slice(1)
     const cut = isSuspect ? rest.lastIndexOf(') (') : rest.lastIndexOf(')')
@@ -54,17 +54,17 @@ export function parseRecovered(text: string): ToolNote['recovered'] {
 
 /** The status line text and the warnings worth a toast, from the SessionStart line. */
 export function parseBrief(text: string): { status: string; warnings: string[] } | null {
-  const at = text.indexOf('memory: ')
+  const at = text.indexOf('engrams: ')
   if (at < 0) return null
   const line = text.slice(at)
   const m = BRIEF_RE.exec(line)
-  if (!m) return { status: '◆ memory: needs setup', warnings: [line.split('. ')[0].replace(/^memory: /, '')] }
+  if (!m) return { status: '◆ engrams: needs setup', warnings: [line.split('. ')[0].replace(/^engrams: /, '')] }
   const mode = m[2].startsWith('semantic') ? 'semantic' : m[2]
   const warnings = m[3]
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  return { status: `◆ memory ${m[1]} · ${mode}`, warnings }
+  return { status: `◆ engrams ${m[1]} · ${mode}`, warnings }
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -76,7 +76,7 @@ function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<stri
 
 async function uiEnabled($: EngineInterface): Promise<boolean> {
   try {
-    const toml = await $.fs.read(`${await $.session.root()}/.claude/memory.toml`)
+    const toml = await $.fs.read(`${await $.session.root()}/.claude/engrams.toml`)
     return !/^\s*ui\s*=\s*false\b/m.test(toml)
   } catch {
     return true
@@ -91,13 +91,13 @@ async function showBrief($: EngineInterface, text: string) {
   const warned = brief.warnings.join(' ')
   if (warned && (await read($, briefShown)) !== warned) {
     await update($, briefShown, () => warned)
-    $.ui.toast(`memory: ${brief.warnings.join(' ')}`)
+    $.ui.toast(`engrams: ${brief.warnings.join(' ')}`)
   }
 }
 
 export const register: Register = on => {
   // A resumed session stores its SessionStart line where neither session.append
-  // nor $.session.messages() shows it, so ask memory for the brief directly.
+  // nor $.session.messages() shows it, so ask engrams for the brief directly.
   // Without --hook, doctor --brief reads no stdin and pulls nothing.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -105,7 +105,7 @@ export const register: Register = on => {
     $.clock.after(0, () => {
       void (async () => {
         if (!(await uiEnabled($))) return
-        const ran = await $.process.run([`${$.plugin.root}/bin/memory`, 'doctor', '--brief'], {
+        const ran = await $.process.run([`${$.plugin.root}/bin/engrams`, 'doctor', '--brief'], {
           cwd: await $.session.root(),
           timeoutMs: 15000,
         })
@@ -128,7 +128,7 @@ export const register: Register = on => {
     }
     if (e.door !== 'hook-context' || e.origin.kind !== 'hook') return next(e)
     const text = textOf(e.message.content)
-    if (!text.includes('memory: ') || !(await uiEnabled($))) return next(e)
+    if (!text.includes('engrams: ') || !(await uiEnabled($))) return next(e)
 
     const event = e.origin.event
     if (event === 'UserPromptSubmit') {
@@ -144,7 +144,7 @@ export const register: Register = on => {
       }
     } else if (event === 'Stop') {
       const names = STOP_RE.exec(text)?.[1]
-      if (names) $.ui.toast(`✎ memory: ${names} failed and then worked; Claude was asked to write it up before stopping`)
+      if (names) $.ui.toast(`✎ engrams: ${names} failed and then worked; Claude was asked to write it up before stopping`)
     } else if (event === 'SessionStart') {
       await showBrief($, text)
     }
@@ -203,12 +203,12 @@ export const register: Register = on => {
 function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNote, isOpen: boolean) {
   const { Box, Text } = $.ui.resolve(e)
   return (
-    <Box key={`memory-note-${id}`} flexDirection="column">
+    <Box key={`engrams-note-${id}`} flexDirection="column">
       {note.pages.length > 0 && drawPages($, e, id, note.pages, isOpen, 'match this error')}
       {note.recovered.map(r => (
         <Box flexDirection="row" paddingLeft={3}>
           <Text color="warning">✎ </Text>
-          <Text color="subtle">memory: </Text>
+          <Text color="subtle">engrams: </Text>
           <Text bold color="claude">{r.command}</Text>
           <Text color="subtle">{` failed ${r.failures} times, then worked; Claude was asked to write a page`}</Text>
         </Box>
@@ -220,10 +220,10 @@ function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNot
 function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: RecalledPage[], isOpen: boolean, verb: string) {
   const { Box, Button, Text } = $.ui.resolve(e)
   const toggle = () => update($, open, map => keepLast(map, id, !(map[id] === true)))
-  const noun = pages.length === 1 ? 'memory item' : 'memory items'
+  const noun = pages.length === 1 ? 'engram' : 'engrams'
   const label = verb === 'retrieved' ? `${noun} retrieved` : `${noun} ${pages.length === 1 ? 'matches' : 'match'} this error`
   return (
-    <Box key={`memory-${id}`} flexDirection="column" paddingLeft={3}>
+    <Box key={`engrams-${id}`} flexDirection="column" paddingLeft={3}>
       <Box flexDirection="row">
         <Button key={`toggle-${id}`} plain label={isOpen ? '−' : '+'} onPress={toggle} />
         <Text> </Text>

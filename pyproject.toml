@@ -1,7 +1,7 @@
 [project]
-name = "dokidlc-skill-memory"
+name = "dokidlc-skill-engrams"
 version = "0.0.0"
-description = "Test harness for the memory plugin. The plugin itself is bin/memory and skills/."
+description = "Test harness for the engrams plugin. The plugin itself is bin/engrams and skills/."
 requires-python = ">=3.12"
 
 [dependency-groups]
