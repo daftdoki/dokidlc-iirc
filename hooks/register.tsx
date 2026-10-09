@@ -73,8 +73,9 @@ const TAGLINE_FROM = '#e8875f'
 const TAGLINE_TO = '#a78bfa'
 // the card's frame is the gradient's violet end; the STATUS chip carries the health color
 const FRAME = '#a78bfa'
-// the title rule spans the tagline's line: its indent of 9 and its length
-const RULE = 9 + TAGLINE.length
+const EXAMPLES = ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"]
+const MORE_HINT = 'settings, maintenance, and look-up'
+const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
 // the help card's command column: the longest command, /iirc status-line on|off, is 24, plus a gap
@@ -520,13 +521,32 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
           <Text> </Text>
           {heading(group)}
           {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => command(`/iirc ${cmd}`, what))}
-          {group === 'LOOK UP' && command('/iirc <request>', 'ask in words; goes to the skill')}
+          {group === 'LOOK UP' && command('/iirc <request>', REQUEST_HINT)}
         </Box>
       ))}
     </Box>
   )
+  // The card is as wide as its widest row, measured here, so the title rule can span it exactly:
+  // a row of Text cannot stretch to fill a box. Every glyph used is one column wide.
+  const widths = [9 + 'If I Recall Correctly'.length, 9 + TAGLINE.length]
+  if (view === 'home') {
+    widths.push(16 + '/iirc <request>'.length, ...EXAMPLES.map(x => 4 + x.length))
+    widths.push(16 + '/iirc help'.length, 4 + MORE_HINT.length)
+    const fixWidth = s && level !== 'ok' && s.fix ? '   fix with '.length + s.fix.length : 0
+    const modeWidth = s && s.mode && s.mode !== 'semantic+keyword' ? `   ${s.mode} mode`.length : 0
+    widths.push(12 + chipText.length + 2 + fixWidth + modeWidth)
+    if (tiles.length > 0) {
+      const [n, label] = tiles[tiles.length - 1]
+      widths.push(15 + 2 + 'THIS SESSION'.length, 2 + 13 * (tiles.length - 1) + Math.max(n.length, label.length))
+    }
+    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length)
+  } else {
+    widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
+    widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
+  }
+  const inner = Math.max(...widths)
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start">
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start" width={inner + 4}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
@@ -537,8 +557,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       </Box>
       {/* a rule under the title, orange to violet, as long as the tagline line */}
       <Box flexDirection="row">
-        {Array.from({ length: RULE }, (_, k) => (
-          <Text key={k} color={mix(TAGLINE_FROM, TAGLINE_TO, k / (RULE - 1))}>━</Text>
+        {Array.from({ length: inner }, (_, k) => (
+          <Text key={k} color={mix(TAGLINE_FROM, TAGLINE_TO, k / (inner - 1))}>━</Text>
         ))}
       </Box>
       {view === 'help' && helpBody}
@@ -547,7 +567,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
         <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
         <Text color="suggestion">/iirc &lt;request&gt;</Text>
       </Box>}
-      {view === 'home' && ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
+      {view === 'home' && EXAMPLES.map(example => (
         <Box key={example} flexDirection="row" paddingLeft={2}>
           <Text color="claude">{'› '}</Text>
           <Text dimColor italic>{example}</Text>
@@ -563,7 +583,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       {view === 'home' && (
         <Box flexDirection="row" paddingLeft={2}>
           <Text color="claude">{'› '}</Text>
-          <Text dimColor italic>settings, maintenance, and look-up</Text>
+          <Text dimColor italic>{MORE_HINT}</Text>
         </Box>
       )}
       {view === 'home' && <Text> </Text>}
