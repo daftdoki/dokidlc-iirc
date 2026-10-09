@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { liveStatus, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import { liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 
 const RECALL =
   'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -536,4 +536,67 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   await row.press({ key: 'toggle-p-tree' })
   await row.press({ key: 'open-p-tree-0-0-1' })
   expect(opened).toEqual(['iirc:iirc'])
+})
+
+
+test('paragraphs split a body at blank lines and keep a fenced block whole', () => {
+  expect(paragraphs('One.\n\nTwo\nlines.\n\n```\na\n\nb\n```\n\n- x\n- y\n')).toEqual(['One.', 'Two\nlines.', '```\na\n\nb\n```', '- x\n- y'])
+})
+
+test('vi keys: the cursor starts on the first page name; j and k move it; g and e jump; in a page, j steps by paragraph', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => {
+    if (e.argv.includes('show')) {
+      return ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'A' }, body: 'First.\n\nSecond.', links: ['b.md'], signals: [] }))
+    }
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
+    if (e.argv.includes('stats')) return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'n.md', 'gone.md'], used: ['a.md'], missed: [['n.md', 2]], match: {}, timeouts: 0, gone: ['gone.md'] }))
+    return ran(BRIEF)
+  })
+  await $.command.run({ command: 'iirc', args: 'pane' })
+  await clock.settle()
+  const view = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
+  })
+  // the drawn cursor sits in the row of the page it is on: the row's first Text
+  const cursorOn = async () => {
+    for (const name of ['a', 'n']) {
+      const row = await view.find({ key: `s-${name}.md` })
+      if (row && JSON.stringify(row).includes('"›"')) return name
+    }
+    return null
+  }
+  expect(await cursorOn()).toBe('a')
+  await view.press({ key: 'key-j' })
+  expect(await cursorOn()).toBe('n')
+  await view.press({ key: 'key-j' })                          // the renamed page is no stop: it stays on the last
+  expect(await cursorOn()).toBe('n')
+  await view.press({ key: 'key-k' })
+  expect(await cursorOn()).toBe('a')
+  await view.press({ key: 'key-e' })
+  expect(await cursorOn()).toBe('n')
+  await view.press({ key: 'key-g' })
+  expect(await cursorOn()).toBe('a')
+  await view.press({ key: 'open-s-a.md' })
+  const paraOn = async () => {
+    for (const i of [0, 1]) {
+      const box = await view.find({ key: `p-${i}` })
+      if (box && JSON.stringify(box).includes('"›"')) return i
+    }
+    return null
+  }
+  expect(await paraOn()).toBe(0)
+  await view.press({ key: 'key-j' })
+  expect(await paraOn()).toBe(1)
+  await view.press({ key: 'key-j' })                          // past the paragraphs: the linked page
+  expect(await paraOn()).toBe(null)
+  await view.press({ key: 'key-h' })
+  expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
+  await view.press({ key: 'key-l' })
+  expect(await view.find({ text: 'A' })).toBeDefined()
 })

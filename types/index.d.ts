@@ -32,6 +32,9 @@ export type ShownPage = {
 /** The pane's tabs: which one shows, the page in the page tab, and the pages before it for Back. */
 export type Reader = { page: ShownPage | null; history: string[]; error: string | null; loading: string | null; tab: 'session' | 'page' }
 
+/** Where `j` and `k` stand: an index into each tab's stops. */
+export type Cursor = { session: number; page: number }
+
 /** This session's pages by name, from `iirc stats --session`, for the Session tab; `gone` were renamed or deleted since. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[]; gone: string[] }
 
@@ -54,6 +57,8 @@ declare module 'claude-code' {
       isStatusShown: boolean
       /** The page the reader tab shows, and the way back. */
       reader: Reader
+      /** Where vi keys stand in each tab. */
+      cursor: Cursor
       /** This session's suggested, read, and written pages, for the Session tab. */
       sessionPages: SessionPages
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */

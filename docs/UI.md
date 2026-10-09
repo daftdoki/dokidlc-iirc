@@ -149,8 +149,22 @@ Neither card costs tokens: the plugin answers, and the skill does not load.
 `/iirc pane` opens a pane beside the transcript, or above the prompt on
 a terminal that is not in fullscreen. A row at its top holds its own
 tabs: `session`, and, while a page is open, the page's name and a `✕`
-that closes it. While the pane has the keys, `1` and `2` switch tabs and
-`x` closes the page.
+that closes it. Under it, a row of keys:
+
+| Key | Session tab | Page tab |
+|---|---|---|
+| `j`, `k` | the next or previous page name | the next or previous paragraph, then each linked page |
+| Enter | open the page under the cursor | open the linked page under the cursor |
+| `g`, `e` | the top, the end | the top, the end |
+| `h`, `l` | the session tab, the page tab | the same |
+| `1`, `2`, `x`, `b` | the session tab, the page tab, close the page | the same, and `b` goes back |
+
+The keys work while the pane has the keyboard. The pane asks for it when
+it opens, and Claude Code gives it unless you were typing at the prompt;
+a click on the pane, or `ctrl+x` then Tab, gives it too. A `›` marks
+where `j` and `k` stand, and the pane opens with it on the first page
+name. Arrows, Page Up and Down, and the mouse wheel scroll as in any
+pane. Shift is not a separate key here, so the end is `e`, not `G`.
 
 The session tab lists this session's pages:
 

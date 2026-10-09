@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, ShownPage, ToolNote } from '../types'
+import type { Cursor, IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, ShownPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -22,6 +22,7 @@ const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
+const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0 } as Cursor)
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
@@ -282,6 +283,7 @@ export function tabTitle(name: string): string {
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
+  await update($, cursor, x => ({ ...x, page: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
   const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
@@ -316,12 +318,78 @@ async function goBack($: EngineInterface) {
   await openPage($, prev, true)
 }
 
+/** A page body split at blank lines, a fenced block kept whole: the stops `j` and `k` move between. */
+export function paragraphs(body: string): string[] {
+  const out: string[] = []
+  let cur: string[] = []
+  let isFence = false
+  for (const line of body.trim().split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) isFence = !isFence
+    if (!isFence && line.trim() === '') {
+      if (cur.length > 0) out.push(cur.join('\n'))
+      cur = []
+      continue
+    }
+    cur.push(line)
+  }
+  if (cur.length > 0) out.push(cur.join('\n'))
+  return out
+}
+
+/** The suggested pages in drawing order: read first, then the unread most often suggested. */
+function sortSuggested(sp: SessionPages, c: SessionCounts): string[] {
+  const times = new Map(c.missed)
+  const used = new Set(sp.used)
+  return [...sp.suggested].sort((a, b) => Number(used.has(b)) - Number(used.has(a)) || (times.get(b) ?? 0) - (times.get(a) ?? 0))
+}
+
+/** The keys `j` and `k` step through in the Session tab: every page link, in drawing order. */
+function sessionStops(sp: SessionPages, c: SessionCounts, checkup: IircHealth | null): string[] {
+  const gone = new Set(sp.gone)
+  return [
+    ...sortSuggested(sp, c).filter(n => !gone.has(n)).map(n => `open-s-${n}`),
+    ...sp.written.filter(n => !gone.has(n)).map(n => `open-w-${n}`),
+    ...(checkup?.suspect ?? []).map(n => `open-x-${n}`),
+  ]
+}
+
+/** The page tab's stops: each paragraph of the body, then each linked page. */
+function pageStops(page: ShownPage): string[] {
+  return [...paragraphs(page.body).map((_, i) => `para-${i}`), ...page.links.map(n => `link-${n}`)]
+}
+
+/** Move the cursor of the shown tab: a step for `j` and `k`, or to an end for `g` and `e`. */
+async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
+  const r = await read($, reader)
+  const isPage = r.tab === 'page' && r.page !== null
+  const stops = isPage && r.page ? pageStops(r.page) : sessionStops(await read($, sessionPages), await read($, counts), await read($, health))
+  if (stops.length === 0) return
+  const c = await read($, cursor)
+  const at = isPage ? c.page : c.session
+  const next = step === 'start' ? 0 : step === 'end' ? stops.length - 1 : Math.max(0, Math.min(stops.length - 1, at + step))
+  await update($, cursor, x => (isPage ? { ...x, page: next } : { ...x, session: next }))
+  const key = stops[next]
+  if (key === undefined) return
+  try {
+    // a link takes the focus ring, so Enter opens it; a paragraph only scrolls into view
+    if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key })
+    if (step === 'start' || step === 'end') await $.ui.scroll({ in: PANE, to: step })
+    else await $.ui.scroll({ in: PANE, to: { key }, block: key.startsWith('para-') ? 'start' : 'nearest' })
+  } catch (err) {
+    $.ui.log(`iirc: vi key: ${String(err)}`)
+  }
+}
+
 /** The Session tab, with its numbers fresh. */
 async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
+  await update($, cursor, x => ({ ...x, session: 0 }))
   await $.ui.open({ id: PANE, title: 'iirc', focus: true })
+  // put the ring on the first page name, so j, k, and Enter work at once
+  const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
+  if (first) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
 }
 
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
@@ -508,7 +576,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {drawTabs($, e, r)}
-        {r.tab === 'page' ? drawReader($, e, r) : drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health))}
+        {r.tab === 'page' ? drawReader($, e, r, (await read($, cursor)).page) : drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health), (await read($, cursor)).session)}
       </Box>
     )
   })
@@ -1021,21 +1089,39 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader) {
           </Button>
         )}
       </Box>
+      {/* the vi keys: each a Button, since a hotkey belongs to one; the row is also their legend */}
+      <Box flexDirection="row" flexWrap="wrap">
+        {([['j', 'down', 1], ['k', 'up', -1], ['g', 'top', 'start'], ['e', 'end', 'end']] as const).map(([key, label, step]) => (
+          <Box key={`vi-${key}`} flexShrink={0} marginRight={2}>
+            <Button key={`key-${key}`} plain dimColor hotkey={key} onPress={() => void moveCursor($, step)}>{label}</Button>
+          </Box>
+        ))}
+        <Box flexShrink={0} marginRight={2}>
+          <Button key="key-h" plain dimColor hotkey="h" onPress={() => void update($, reader, x => ({ ...x, tab: 'session' as const }))}>session</Button>
+        </Box>
+        {name && (
+          <Box flexShrink={0}>
+            <Button key="key-l" plain dimColor hotkey="l" onPress={() => void update($, reader, x => ({ ...x, tab: 'page' as const }))}>page</Button>
+          </Box>
+        )}
+      </Box>
       <Text> </Text>
     </Box>
   )
 }
 
 /** The Session tab: what recall suggested this session and whether it was read, what was written, and what may be wrong. */
-function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null) {
+function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null, at = 0) {
   const { Box, Text } = $.ui.resolve(e)
   const times = new Map(c.missed)
   const used = new Set(sp.used)
-  // read pages first, then the unread ones most often suggested
-  const suggested = [...sp.suggested].sort((a, b) => Number(used.has(b)) - Number(used.has(a)) || (times.get(b) ?? 0) - (times.get(a) ?? 0))
+  const suggested = sortSuggested(sp, c)
   const gone = new Set(sp.gone)
+  // the vi cursor, drawn: the focus ring is the engine's and not every surface shows it
+  const here = sessionStops(sp, c, checkup)[at]
   const row = (key: string, mark: string, color: string, name: string, tail: string) => (
-    <Box key={key} flexDirection="row" paddingLeft={2}>
+    <Box key={key} flexDirection="row">
+      <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
       <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
       {/* a page renamed or deleted since is no link: there is nothing to open */}
       {gone.has(name) ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
@@ -1070,7 +1156,7 @@ function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: S
 }
 
 /** The reader tab: one page, its trust, its body, and the pages it links. */
-function drawReader($: EngineInterface, e: ResolveInput, r: Reader) {
+function drawReader($: EngineInterface, e: ResolveInput, r: Reader, at = 0) {
   const { Box, Button, Markdown, Text } = $.ui.resolve(e)
   if (r.loading && (!r.page || r.page.label !== r.loading)) return <Text color="subtle">{`reading ${r.loading}…`}</Text>
   if (!r.page) {
@@ -1097,7 +1183,13 @@ function drawReader($: EngineInterface, e: ResolveInput, r: Reader) {
       <Text italic color="suggestion">{str(fm.summary)}</Text>
       {topics && <Text color="subtle">{`topics: ${topics}`}</Text>}
       <Text> </Text>
-      <Markdown key="body" text={page.body.trim()} />
+      {/* one block per paragraph, so j and k have places to stop */}
+      {paragraphs(page.body).map((text, i) => (
+        <Box key={`p-${i}`} flexDirection="row" marginBottom={1}>
+          <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{at === i ? '›' : ' '}</Text></Box>
+          <Markdown key={`para-${i}`} text={text} />
+        </Box>
+      ))}
       {page.links.length > 0 && <Text> </Text>}
       {page.links.length > 0 && sectionTitle($, e, 'LINKED PAGES')}
       {page.links.map(name => (
