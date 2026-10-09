@@ -5,8 +5,8 @@ export type RecalledPage = { name: string; summary: string; isSuspect: boolean; 
 /** What the hint row shows of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears it. */
 export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string }
 
-/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `missed` is each page suggested and never read, with how often, most first. */
-export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages }
+/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
+export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number }
 
 /** The average match percentage of this session's suggestions: all of them, the ones read, and the ones not read; null with none. */
 export type MatchAverages = { all: number | null; read: number | null; unread: number | null }
