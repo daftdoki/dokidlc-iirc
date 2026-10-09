@@ -25,6 +25,7 @@ const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, hi
 // pages `/iirc show` read, by name, for the transcript card that draws each
 const shownPages = atom({ plugin: 'iirc', key: 'shownPages' } as const, {})
 const SHOW_ARGS_RE = /^\s*show\s+(\S+)\s*$/
+const READER_ARGS_RE = /^\s*reader(?:\s+(\S+))?\s*$/
 const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0, sessionTop: 0, pageTop: 0 } as Cursor)
 // The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
@@ -100,7 +101,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
   ['open', 'unfold the latest suggested pages', 'LOOK UP'],
-  ['pane', "this session's pages; a click reads one", 'LOOK UP'],
+  ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
@@ -315,8 +316,8 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
-  const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
-  if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
+  const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
+  if (!opened.isPlaced) $.ui.toast(`iirc: the reader is waiting: ${opened.reason}; /iirc reader opens it`)
   let page: ShownPage | null = null
   let error: string | null = null
   try {
@@ -429,11 +430,11 @@ async function openSession($: EngineInterface, isDemo = false) {
     refreshCounts($)
     await refreshHealth($)
   }
-  // `/iirc pane` starts fresh: the session tab, and no page tab left from before
+  // `/iirc reader` starts fresh: the session tab, and no page tab left from before
   await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
-  await $.ui.open({ id: PANE, title: 'iirc', focus: true })
+  await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
   if (first && sessionRowStops.indexOf(first) < paneRows) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
@@ -610,10 +611,15 @@ export const register: Register = on => {
       await update($, open, map => keepLast(map, last, true))
       return { text: 'iirc: the latest suggested pages are unfolded above' }
     }
-    if (e.args.trim() === 'pane' || e.args.trim() === 'pane demo') {
-      // `pane demo` fills the session tab with sample numbers over real pages, for screenshots
-      await openSession($, e.args.trim() === 'pane demo')
-      return { text: 'iirc pane opened: this session\'s pages; a page name opens it in a reader tab' }
+    const readerArgs = READER_ARGS_RE.exec(e.args)
+    if (readerArgs) {
+      // `reader demo` fills the session tab with sample numbers over real pages, for screenshots
+      const ref = readerArgs[1]
+      await openSession($, ref === 'demo')
+      if (!ref || ref === 'demo') return { text: 'iirc reader opened: this session\'s pages; a page name opens it in a page tab' }
+      // a page: its tab over a fresh session tab, so h goes back to the session's pages
+      await openPage($, ref)
+      return { text: `iirc reader opened on ${ref}` }
     }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (/^demo(\s+status)?$/.test(e.args.trim())) return { text: 'the /iirc card with sample numbers' }
@@ -1279,7 +1285,7 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
       {!isFocused && (
         <Box flexDirection="row">
           <Text color={LEVEL_COLOR.warn}>{'keys off '}</Text>
-          <Text color="subtle" wrap="truncate-end">{'· click the pane, or ctrl+x tab'}</Text>
+          <Text color="subtle" wrap="truncate-end">{'· click the reader, or ctrl+x tab'}</Text>
         </Box>
       )}
       {/* the vi keys on one line: each a Button, since a hotkey belongs to one; glyphs alone in a narrow pane */}

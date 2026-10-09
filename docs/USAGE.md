@@ -16,8 +16,9 @@ the agent got. When the circle on the line turns yellow or red, the line
 ends with the command that clears it, such as `· run iirc doubt`; ask
 the agent to run it, or type it after `/iirc`. For anything else, ask in
 words: "what do we know about ollama hangs?", "remember that...",
-"what's out of date?". To read a page yourself, click its name, or run
-`/iirc pane`; your reads there do not count as the agent's.
+"what's out of date?". To read a page yourself, click its name, run
+`/iirc reader PAGE` to open it in the reader, or `/iirc show PAGE` for a
+card in the transcript; your reads do not count as the agent's.
 
 ## Tasks
 
@@ -165,7 +166,7 @@ The `command.run` handler in
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
 | `/iirc open` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
-| `/iirc pane` | A pane with this session's suggested, written, and suspect pages. A click on a page name, here or anywhere iirc draws one, opens the page in a reader tab. See [UI.md](UI.md#the-pane). |
+| `/iirc reader`, `/iirc reader PAGE` | The reader, a pane with this session's suggested, written, and suspect pages, or open on one page. A click on a page name, here or anywhere iirc draws one, opens the page in the reader's page tab. See [UI.md](UI.md#the-reader). |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
 | `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 

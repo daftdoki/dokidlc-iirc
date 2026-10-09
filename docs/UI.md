@@ -156,21 +156,23 @@ draw the two cards with sample numbers.
 
 Neither card costs tokens: the plugin answers, and the skill does not load.
 
-## The pane
+## The reader
 
-`/iirc pane` opens a pane beside the transcript when Claude Code runs in
+`/iirc reader` opens the reader, iirc's pane, on this session's pages.
+`/iirc reader PAGE` opens it on one page, with the session's pages a tab
+away. Claude Code places it beside the transcript when it runs in
 fullscreen on a terminal at least 110 columns wide, and above the prompt
 otherwise.
 
-![The pane docked beside the transcript: the session tab with its keys row and the suggested pages, the first under the cursor](images/iirc-pane-docked-session.png)
+![The reader docked beside the transcript: the session tab with its keys row and the suggested pages, the first under the cursor](images/iirc-pane-docked-session.png)
 
-![The pane's page tab, docked: a page's title, kind and trust chips, summary, topics, and body](images/iirc-pane-docked-page.png)
+![The reader's page tab, docked: a page's title, kind and trust chips, summary, topics, and body](images/iirc-pane-docked-page.png)
 
-![The pane above the prompt on a narrow terminal: the session tab](images/iirc-pane-inline-session.png)
+![The reader above the prompt on a narrow terminal: the session tab](images/iirc-pane-inline-session.png)
 
-![The pane above the prompt on a narrow terminal: a page open in the page tab](images/iirc-pane-inline-page.png)
+![The reader above the prompt on a narrow terminal: a page open in the page tab](images/iirc-pane-inline-page.png)
 
- Drag the pane's edge to change its width;
+Drag the reader's edge to change its width;
 Claude Code keeps that width, up to a maximum it sets. A row at its top holds its own
 tabs: `session`, and, while a page is open, the page's name. Under it, a row of keys:
 
@@ -182,27 +184,27 @@ tabs: `session`, and, while a page is open, the page's name. Under it, a row of 
 | `h`, `l` | the session tab, the page tab | the same |
 | `1`, `2`, `b` | the session tab, the page tab | the same, and `b` goes back |
 | `x` | | close the page tab, back to the session tab |
-| `q` | close the pane | close the pane |
+| `q` | close the reader | close the reader |
 
-The keys work while the pane has the keyboard. Without it, the `●` beside
-`iirc` turns gray and the keys row reads `keys off · click the pane, or
-ctrl+x tab, to use j k g e`. The pane asks for it when
+The keys work while the reader has the keyboard. Without it, the `●` beside
+`iirc` turns gray and the keys row reads `keys off · click the reader, or
+ctrl+x tab, to use j k g e`. The reader asks for it when
 it opens, and Claude Code gives it unless you were typing at the prompt;
-a click on the pane, or `ctrl+x` then Tab, gives it too. A `▶` and an orange chip on the row's mark show
-where `j` and `k` stand, and the pane opens with it on the first page
+a click on the reader, or `ctrl+x` then Tab, gives it too. A `▶` and an orange chip on the row's mark show
+where `j` and `k` stand, and the reader opens with it on the first page
 name. Arrows, Page Up and Down, and the mouse wheel scroll as in any
 pane. Shift is not a separate key here, so the end is `e`, not `G`.
 
-![The pane without the keyboard: a gray mark, and keys off with how to get them back](images/iirc-pane-docked-keys-off.png)
+![The reader without the keyboard: a gray mark, and keys off with how to get them back](images/iirc-pane-docked-keys-off.png)
 
 The tab row and the keys stay at the top; the wheel, the arrows, and the
 page keys scroll the content under them, and `↑ N above` says how much
 has scrolled away. Esc hands the keys back to the prompt and leaves the
-pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
+reader open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
 closes it.
 
 The session tab lists this session's pages; the counts are on `/iirc status`,
-so the pane's few rows go to the list:
+so the reader's few rows go to the list:
 
 - SUGGESTED: every page recall suggested, read ones first with `✓ read`,
   then the rest with `· not read` and how many times recall suggested it
@@ -217,12 +219,12 @@ The page tab shows the title, the kind, the store, when the page was
 updated and verified, any suspect or glance marker, the summary and
 topics, the body, and the path. Pages the body links with `[[name]]` are
 listed under LINKED PAGES; a click opens one in the same tab, and Back
-(`b` while the pane has the keys) returns to the page before.
+(`b` while the reader has the keys) returns to the page before.
 
-A page name outside the pane opens the pane too. Claude Code counts that
+A page name outside the reader opens the reader too. Claude Code counts that
 open as the plugin's, not yours, and places such a pane only on a
-terminal at least 144 columns wide, or 110 once you have opened the pane
-yourself with `/iirc pane`. On a narrower terminal a toast says the pane
+terminal at least 144 columns wide, or 110 once you have opened the reader
+yourself with `/iirc reader`. On a narrower terminal a toast says the reader
 is waiting.
 
 Reading a page here is your read, not the agent's: it runs `iirc show`,
@@ -232,7 +234,7 @@ count only what the agent read.
 ## A page in the transcript
 
 `/iirc show PAGE` draws a page the way the page tab does, as a card in
-the transcript. Like the pane, it is your read, not the agent's.
+the transcript. Like the reader, it is your read, not the agent's.
 
 ![A page as a card from /iirc show: title, chips, summary, topics, body, and path](images/iirc-card-page.png)
 

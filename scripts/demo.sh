@@ -54,7 +54,7 @@ Sleep 500ms
 Enter
 Sleep 5s
 # the pane: step through the session's pages, open one, read it, go back, close
-Type "/iirc pane demo"
+Type "/iirc reader demo"
 Sleep 500ms
 Enter
 Sleep 3s

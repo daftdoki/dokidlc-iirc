@@ -28,7 +28,7 @@ Nothing in the pages needs your approval, and nothing you asked for goes
 there. The pages are what the agent learned by itself; documents you review
 stay in `docs/`.
 
-![iirc in a Claude Code session: a prompt with three suggested pages under it, unfolded to show each page's match; the /iirc and /iirc status cards; then the pane stepping through the session's pages and opening one](docs/images/iirc-demo.gif)
+![iirc in a Claude Code session: a prompt with three suggested pages under it, unfolded to show each page's match; the /iirc and /iirc status cards; then the reader stepping through the session's pages and opening one](docs/images/iirc-demo.gif)
 
 ## Why another memory system?
 
@@ -123,7 +123,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 
 ![The /iirc card with sample numbers: ask in words, more commands, full status, the recall hit rate gauge at 74%, and the page count](docs/images/iirc-card-home.png)
 
-![The iirc pane docked beside the transcript, reading a page: its title, kind and trust chips, summary, topics, and body](docs/images/iirc-pane-docked-page.png)
+![The iirc reader docked beside the transcript, reading a page: its title, kind and trust chips, summary, topics, and body](docs/images/iirc-pane-docked-page.png)
 
 [docs/USAGE.md](docs/USAGE.md) covers every task, command, and setting;
 [docs/UI.md](docs/UI.md) explains every part of what is drawn.

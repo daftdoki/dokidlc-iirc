@@ -5,7 +5,7 @@
 #
 # REPO is a repository that runs this plugin and has pages in .iirc/ (default: the
 # current directory). The cards use sample numbers (/iirc demo); the pane uses
-# sample numbers over REPO's real pages (/iirc pane demo). Needs vhs (brew install
+# sample numbers over REPO's real pages (/iirc reader demo). Needs vhs (brew install
 # vhs) and uv. Claude Code starts in REPO as you, logged in; one prompt is sent so
 # the suggested-pages row appears, then interrupted.
 #
@@ -63,13 +63,13 @@ shot() {
   shot '/iirc doctor' 10s card-doctor
   shot "/iirc show $page" 4s card-page
   printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc open"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
-  shot '/iirc pane demo' 4s pane-docked-session
+  shot '/iirc reader demo' 4s pane-docked-session
   printf 'Enter\nSleep 3s\nScreenshot pane-docked-page.png\nEscape\nSleep 1s\nScreenshot pane-docked-keys-off.png\nType "q"\nSleep 500ms\nCtrl+U\n'
 } | tape wide 1600 1300
 
 # narrow: the pane inline above the prompt
 {
-  shot '/iirc pane demo' 4s pane-inline-session
+  shot '/iirc reader demo' 4s pane-inline-session
   printf 'Enter\nSleep 3s\nScreenshot pane-inline-page.png\n'
 } | tape narrow 1000 1000
 

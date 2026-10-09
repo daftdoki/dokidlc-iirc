@@ -463,7 +463,7 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   expect(brief.status.fix).toBe('iirc doctor')
 })
 
-test('/iirc pane opens the Session tab; a page name opens the reader tab, a linked page replaces it, Back returns', async ($: Engine, on: On) => {
+test('/iirc reader opens the Session tab; a page name opens the reader tab, a linked page replaces it, Back returns', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
   const opened: string[] = []
@@ -487,9 +487,9 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
     }
     return ran(BRIEF)
   })
-  expect((await $.command.run({ command: 'iirc', args: 'pane' })).text).toContain('iirc pane opened')
+  expect((await $.command.run({ command: 'iirc', args: 'reader' })).text).toContain('iirc reader opened')
   await clock.settle()
-  expect(opened).toEqual(['iirc:iirc'])
+  expect(opened).toEqual(['iirc:iirc reader'])
   const pane = (requestId: string, title: string) => $.ui.mount({
     plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
     props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
@@ -503,7 +503,7 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
   expect(await view.find({ key: 'open-s-old-name.md' })).toBeUndefined()    // a renamed page is no link
   await view.press({ key: 'open-s-a.md' })
   expect(shown).toEqual(['a.md'])
-  expect(opened).toEqual(['iirc:iirc', 'iirc:iirc'])                        // the same pane, never a second one
+  expect(opened).toEqual(['iirc:iirc reader', 'iirc:iirc reader'])                        // the same pane, never a second one
   expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
   expect(await view.find({ text: 'one line' })).toBeDefined()
   expect(await view.find({ key: 'back' })).toBeUndefined()                  // nothing to go back to yet
@@ -538,7 +538,7 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   expect((await $.command.run({ command: 'iirc', args: 'open' })).text).toContain('unfolded')
   expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc open unfolds the latest row
   await row.press({ key: 'open-p-tree-0-0-1' })
-  expect(opened).toEqual(['iirc:iirc'])
+  expect(opened).toEqual(['iirc:iirc reader'])
 })
 
 
@@ -560,7 +560,7 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
     if (e.argv.includes('stats')) return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'n.md', 'gone.md'], used: ['a.md'], missed: [['n.md', 2]], match: {}, timeouts: 0, gone: ['gone.md'] }))
     return ran(BRIEF)
   })
-  await $.command.run({ command: 'iirc', args: 'pane' })
+  await $.command.run({ command: 'iirc', args: 'reader' })
   await clock.settle()
   const view = await $.ui.mount({
     plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
@@ -619,7 +619,7 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
     if (e.argv.includes('stats')) return ran(JSON.stringify({ read: [], written: [], suggested: names, used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
     return ran(BRIEF)
   })
-  await $.command.run({ command: 'iirc', args: 'pane' })
+  await $.command.run({ command: 'iirc', args: 'reader' })
   await clock.settle()
   // eight rows: three for the header, five for the list
   const view = await $.ui.mount({
@@ -697,7 +697,7 @@ test('the keys row is one line: labels in a wide pane, glyphs alone in a narrow 
 })
 
 
-test('/iirc pane opens fresh: no page tab is left from before', async ($: Engine, on: On) => {
+test('/iirc reader opens fresh: no page tab is left from before', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -707,12 +707,32 @@ test('/iirc pane opens fresh: no page tab is left from before', async ($: Engine
     ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'A' }, body: 'b', links: [], signals: [] }))
     : e.argv.includes('stats') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
     : ran('{"suspect": [], "stores": []}')))
-  await $.command.run({ command: 'iirc', args: 'pane' })
+  await $.command.run({ command: 'iirc', args: 'reader' })
   await clock.settle()
   const view = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
     props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} } })
   await view.press({ key: 'open-s-a.md' })
   expect(await view.find({ key: 'tab-page' })).toBeDefined()
-  await $.command.run({ command: 'iirc', args: 'pane' })
+  await $.command.run({ command: 'iirc', args: 'reader' })
   expect(await view.find({ key: 'tab-page' })).toBeUndefined()
+})
+
+test('/iirc reader PAGE opens the reader on that page, over a fresh session tab', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const opened: string[] = []
+  on('ui.open', ($, e) => (opened.push(`${e.id}:${e.title}`), { value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => (e.argv.includes('show')
+    ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'Title of a' }, body: 'b', links: [], signals: [] }))
+    : e.argv.includes('stats') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    : ran('{"suspect": [], "stores": []}')))
+  expect((await $.command.run({ command: 'iirc', args: 'reader a.md' })).text).toBe('iirc reader opened on a.md')
+  await clock.settle()
+  expect(opened[0]).toBe('iirc:iirc reader')
+  const view = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc reader', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} } })
+  expect(await view.find({ text: 'Title of a' })).toBeDefined()
+  expect(await view.find({ key: 'tab-session' })).toBeDefined()
 })

@@ -148,10 +148,10 @@ shows the design rather than one session's counts.
 `scripts/screenshots.sh [REPO]` captures every image in `docs/UI.md` and the
 README into `docs/images/`. It drives Claude Code in REPO (default: the current
 directory, which must run this plugin and have pages in `.iirc/`) with
-[vhs](https://github.com/charmbracelet/vhs), once in a wide terminal (the pane
-docked) and once under 110 columns (the pane above the prompt), and crops each
-card to its frame with `scripts/crop-card.py`. The cards and the pane use sample
-numbers (`/iirc demo`, `/iirc pane demo`); one real prompt
+[vhs](https://github.com/charmbracelet/vhs), once in a wide terminal (the reader
+docked) and once under 110 columns (the reader above the prompt), and crops each
+card to its frame with `scripts/crop-card.py`. The cards and the reader use sample
+numbers (`/iirc demo`, `/iirc reader demo`); one real prompt
 is sent for the row under a prompt, then interrupted. Needs `brew install vhs`
 and uv; it runs as you, logged in. The images are made locally, never in CI:
 when the creator says "update the screenshots", run it, look at each image, and
