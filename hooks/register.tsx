@@ -32,8 +32,6 @@ const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, pa
 // The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
 const HEADER_ROWS = 4
-// the keys row, `j: down  k: up ... q: close`, in columns
-const LEGEND_COLUMNS = 62
 let paneRows = 20
 let sessionRowStops: (string | null)[] = []
 let pageHeights: number[] = []
@@ -663,9 +661,8 @@ export const register: Register = on => {
     const r = await read($, reader)
     const c = await read($, cursor)
     const { Box, Text } = $.ui.resolve(e)
-    // the keys row wraps in a narrow pane, and the header grows by a row
     // and one row spare: a single row too many and Claude Code scrolls the window to the focus, taking the header with it
-    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.isFocused && e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0) - 1)
+    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - 1)
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
     let items: unknown[]
     let top: number
@@ -1228,6 +1225,25 @@ function chip($: EngineInterface, e: ResolveInput, key: string, text: string, co
 // a kind's chip color: decisions violet, findings blue, procedures green, environment facts amber
 const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb6ff', procedure: '#57ab5a', environment: '#d4a72c' }
 
+// the keys row: key, label, the glyph a narrow pane shows instead, what it does
+const KEYS: [string, string, string, 'down' | 'up' | 'top' | 'end' | 'session' | 'page' | 'close'][] = [
+  ['j', '↓', '↓', 'down'], ['k', '↑', '↑', 'up'], ['g', 'top', '⤒', 'top'], ['e', 'end', '⤓', 'end'],
+  ['h', '◂', '◂', 'session'], ['l', '▸', '▸', 'page'], ['q', 'close', '✕', 'close'],
+]
+// columns the labelled keys row takes, `j: ↓  k: ↑  g: top  e: end  h: ◂  l: ▸  q: close`; under it, glyphs alone
+const KEYS_WIDE = 50
+
+/** What a key of the keys row does. */
+function runKey($: EngineInterface, act: (typeof KEYS)[number][3]) {
+  if (act === 'down') return moveCursor($, 1)
+  if (act === 'up') return moveCursor($, -1)
+  if (act === 'top') return moveCursor($, 'start')
+  if (act === 'end') return moveCursor($, 'end')
+  if (act === 'session') return update($, reader, x => ({ ...x, tab: 'session' as const }))
+  if (act === 'page') return update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x))
+  return $.ui.close({ id: PANE }).catch(() => undefined)
+}
+
 /** The pane's fixed header: its tabs as chips with the iirc mark, the gradient rule, and the keys. */
 function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number, terminal?: number, rows?: string, isFocused = true) {
   const { Box, Button, Text } = $.ui.resolve(e)
@@ -1238,11 +1254,6 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
     <Button key={key} plain hotkey={hotkey} onPress={onPress}>
       {isOn ? <Text bold color="#0d1117" backgroundColor={HEADING}>{` ${label} `}</Text> : <Text color="subtle">{` ${label} `}</Text>}
     </Button>
-  )
-  const key = (k: string, label: string, onPress: () => void) => (
-    <Box key={`vi-${k}`} flexShrink={0} marginRight={2}>
-      <Button key={`key-${k}`} plain hotkey={k} onPress={onPress}><Text color="subtle">{label}</Text></Button>
-    </Box>
   )
   return (
     <Box flexDirection="column">
@@ -1266,24 +1277,23 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
           <Text bold color="#0d1117" backgroundColor={LEVEL_COLOR.error}>{' ✕ '}</Text>
         </Button>
       </Box>
-      {gradientRule($, e, columns)}
       {/* without the keys, the legend says how to get them: the keys do nothing until the pane has them */}
       {!isFocused && (
         <Box flexDirection="row">
           <Text color={LEVEL_COLOR.warn}>{'keys off '}</Text>
-          <Text color="subtle">{'· click the pane, or ctrl+x tab, to use j k g e'}</Text>
+          <Text color="subtle" wrap="truncate-end">{'· click the pane, or ctrl+x tab'}</Text>
         </Box>
       )}
-      {/* the vi keys: each a Button, since a hotkey belongs to one; the row is also their legend */}
-      {isFocused && <Box flexDirection="row" flexWrap="wrap">
-        {key('j', 'down', () => void moveCursor($, 1))}
-        {key('k', 'up', () => void moveCursor($, -1))}
-        {key('g', 'top', () => void moveCursor($, 'start'))}
-        {key('e', 'end', () => void moveCursor($, 'end'))}
-        {key('h', 'session', () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
-        {key('l', 'page', () => void update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x)))}
-        {key('q', 'close', () => void $.ui.close({ id: PANE }).catch(() => undefined))}
+      {/* the vi keys on one line: each a Button, since a hotkey belongs to one; glyphs alone in a narrow pane */}
+      {isFocused && <Box flexDirection="row">
+        {KEYS.map(([k, label, glyph, act]) => (
+          <Box key={`vi-${k}`} flexShrink={0} marginRight={2}>
+            <Button key={`key-${k}`} plain hotkey={k} onPress={() => void runKey($, act)}><Text color="subtle">{columns >= KEYS_WIDE ? label : glyph}</Text></Button>
+          </Box>
+        ))}
       </Box>}
+      {/* the rule closes the header: the content starts below it */}
+      {gradientRule($, e, columns)}
     </Box>
   )
 }

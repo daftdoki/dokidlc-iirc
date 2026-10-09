@@ -700,3 +700,16 @@ test('without the keys, the pane says so and how to get them', async ($: Engine,
   expect(await off.find({ text: 'keys off ' })).toBeDefined()
   expect(await off.find({ key: 'key-j' })).toBeUndefined()
 })
+
+test('the keys row is one line: labels in a wide pane, glyphs alone in a narrow one', async ($: Engine, on: On) => {
+  engine(on)
+  on('session.id', () => ({ value: 's1' }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const pane = (requestId: string, bodyColumns: number) => $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
+    props: { title: 'iirc', isFocused: true, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
+  })
+  const wide = await pane('iirc', 80)
+  expect(await wide.find({ text: 'top' })).toBeDefined()
+  expect(await wide.find({ text: '⤒' })).toBeUndefined()
+})
