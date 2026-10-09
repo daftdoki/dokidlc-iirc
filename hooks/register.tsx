@@ -458,11 +458,12 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
   const cells = Array.from({ length: BAR }, (_, k) =>
     k < filled ? <Text key={k} color={gaugeColor(k / (BAR - 1))}>█</Text> : <Text key={k} color="inactive">░</Text>,
   )
+  // command first, in the same column as the MAINTENANCE and LOOK UP rows
   const setting = (label: string, value: string, command: string) => (
     <Box key={label} flexDirection="row" paddingLeft={2}>
-      <Box width={20} flexShrink={0}><Text color="subtle">{label}</Text></Box>
-      <Box width={10} flexShrink={0}><Text bold color="claude">{value}</Text></Box>
-      <Text color="suggestion">{command}</Text>
+      <Box width={24} flexShrink={0}><Text color="suggestion">{command}</Text></Box>
+      <Box width={24} flexShrink={0}><Text color="subtle">{label}</Text></Box>
+      <Text bold color="claude">{value}</Text>
     </Box>
   )
   const heading = (text: string) => <Text bold color="subtle">{text}</Text>
@@ -504,7 +505,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
       )}
       <Text> </Text>
       {heading('SETTINGS')}
-      {setting('line under prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
+      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
