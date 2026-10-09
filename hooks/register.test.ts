@@ -635,6 +635,8 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   expect(await view.find({ text: '  ↑ 1 above' })).toBeUndefined()
   await view.press({ key: 'key-q' })
   expect(closed).toEqual(['iirc'])
+  await view.press({ key: 'pane-close' })
+  expect(closed).toEqual(['iirc', 'iirc'])                       // the red ✕ closes it too
 })
 
 test('transcript reader: /iirc session draws the session tab as a card; with /iirc reader transcript a name runs /iirc show, whose output is the page card', async ($: Engine, on: On) => {

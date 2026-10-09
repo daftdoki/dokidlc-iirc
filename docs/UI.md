@@ -148,8 +148,7 @@ Neither card costs tokens: the plugin answers, and the skill does not load.
 
 `/iirc pane` opens a pane beside the transcript, or above the prompt on
 a terminal that is not in fullscreen. Drag the pane's edge to change its width;
-Claude Code keeps that width, up to a maximum it sets. The header's
-right end shows the pane's width and the terminal's, `· 58/114 cols`. A row at its top holds its own
+Claude Code keeps that width, up to a maximum it sets. A row at its top holds its own
 tabs: `session`, and, while a page is open, the page's name and a `✕`
 that closes it. Under it, a row of keys:
 
@@ -174,8 +173,8 @@ pane. Shift is not a separate key here, so the end is `e`, not `G`.
 The tab row and the keys stay at the top; the wheel, the arrows, and the
 page keys scroll the content under them, and `↑ N above` says how much
 has scrolled away. Esc hands the keys back to the prompt and leaves the
-pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
-closes it.
+pane open; `q`, the red `✕` at the right of the tab row, Claude Code's
+`ctrl+x x`, or the frame's close mark closes it.
 
 The session tab lists this session's pages; the counts are on `/iirc status`
 and `/iirc session`, so the pane's few rows go to the list:
