@@ -435,7 +435,8 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
-  await update($, reader, r => ({ ...r, tab: 'session' as const }))
+  // `/iirc pane` starts fresh: the session tab, and no page tab left from before
+  await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
   await $.ui.open({ id: PANE, title: 'iirc', focus: true })

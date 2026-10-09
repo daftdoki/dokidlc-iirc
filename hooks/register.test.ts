@@ -709,3 +709,24 @@ test('the keys row is one line: labels in a wide pane, glyphs alone in a narrow 
   expect(await wide.find({ text: 'top' })).toBeDefined()
   expect(await wide.find({ text: '⤒' })).toBeUndefined()
 })
+
+
+test('/iirc pane opens fresh: no page tab is left from before', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => (e.argv.includes('show')
+    ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'A' }, body: 'b', links: [], signals: [] }))
+    : e.argv.includes('stats') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    : ran('{"suspect": [], "stores": []}')))
+  await $.command.run({ command: 'iirc', args: 'pane' })
+  await clock.settle()
+  const view = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} } })
+  await view.press({ key: 'open-s-a.md' })
+  expect(await view.find({ key: 'tab-page' })).toBeDefined()
+  await $.command.run({ command: 'iirc', args: 'pane' })
+  expect(await view.find({ key: 'tab-page' })).toBeUndefined()
+})
