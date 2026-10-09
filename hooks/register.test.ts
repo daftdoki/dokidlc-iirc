@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -139,6 +139,25 @@ test('sets the status line and toasts the brief warnings, and toasts the stop nu
   expect(status).toEqual(['◆ memory 68 · semantic'])
   expect(toast[0]).toBe('memory: 1 near-duplicate pair: memory doctor names them; merge each or keep both.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
+})
+
+test('at session start, asks memory for the brief and shows it once', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const status: unknown[] = []
+  const toast: unknown[] = []
+  const argv: unknown[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('process.run', ($, e) => (argv.push(e.argv), { value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
+  on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+  expect(String((argv[0] as string[])[0])).toContain('bin/memory')
+  expect(status).toEqual(['◆ memory 68 · semantic', '◆ memory 68 · semantic'])
+  expect(toast).toEqual(['memory: 1 near-duplicate pair: memory doctor names them; merge each or keep both.'])
 })
 
 test('ui = false in memory.toml draws nothing', async ($: Engine, on: On) => {

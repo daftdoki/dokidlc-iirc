@@ -14,6 +14,7 @@ const byTool = atom({ plugin: 'memory', key: 'byTool' } as const, {})
 const open = atom({ plugin: 'memory', key: 'open' } as const, {})
 const lastPrompt = atom({ plugin: 'memory', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'memory', key: 'lastTool' } as const, null)
+const briefShown = atom({ plugin: 'memory', key: 'briefShown' } as const, null)
 
 const RECALL_RE = /memory: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -82,8 +83,37 @@ async function uiEnabled($: EngineInterface): Promise<boolean> {
   }
 }
 
-export const register: Register = on => {
+/** The brief on the status line, and its warnings as a toast once per distinct brief. */
+async function showBrief($: EngineInterface, text: string) {
+  const brief = parseBrief(text)
+  if (!brief) return
+  $.ui.status(brief.status)
+  const warned = brief.warnings.join(' ')
+  if (warned && (await read($, briefShown)) !== warned) {
+    await update($, briefShown, () => warned)
+    $.ui.toast(`memory: ${brief.warnings.join(' ')}`)
+  }
+}
 
+export const register: Register = on => {
+  // A resumed session stores its SessionStart line where neither session.append
+  // nor $.session.messages() shows it, so ask memory for the brief directly.
+  // Without --hook, doctor --brief reads no stdin and pulls nothing.
+  on('session.start', async ($, e, next) => {
+    const result = await next(e)
+    // on a timer, so the run outlives this dispatch and the first prompt never waits for it
+    $.clock.after(0, () => {
+      void (async () => {
+        if (!(await uiEnabled($))) return
+        const ran = await $.process.run([`${$.plugin.root}/bin/memory`, 'doctor', '--brief'], {
+          cwd: await $.session.root(),
+          timeoutMs: 15000,
+        })
+        if (ran.exitCode === 0) await showBrief($, ran.stdout)
+      })().catch(() => {})
+    })
+    return result
+  })
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) await update($, lastTool, () => e.tool_use_id)
@@ -116,11 +146,7 @@ export const register: Register = on => {
       const names = STOP_RE.exec(text)?.[1]
       if (names) $.ui.toast(`✎ memory: ${names} failed and then worked; Claude was asked to write it up before stopping`)
     } else if (event === 'SessionStart') {
-      const brief = parseBrief(text)
-      if (brief) {
-        $.ui.status(brief.status)
-        if (brief.warnings.length > 0) $.ui.toast(`memory: ${brief.warnings.join(' ')}`)
-      }
+      await showBrief($, text)
     }
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))

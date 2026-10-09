@@ -11,6 +11,7 @@ declare module 'claude-code' {
       open: Record<string, boolean>
       lastPrompt: string | null
       lastTool: string | null
+      briefShown: string | null
     }
   }
 }
