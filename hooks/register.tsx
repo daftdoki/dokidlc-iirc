@@ -1113,7 +1113,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
   const level = r.failed.length > 0 ? 'error' : r.notes.length > 0 ? 'warn' : 'ok'
   const tone = LEVEL_COLOR[level]
   const total = r.ok.length + r.failed.length
-  const chip = level === 'error'
+  const chipLabel = level === 'error'
     ? `✖ ${r.failed.length} of ${total} failed`
     : level === 'warn'
       ? `▲ ${r.ok.length} pass, ${r.notes.length} ${r.notes.length === 1 ? 'note' : 'notes'}`
@@ -1142,7 +1142,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
       <Text> </Text>
       <Box flexDirection="row">
         <Box width={12} flexShrink={0}>{heading('RESULT')}</Box>
-        <Text bold color="#0d1117" backgroundColor={tone}>{` ${chip} `}</Text>
+        <Text bold color="#0d1117" backgroundColor={tone}>{` ${chipLabel} `}</Text>
       </Box>
       {r.failed.length > 0 && <Text> </Text>}
       {r.failed.length > 0 && heading('FAILED')}
