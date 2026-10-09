@@ -115,7 +115,8 @@ list the pages:
 The second line sits under the prompt for the whole session. Its circle is
 green when all is well; yellow or red, it ends with the command that
 fixes it, such as `· run iirc doubt`.
-A plain `/iirc` prints that line and the commands that change it.
+A plain `/iirc` draws a card with the status, the counts, the hit rate,
+and the settings.
 [docs/ui.md](docs/ui.md) explains every part.
 
 Ask a question and the agent searches. "Do you remember anything about

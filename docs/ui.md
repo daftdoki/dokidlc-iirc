@@ -84,10 +84,25 @@ The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 line cannot carry color, so the line sits in the hint row.
 
 `/iirc status off` hides it and `/iirc status on` brings it back;
-`/iirc status` says which. A plain `/iirc` prints the line with both
-settings and the forms `/iirc` takes; `/iirc` followed by a request in
-words, such as `/iirc what do we know about ollama hangs?`, goes to the
-skill. The choice is kept in the plugin's own store, so
+`/iirc status` says which.
+
+## A plain `/iirc`
+
+A plain `/iirc` draws a card in place of its output row:
+
+- the name, "If I Recall Correctly", and what the plugin does
+- STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
+  state's name, with the command that fixes it; the card's border takes
+  the same green, yellow, or red
+- the session's counts: pages, used, reads, and writes
+- RECALL HIT RATE: the share of suggested pages that were read, as a
+  percentage and a bar that runs from red into green as it fills
+- SETTINGS: the line under the prompt and the number of suggested pages,
+  each with its value and the command that changes it
+- ASK IN WORDS: `/iirc` followed by a request, such as
+  `/iirc what do we know about ollama hangs?`, which goes to the skill
+
+It costs no tokens: the plugin answers, and the skill does not load. The choice is kept in the plugin's own store, so
 it holds on that machine.
 
 ## Toasts
