@@ -166,9 +166,6 @@ The `command.run` handler in
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
 | `/iirc open` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
 | `/iirc pane` | A pane with this session's suggested, written, and suspect pages. A click on a page name, here or anywhere iirc draws one, opens the page in a reader tab. See [UI.md](UI.md#the-pane). |
-| `/iirc session` | The pane's session tab as a card in the transcript. |
-| `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
-| `/iirc reader`, `/iirc reader pane\|transcript` | Where a click on a page name opens the page: the pane (the default) or a card in the transcript; kept on this machine. |
 | `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,

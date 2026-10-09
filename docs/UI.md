@@ -201,8 +201,8 @@ has scrolled away. Esc hands the keys back to the prompt and leaves the
 pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
 closes it.
 
-The session tab lists this session's pages; the counts are on `/iirc status`
-and `/iirc session`, so the pane's few rows go to the list:
+The session tab lists this session's pages; the counts are on `/iirc status`,
+so the pane's few rows go to the list:
 
 - SUGGESTED: every page recall suggested, read ones first with `✓ read`,
   then the rest with `· not read` and how many times recall suggested it
@@ -228,20 +228,6 @@ is waiting.
 Reading a page here is your read, not the agent's: it runs `iirc show`,
 which the log records as `show`, so the session's reads and hit rate
 count only what the agent read.
-
-## The same, in the transcript
-
-`/iirc session` draws the pane's session tab as a card in the transcript:
-the same tiles, gauge, and lists, with the same clickable names, at the
-transcript's full width. `/iirc show PAGE` draws a page the way the page
-tab does, as a card. `/iirc reader transcript` makes a click on any page
-name run `/iirc show` for that page, so the page appears as a card below;
-`/iirc reader pane`, the default, opens it in the pane. Like the pane,
-`/iirc show` is your read, not the agent's.
-
-![The /iirc session card with sample numbers from /iirc session demo: the session tiles and gauge, the suggested pages with read marks and counts, and the pages written](images/iirc-card-session.png)
-
-![A page as a card from /iirc show: title, chips, summary, topics, body, and path](images/iirc-card-page.png)
 
 `scripts/screenshots.sh` makes every image on this page; see
 [DEVELOPMENT.md](../DEVELOPMENT.md).
