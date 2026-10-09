@@ -75,7 +75,7 @@ def any_index(calls, pattern):
     return out
 
 
-def wrote_memory_directly(calls):
+def wrote_page_directly(calls):
     """Steps that touch a page file without going through `iirc write`: the Write/Edit tools, or a shell redirect into .iirc/."""
     out = [i for i, c in enumerate(calls) if c["tool"] in ("Write", "Edit", "MultiEdit") and "/.iirc/" in str(c["input"].get("file_path", ""))]
     out += [i for i, cmd in bash(calls) if re.search(r"(>>?|tee(?: -a)?)\s*\.?\S*\.iirc/\S+\.md", cmd)]
@@ -122,7 +122,7 @@ def grade(run: Path, eval_name: str):
         pg = field.get("ledger-tests-need-make-db.md", {})
         add("ledger-tests-need-make-db.md carries a verified stamp after the run", "verified" in pg.get("fm", {}), f"frontmatter keys: {sorted(pg.get('fm', {}))}")
         add("The reply names make db and the missing database as the cause", re.search(r"make db", answer) and re.search(r"sample\.db|database|gitignore", answer), answer[:200])
-        add("No page file is written except through iirc write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through iirc write", not wrote_page_directly(calls), f"direct writes at steps {wrote_page_directly(calls)}")
 
     elif eval_name == "write-after-learning":
         synced = [i for i, c in enumerate(calls) if "12 records synced" in c["result"]]
@@ -137,7 +137,7 @@ def grade(run: Path, eval_name: str):
         add("The new pages say what they work around: the stale lock and the vpn route", re.search(r"lock", alltext, re.I) and re.search(r"vpn|route|E_NOROUTE", alltext, re.I), "")
         add("Every new page's summary is one sentence", ps and all(one_sentence(p["fm"].get("summary", "")) for p in ps), [p["fm"].get("summary") for p in ps])
         add("Every new page is under 8KB and is more than a command and a path", ps and all(p["bytes"] < 8192 and len(p["body"].strip()) > 120 for p in ps), [p["bytes"] for p in ps])
-        add("No page file is written except through iirc write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through iirc write", not wrote_page_directly(calls), f"direct writes at steps {wrote_page_directly(calls)}")
         add("An iirc search runs before the first sync attempt", (min(searches + reads, default=10**6) < (first_index(calls, r"sync\.py") or 10**6)), f"iirc at {min(searches + reads, default=None)}, sync at {first_index(calls, r'sync\.py')}")
 
     elif eval_name == "suspect-page-same-turn":
@@ -162,7 +162,7 @@ def grade(run: Path, eval_name: str):
         verify_steps = [i for i, cmd in bash(calls) if re.search(r"iirc verify.*dev-server-port", cmd)]
         write_steps = [i for i, cmd in bash(calls) if re.search(r"iirc (write|delete).*dev-server-port", cmd)]
         add("The stale page is not verified before it is rewritten", not verify_steps or (write_steps and min(write_steps) < min(verify_steps)), f"verify at {verify_steps}, write/delete at {write_steps}")
-        add("No page file is written except through iirc write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through iirc write", not wrote_page_directly(calls), f"direct writes at steps {wrote_page_directly(calls)}")
         if pg is not None:
             add("The rewritten page keeps a Sources section with a date", sources_dated(pg), "")
 
@@ -176,7 +176,7 @@ def grade(run: Path, eval_name: str):
         add("ledger-tests-need-make-db.md still has a Sources section with a date", pg and sources_dated(pg), "")
         thin = [n for n, p in field.items() if len(p["body"].strip()) < 120]
         add("No page's body is only a command and a path", not thin, f"thin pages: {thin}")
-        add("No page file is written except through iirc write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through iirc write", not wrote_page_directly(calls), f"direct writes at steps {wrote_page_directly(calls)}")
 
     tools = {}
     for c in calls:

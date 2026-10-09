@@ -17,6 +17,6 @@ cp -R "$REPO" "$W/plugin-live"
 rm -rf "$W/plugin-live/.venv" "$W/plugin-live/.pytest_cache"
 cp -R "$W/plugin-live" "$W/plugin-noskill" && rm -rf "$W/plugin-noskill/skills"
 git clone -q "$REPO" "$W/plugin-snapshot" && git -C "$W/plugin-snapshot" checkout -q "$OLD_REV"
-export MEMORY_EVAL_WORKSPACE=$W
+export IIRC_EVAL_WORKSPACE=$W
 sh "$H/build_fixtures.sh"
-echo "export MEMORY_EVAL_WORKSPACE=$W"
+echo "export IIRC_EVAL_WORKSPACE=$W"

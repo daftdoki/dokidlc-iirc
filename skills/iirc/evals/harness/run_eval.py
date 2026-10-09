@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one iirc-skill eval headlessly in a fresh fixture copy.
 
-    MEMORY_EVAL_WORKSPACE=... run_eval.py --iteration 1 --eval search-before-debug --condition new_skill --run 1
+    IIRC_EVAL_WORKSPACE=... run_eval.py --iteration 1 --eval search-before-debug --condition new_skill --run 1
 
 Conditions: new_skill (plugin-live, the checkout), old_skill (plugin-snapshot, a
 chosen rev), without_skill (plugin-noskill, the checkout minus skills/). setup.sh
@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-W = Path(os.environ.get("MEMORY_EVAL_WORKSPACE") or sys.exit("set MEMORY_EVAL_WORKSPACE; see setup.sh"))
+W = Path(os.environ.get("IIRC_EVAL_WORKSPACE") or sys.exit("set IIRC_EVAL_WORKSPACE; see setup.sh"))
 EVALS = json.loads((Path(__file__).resolve().parent.parent / "evals.json").read_text())
 PLUGIN = {"new_skill": W / "plugin-live", "without_skill": W / "plugin-noskill", "old_skill": W / "plugin-snapshot"}
 WITH_SKILL_PREFIX = "The `iirc` skill for this repository is at {skill}. Read it before you start.\n\n"

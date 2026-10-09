@@ -36,7 +36,7 @@ def test_field_name_is_stable_and_distinct(tmp_path):
     assert iirc.config_path(a) != iirc.config_path(b)   # two clones, two configs
 
 
-def test_config_text_points_at_dot_memory(tmp_path):
+def test_config_text_points_at_dot_iirc(tmp_path):
     text = iirc.config_text(tmp_path)
     assert f'location = "{(tmp_path / ".iirc").resolve()}"' in text
     assert 'index_location = "cache"' in text
@@ -1004,7 +1004,7 @@ def _write(monkeypatch, name, *extra):
     iirc.main(["write", name, "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding", *extra])
 
 
-def test_commit_store_commits_only_memory_paths(tmp_path, monkeypatch):
+def test_commit_store_commits_only_store_paths(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     (tmp_path / "staged.txt").write_text("s\n"); _git(tmp_path, "add", "staged.txt")
     (tmp_path / "docs" / "a.md").write_text("edited\n")

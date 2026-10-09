@@ -49,7 +49,7 @@ alone is only a hint.
 | `docs/` | anything you asked for or reviewed: designs, research, decisions with their reasoning |
 
 A page may cite a document in `docs/`. A document never cites
-iirc.
+a page.
 
 ## Status
 

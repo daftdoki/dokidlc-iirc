@@ -10,17 +10,17 @@ and nothing touches a real field. Built with skill-creator on 2026-09-20.
 
 ```
 sh skills/iirc/evals/harness/setup.sh            # workspace under $TMPDIR, baseline at HEAD~1
-export MEMORY_EVAL_WORKSPACE=...                   # the line setup.sh prints
+export IIRC_EVAL_WORKSPACE=...                   # the line setup.sh prints
 sh skills/iirc/evals/harness/run_iteration.sh 1 "new_skill old_skill" 2
-python3 skills/iirc/evals/harness/grade.py $MEMORY_EVAL_WORKSPACE/iteration-1/eval-*/*/run-*
+python3 skills/iirc/evals/harness/grade.py $IIRC_EVAL_WORKSPACE/iteration-1/eval-*/*/run-*
 ```
 
 Then, from the skill-creator plugin directory:
 
 ```
-python3 -m scripts.aggregate_benchmark $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name iirc
-python3 eval-viewer/generate_review.py $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name iirc \
-  --benchmark $MEMORY_EVAL_WORKSPACE/iteration-1/benchmark.json
+python3 -m scripts.aggregate_benchmark $IIRC_EVAL_WORKSPACE/iteration-1 --skill-name iirc
+python3 eval-viewer/generate_review.py $IIRC_EVAL_WORKSPACE/iteration-1 --skill-name iirc \
+  --benchmark $IIRC_EVAL_WORKSPACE/iteration-1/benchmark.json
 ```
 
 One run takes 15 to 120 seconds on opus and costs $0.10 to $0.50. Four run

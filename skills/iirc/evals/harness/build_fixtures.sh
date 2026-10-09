@@ -2,9 +2,9 @@
 # Builds the three fixture repositories the iirc skill evals run in.
 # Each is a git repo with a .iirc/ field written through the plugin copy,
 # so pages carry real embeddings, refs, and commit stamps.
-# Run through setup.sh, which sets MEMORY_EVAL_WORKSPACE and builds the plugin copies first.
+# Run through setup.sh, which sets IIRC_EVAL_WORKSPACE and builds the plugin copies first.
 set -eu
-W=${MEMORY_EVAL_WORKSPACE:?run setup.sh}
+W=${IIRC_EVAL_WORKSPACE:?run setup.sh}
 PLUGIN=$W/plugin-live
 export PATH="$PLUGIN/bin:$(echo "$PATH" | tr ':' '\n' | grep -v '/.claude/plugins/cache/' | paste -sd: -)"
 export XDG_STATE_HOME=$W/build-state

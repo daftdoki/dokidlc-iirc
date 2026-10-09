@@ -1,9 +1,9 @@
 #!/bin/sh
 # run_iteration.sh N "cond1 cond2" [runs] : every eval x condition x run, four at a time.
-# Iteration directories land in $MEMORY_EVAL_WORKSPACE. Grade with grade.py, then aggregate with
+# Iteration directories land in $IIRC_EVAL_WORKSPACE. Grade with grade.py, then aggregate with
 # skill-creator's scripts.aggregate_benchmark and view with its eval-viewer/generate_review.py.
 H=$(cd "$(dirname "$0")" && pwd)
-: "${MEMORY_EVAL_WORKSPACE:?run setup.sh}"
+: "${IIRC_EVAL_WORKSPACE:?run setup.sh}"
 N=$1; CONDS=${2:-"new_skill old_skill"}; RUNS=${3:-2}
 python3 -c "import json;[print(e['name']) for e in json.load(open('$H/../evals.json'))['evals']]" | while read ev; do
   for cond in $CONDS; do
