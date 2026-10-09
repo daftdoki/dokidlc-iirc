@@ -21,7 +21,7 @@ const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
-const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null } as Reader)
+const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null } as Reader)
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [] } as SessionPages)
 // the pane's two tabs: this session's pages, and a reader the page names open
 const SESSION_PANE = 'iirc'
@@ -280,10 +280,20 @@ export function tabTitle(name: string): string {
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
+  // open first, while the press still counts as the person's: an open after an await may count as
+  // unasked, and an unasked pane waits undrawn on a terminal under 144 columns
+  await update($, reader, r => ({ ...r, loading: ref }))
+  const opened = await $.ui.open({ id: READER_PANE, title: tabTitle(ref), focus: true, rows: 24 })
+  $.ui.log(`iirc: reader open for ${ref}: ${JSON.stringify(opened)}`)
+  if (!opened.isPlaced) $.ui.toast(`iirc: the page tab is waiting: ${opened.reason}`)
   let page: ShownPage | null = null
   let error: string | null = null
   try {
-    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'show', ref], { cwd: await $.session.root(), timeoutMs: 15000 })
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'show', ref], {
+      cwd: await $.session.root(),
+      timeoutMs: 15000,
+      env: { CLAUDE_CODE_SESSION_ID: await $.session.id() },   // the person's read lands in this session's log
+    })
     if (ran.exitCode === 0) page = JSON.parse(ran.stdout) as ShownPage
     else error = (ran.stderr || ran.stdout).trim() || `iirc show ${ref} exited ${ran.exitCode}`
   } catch (err) {
@@ -292,9 +302,9 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({
     page: page ?? r.page,
     error,
+    loading: null,
     history: isBack || !page || !r.page || r.page.label === page.label ? r.history : [...r.history, r.page.label].slice(-20),
   }))
-  await $.ui.open({ id: READER_PANE, title: tabTitle(page?.name ?? ref), focus: true, rows: 24 })
 }
 
 /** The page before this one, if the reader has one. */
@@ -496,7 +506,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: READER_PANE }, async ($, e) => drawReader($, e, await read($, reader)))
   // a closed reader starts empty next time, with no stale page or way back
   on('ui.close', async ($, e, next) => {
-    if (e.id === READER_PANE) await update($, reader, () => ({ page: null, history: [], error: null }))
+    if (e.id === READER_PANE) await update($, reader, () => ({ page: null, history: [], error: null, loading: null }))
     return next(e)
   })
 
@@ -996,29 +1006,27 @@ function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: S
   )
   return (
     <Box flexDirection="column">
+      {/* short rows: a row wider than the pane shrinks every piece in it */}
       <Box flexDirection="row">
-        <Text color="subtle">{'this session: '}</Text>
         <Text bold color="claude">{`${c.used}/${c.suggested}`}</Text>
-        <Text color="subtle">{' suggested pages read · '}</Text>
-        <Text bold color="claude">{String(c.reads)}</Text>
-        <Text color="subtle">{' reads · '}</Text>
-        <Text bold color="claude">{String(c.writes)}</Text>
-        <Text color="subtle">{' writes · a page name opens it'}</Text>
+        <Text color="subtle">{' suggested pages read'}</Text>
       </Box>
+      <Text color="subtle">{'click a name to read the page'}</Text>
       <Text> </Text>
       {sectionTitle($, e, 'SUGGESTED')}
+      <Box paddingLeft={2}><Text color="subtle">{'✓ read · not read, ×N times suggested'}</Text></Box>
       {suggested.length === 0 && <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>}
       {suggested.map(name =>
         used.has(name)
-          ? row(`s-${name}`, '✓', LEVEL_COLOR.ok, name, '  read')
-          : row(`s-${name}`, '·', 'subtle', name, `  not read${times.get(name) ? `, suggested ×${times.get(name)}` : ''}`),
+          ? row(`s-${name}`, '✓', LEVEL_COLOR.ok, name, '')
+          : row(`s-${name}`, '·', 'subtle', name, times.get(name) ? ` ×${times.get(name)}` : ''),
       )}
       {sp.written.length > 0 && <Text> </Text>}
       {sp.written.length > 0 && sectionTitle($, e, 'WRITTEN')}
       {sp.written.map(name => row(`w-${name}`, '✎', LEVEL_COLOR.warn, name, ''))}
       {checkup && checkup.suspect.length > 0 && <Text> </Text>}
       {checkup && checkup.suspect.length > 0 && sectionTitle($, e, 'SUSPECT')}
-      {checkup?.suspect.map(name => row(`x-${name}`, '▲', LEVEL_COLOR.warn, name, '  a cited file changed'))}
+      {checkup?.suspect.map(name => row(`x-${name}`, '▲', LEVEL_COLOR.warn, name, ''))}
     </Box>
   )
 }
@@ -1026,6 +1034,7 @@ function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: S
 /** The reader tab: one page, its trust, its body, and the pages it links. */
 function drawReader($: EngineInterface, e: ResolveInput, r: Reader) {
   const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+  if (r.loading && (!r.page || r.page.label !== r.loading)) return <Text color="subtle">{`reading ${r.loading}…`}</Text>
   if (!r.page) {
     return <Text color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the Session tab, the suggested pages, or a card opens the page here.'}</Text>
   }

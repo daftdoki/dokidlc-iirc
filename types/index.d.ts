@@ -30,7 +30,7 @@ export type ShownPage = {
 }
 
 /** The reader tab: the page shown, and the pages before it for Back. */
-export type Reader = { page: ShownPage | null; history: string[]; error: string | null }
+export type Reader = { page: ShownPage | null; history: string[]; error: string | null; loading: string | null }
 
 /** This session's pages by name, from `iirc stats --session`, for the Session tab. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[] }

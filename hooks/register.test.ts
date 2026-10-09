@@ -22,6 +22,7 @@ function engine(on: On, toml = '') {
   on('session.root', () => ({ value: '/repo' }))
   on('fs.read', () => (toml ? { value: toml } : { deny: 'ENOENT' }))
   on('ui.status', () => ({ value: undefined }))
+  on('ui.log', () => ({ value: undefined }))
   on('command.run', () => ({ text: 'the skill ran' }))
   const kept = new Map<string, unknown>()
   on('store.get', ($, e) => ({ value: kept.get(e.key) }))
@@ -494,9 +495,9 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
     props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
   })
   const session = await pane('iirc', 'iirc')
-  expect(await session.find({ text: '  not read, suggested ×3' })).toBeDefined()
+  expect(await session.find({ text: ' ×3' })).toBeDefined()
   expect(await session.find({ text: 'w' })).toBeDefined()                       // written
-  expect(await session.find({ text: '  a cited file changed' })).toBeDefined()  // suspect
+  expect(await session.find({ key: 'open-x-old.md' })).toBeDefined()          // suspect
   await session.press({ key: 'open-s-a.md' })
   expect(shown).toEqual(['a.md'])
   expect(opened.at(-1)).toBe('iirc-page:a')
