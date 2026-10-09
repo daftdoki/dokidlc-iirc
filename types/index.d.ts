@@ -57,6 +57,8 @@ declare module 'claude-code' {
       isStatusShown: boolean
       /** The page the reader tab shows, and the way back. */
       reader: Reader
+      /** Pages `/iirc show` read, by name, for the transcript card each one draws. */
+      shownPages: Record<string, ShownPage>
       /** Where vi keys stand in each tab. */
       cursor: Cursor
       /** This session's suggested, read, and written pages, for the Session tab. */

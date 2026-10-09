@@ -229,6 +229,13 @@ Reading a page here is your read, not the agent's: it runs `iirc show`,
 which the log records as `show`, so the session's reads and hit rate
 count only what the agent read.
 
+## A page in the transcript
+
+`/iirc show PAGE` draws a page the way the page tab does, as a card in
+the transcript. Like the pane, it is your read, not the agent's.
+
+![A page as a card from /iirc show: title, chips, summary, topics, body, and path](images/iirc-card-page.png)
+
 `scripts/screenshots.sh` makes every image on this page; see
 [DEVELOPMENT.md](../DEVELOPMENT.md).
 

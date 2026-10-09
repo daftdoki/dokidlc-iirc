@@ -16,6 +16,8 @@ set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 repo=$(cd "${1:-.}" && pwd)
 out=$here/docs/images
+# the smallest page, so its card fits on one screen
+page=${IIRC_SHOT_PAGE:-$(ls -S "$repo/.iirc" | grep -v '^index.md$' | grep '\.md$' | tail -1)}
 prompt=${IIRC_SHOT_PROMPT:-"why does the recall hook time out when ollama unloads the embed model?"}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -59,6 +61,7 @@ shot() {
   shot '/iirc demo status' 4s card-status
   shot '/iirc help' 4s card-help
   shot '/iirc doctor' 10s card-doctor
+  shot "/iirc show $page" 4s card-page
   printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc open"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
   shot '/iirc pane demo' 4s pane-docked-session
   printf 'Enter\nSleep 3s\nScreenshot pane-docked-page.png\nEscape\nSleep 1s\nScreenshot pane-docked-keys-off.png\nType "q"\nSleep 500ms\nCtrl+U\n'
@@ -71,7 +74,7 @@ shot() {
 } | tape narrow 1000 1000
 
 # the cards cropped to their frames; the row and the pane kept whole, as they sit on screen
-for card in home status help doctor; do
+for card in home status help doctor page; do
   uv run --quiet "$here/scripts/crop-card.py" "$work/card-$card.png" "$out/iirc-card-$card.png"
 done
 for shot in prompt-row prompt-row-open pane-docked-session pane-docked-page pane-docked-keys-off pane-inline-session pane-inline-page; do

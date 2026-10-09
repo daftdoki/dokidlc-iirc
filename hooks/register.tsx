@@ -22,6 +22,9 @@ const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
+// pages `/iirc show` read, by name, for the transcript card that draws each
+const shownPages = atom({ plugin: 'iirc', key: 'shownPages' } as const, {})
+const SHOW_ARGS_RE = /^\s*show\s+(\S+)\s*$/
 const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0, sessionTop: 0, pageTop: 0 } as Cursor)
 // The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
@@ -98,6 +101,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
   ['open', 'unfold the latest suggested pages', 'LOOK UP'],
   ['pane', "this session's pages; a click reads one", 'LOOK UP'],
+  ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
@@ -287,6 +291,23 @@ export function tabTitle(name: string, max = TAB_TITLE_MAX): string {
   const bare = name.replace(/\.md$/, '')
   const room = Math.min(max, TAB_TITLE_MAX)
   return bare.length > room ? bare.slice(0, room - 1) + '…' : bare
+}
+
+/** `iirc show PAGE` for a transcript card: the page, kept by name for the card's drawing, or why not. */
+async function showPage($: EngineInterface, ref: string): Promise<{ page: ShownPage | null; error: string | null }> {
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'show', ref], {
+      cwd: await $.session.root(),
+      timeoutMs: 15000,
+      env: { CLAUDE_CODE_SESSION_ID: await $.session.id() },
+    })
+    if (ran.exitCode !== 0) return { page: null, error: (ran.stderr || ran.stdout).trim().replace(/^iirc: /, '') || `iirc show exited ${ran.exitCode}` }
+    const page = JSON.parse(ran.stdout) as ShownPage
+    await update($, shownPages, map => keepLast(map, page.name, page))
+    return { page, error: null }
+  } catch (err) {
+    return { page: null, error: `iirc show ${ref} did not finish: ${String(err)}` }
+  }
 }
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
@@ -574,6 +595,13 @@ export const register: Register = on => {
     if (!e.args.trim()) return { text: await helpText($, 'home') }
     if (e.args.trim() === 'status') return { text: await helpText($, 'status') }
     if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
+    const showArgs = SHOW_ARGS_RE.exec(e.args)
+    if (showArgs) {
+      const ref = showArgs[1] ?? ''
+      const { page, error } = await showPage($, ref)
+      // the card draws over this text; the text stands where the card cannot
+      return { text: page ? `${String(page.fm.title ?? page.name)}\n${String(page.fm.summary ?? '')}\n\n${page.body.trim()}` : `iirc show ${ref}: ${error}` }
+    }
     if (e.args.trim() === 'open') {
       // unfold the latest suggested-pages row, the keyboard's way to what a click on [+] does
       const keys = Object.keys(await read($, byPrompt))
@@ -615,6 +643,13 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
     const args = e.props.args.trim()
+    const shown = isIirc && !e.props.isErrored ? SHOW_ARGS_RE.exec(args) : null
+    if (shown) {
+      const pages = await read($, shownPages)
+      const name = shown[1] ?? ''
+      const page = pages[name] ?? pages[`${name}.md`]
+      return page ? drawPageCard($, e, page) : next(e)
+    }
     if (isIirc && !e.props.isErrored && (args === 'doctor' || args === 'doctor --fix')) {
       const report = parseDoctor(e.props.text)
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
@@ -1331,13 +1366,32 @@ function drawReaderNote($: EngineInterface, e: ResolveInput, r: Reader) {
   return <Text key="note" color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the session tab, the suggested pages, or a card opens the page here.'}</Text>
 }
 
+/** A page as a card in the transcript: the reader tab's drawing, whole, in the cards' frame. */
+function drawPageCard($: EngineInterface, e: ResolveInput, page: ShownPage) {
+  const { Box, Text } = $.ui.resolve(e)
+  const columns = (e as { viewport?: { columns: number } }).viewport?.columns ?? 80
+  const { items } = pageItems($, e, { page, history: [], error: null, loading: null, tab: 'page' }, -1, columns - 4, 'card-')
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1}>
+      <Box flexDirection="row">
+        <Text color={LEVEL_COLOR.ok}>● </Text>
+        <Text bold color="claude">iirc</Text>
+        <Text color="subtle">{`   ${page.label}`}</Text>
+      </Box>
+      {gradientRule($, e, Math.min(columns - 4, 60), 'card-rule')}
+      <Text> </Text>
+      {items as never}
+    </Box>
+  )
+}
+
 /** Rows a text takes at a width, wrapped by word: an estimate for scrolling, not for drawing. */
 function rowsAt(text: string, width: number): number {
   return text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / Math.max(10, width))), 0)
 }
 
 /** The page tab as items the pane can start at: the heading, each paragraph, then the links; with each item's height. */
-function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, columns: number) {
+function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, columns: number, keyPrefix = '') {
   const { Box, Button, Markdown, Text } = $.ui.resolve(e)
   const page = r.page as ShownPage
   const fm = page.fm

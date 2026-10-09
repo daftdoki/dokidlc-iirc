@@ -640,6 +640,21 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   expect(closed).toEqual(['iirc'])
 })
 
+test('/iirc show PAGE draws the page as a card in the transcript', async ($: Engine, on: On) => {
+  engine(on)
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => (e.argv.includes('show')
+    ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'Title of a', kind: 'finding', summary: 'one line' }, body: 'First.\n\nSecond.', links: [], signals: [] }))
+    : ran(BRIEF)))
+  const showText = (await $.command.run({ command: 'iirc', args: 'show a.md' })).text
+  expect(showText).toContain('Title of a')
+  const pageCard = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'show-a', props: { command: 'iirc', args: 'show a.md', text: showText, isErrored: false } })
+  expect(await pageCard.find({ text: 'Title of a' })).toBeDefined()
+  expect(await pageCard.find({ text: ' finding ' })).toBeDefined()
+  expect(await pageCard.find({ key: 'para-1' })).toBeDefined()
+})
+
 test('the status card is never wider than the terminal', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
