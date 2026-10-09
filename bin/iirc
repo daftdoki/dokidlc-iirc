@@ -3242,9 +3242,12 @@ def eval_rows() -> dict[str, list[dict]]:
 
 
 def worth_judging(cands: list[dict], knobs: dict[str, float]) -> list[dict]:
-    """Suggested, passed but left off the line, and the TUNE_NEAR_MAX refused candidates nearest the larger knob within TUNE_NEAR, in rank order."""
+    """Suggested, cut from the line, the first page past max_suggested, and the TUNE_NEAR_MAX refused candidates
+    nearest the larger knob within TUNE_NEAR, in rank order. One over_max page per recall says whether one more slot
+    would have helped; judging the rest costs much and tells little more."""
     edge = max(knobs.values())
-    passed = [c for c in cands if c.get("verdict") in ("passed", "over_max", "line_cut")]
+    first_over = next((c for c in cands if c.get("verdict") == "over_max"), None)
+    passed = [c for c in cands if c.get("verdict") in ("passed", "line_cut") or c is first_over]
     near = [c for c in cands if c not in passed and isinstance(c.get("distance"), (int, float)) and abs(c["distance"] - edge) <= TUNE_NEAR]
     near = sorted(near, key=lambda c: abs(c["distance"] - edge))[:TUNE_NEAR_MAX]
     return [c for c in cands if c in passed or c in near]

@@ -2196,3 +2196,10 @@ def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monk
     iirc.main(["knobs", "set", "both", "0.38"])
     assert toml.read_text() == "[ recall ]\nboth = 0.38\n"
     toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_worth_judging_takes_one_page_past_max_suggested():
+    knobs = {"semantic_only": 0.28, "both": 0.34}
+    cands = [{"page": "a.md", "verdict": "passed", "distance": 0.2}, {"page": "b.md", "verdict": "over_max", "distance": 0.22},
+             {"page": "c.md", "verdict": "over_max", "distance": 0.23}, {"page": "d.md", "verdict": "too_far", "distance": 0.35}]
+    assert [c["page"] for c in iirc.worth_judging(cands, knobs)] == ["a.md", "b.md", "d.md"]
