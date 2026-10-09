@@ -386,7 +386,9 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   } else {
     const row = Math.max(0, sessionRowStops.indexOf(key))
     await update($, cursor, x => {
-      const top = step === 'start' ? 0 : row < x.sessionTop ? row : row >= x.sessionTop + paneRows ? row - paneRows + 1 : x.sessionTop
+      // `g` starts the list at its top, then the cursor's row must still show
+      const from = step === 'start' ? 0 : x.sessionTop
+      const top = row < from ? row : row >= from + paneRows ? row - paneRows + 1 : from
       return { ...x, session: next, sessionTop: top }
     })
   }
@@ -400,7 +402,10 @@ async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
-  await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
+  // the first page name must show: in a short pane the list starts low enough to hold it
+  const firstStop = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
+  const firstRow = firstStop ? sessionRowStops.indexOf(firstStop) : -1
+  await update($, cursor, x => ({ ...x, session: 0, sessionTop: firstRow >= paneRows ? firstRow - paneRows + 1 : 0 }))
   await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   // put the ring on the first page name, so j, k, and Enter work at once
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
@@ -608,12 +613,21 @@ export const register: Register = on => {
       items = session.map(x => x.el)
       top = Math.min(c.sessionTop, Math.max(0, items.length - paneRows))
     }
-    // the content past the window is drawn and clipped: the window never moves, this hook moves `top`
+    // only what fits under the header is drawn: a tree taller than the window lets Claude Code scroll it
+    // itself to keep the focus ring in view, and that scroll takes the header with it
+    let end = items.length
+    if (isPage) {
+      let used = 0
+      end = top
+      while (end < items.length && (end === top || used + (pageHeights[end] ?? 1) <= paneRows)) used += pageHeights[end++] ?? 1
+    } else if (r.tab !== 'page') {
+      end = Math.min(items.length, top + paneRows)
+    }
     return (
       <Box flexDirection="column">
         {drawTabs($, e, r, e.props.bodyColumns, e.viewport?.columns, `${e.props.scroll.bodyRows}${e.viewport ? `/${e.viewport.rows}` : ''}`)}
         <Text color="subtle">{top > 0 ? `  ↑ ${top} above` : ' '}</Text>
-        {items.slice(top) as never}
+        {items.slice(top, end) as never}
       </Box>
     )
   })
