@@ -22,7 +22,7 @@ Usage:
   iirc index                 full reindex and index.md regeneration
   iirc cost                  bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
-  iirc stats [--days N]      how iirc is being used
+  iirc stats [--days N]      how the pages are being used
   iirc setup                 semantic (default) or string search, and the embedding host; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
   iirc sync                  commit, pull, and push every remote store
@@ -2758,7 +2758,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("migrate", help="move this repository and machine from the memory plugin's layout; stages, never commits")
     p.set_defaults(func=cmd_migrate)
 
-    p = sub.add_parser("stats", help="how iirc is being used, from the local log")
+    p = sub.add_parser("stats", help="how the pages are being used, from the local log")
     p.add_argument("--days", type=int, default=7)
     p.set_defaults(func=cmd_stats)
 

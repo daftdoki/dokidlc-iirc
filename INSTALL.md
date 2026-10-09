@@ -120,7 +120,7 @@ git add .iirc .claude/settings.json CLAUDE.md && git commit
 ```
 
 These three are the `PERSISTED` tuple in `bin/iirc`. Doctor checks that
-each one is tracked. IIRC only survives a clone if they are committed.
+each one is tracked. The pages survive a clone only if they are committed.
 
 ### 9. Confirm
 

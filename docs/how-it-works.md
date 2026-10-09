@@ -133,7 +133,7 @@ page that both searches found is the page to trust.
 Some machines cannot run or reach ollama. On such a machine, tell the
 agent to use string search. Then only string search runs. The agent
 searches for the words a page contains, not for the question. It tells
-you when it finds nothing. IIRC works, but not as well.
+you when it finds nothing. Search still works, but not as well.
 
 ### The semantic index
 

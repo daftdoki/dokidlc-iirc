@@ -13,7 +13,7 @@ model; seven hooks that put the matching page in front of the agent as it
 works; and a skill that says when to search, when to write, and what to
 do with a page found wrong.
 
-With it enabled, the agent works iirc on its own. Every prompt you send
+With it enabled, the agent keeps its pages on its own. Every prompt you send
 is searched, and when pages match, one line names them with the command to
 read each; a shell command that fails is searched with its error text. The
 agent writes a page when something took more than one attempt. A page
@@ -21,8 +21,8 @@ cites files at a commit, so when a cited file changes, search marks the
 page suspect and the agent reads the diff, then verifies, rewrites, or
 deletes it in the same turn.
 
-Nothing in iirc needs your approval, and nothing you asked for goes
-there. IIRC is what the agent learned by itself; documents you review
+Nothing in the pages needs your approval, and nothing you asked for goes
+there. The pages are what the agent learned by itself; documents you review
 stay in `docs/`.
 
 ## Why another memory system?
@@ -64,7 +64,7 @@ pinned commits.
 - [ollama](https://ollama.com) with the `nomic-embed-text` model, on this
   machine or on a host you can reach. Without it, a string-search fallback
   still works, and finds identifiers but not paraphrase.
-- A git repository. IIRC only persists if `.iirc/` is committed.
+- A git repository. The pages persist only if `.iirc/` is committed.
 
 ## Installation
 
@@ -114,7 +114,7 @@ is in `iirc --help`; the rules the agent follows are in
 
 ## Stores and auto commit
 
-Every change the agent makes to iirc is committed at once. `write`,
+Every change the agent makes to the pages is committed at once. `write`,
 `verify`, `delete`, and `index` each commit the store's directory and
 nothing else, so your own staged and unstaged work stays out of the
 commit. No commit is made during a merge or rebase, and the
