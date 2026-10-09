@@ -387,7 +387,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
     head.push(<Text key={`i${k}`} bold color="claude">{(k > 0 ? ' ' : '') + word[0]}</Text>)
     if (word.length > 1) head.push(<Text key={`w${k}`} color="subtle">{word.slice(1)}</Text>)
   }
-  head.push(<Text key="desc" color="subtle" italic>{'  ·  what past sessions learned, found by meaning'}</Text>)
+
   const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
   const statusRow: unknown[] = [
     <Box key="label" width={10} flexShrink={0}><Text bold color="subtle">STATUS</Text></Box>,
@@ -419,7 +419,11 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
   const heading = (text: string) => <Text bold color="subtle">{text}</Text>
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
+      {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
+      <Box flexDirection="row" paddingLeft={9}>
+        <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
+      </Box>
       <Text> </Text>
       <Box flexDirection="row">{statusRow}</Box>
       {tiles.length > 0 && <Text> </Text>}
