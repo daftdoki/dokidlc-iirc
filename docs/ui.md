@@ -86,36 +86,39 @@ line cannot carry color, so the line sits in the hint row.
 `/iirc status off` hides it and `/iirc status on` brings it back;
 `/iirc status` says which.
 
-## A plain `/iirc`
-
-A plain `/iirc`, or `/iirc help`, draws a card in place of its output row:
+## A plain `/iirc`, and `/iirc help`
 
 ![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
 
+A plain `/iirc` draws a card in place of its output row:
 
 - the name, "If I Recall Correctly", and what the plugin does
+- ASK IN WORDS: `/iirc` followed by a request, such as
+  `/iirc what do we know about ollama hangs?`, which goes to the skill
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it; the card's border takes
   the same green, yellow, or red
 - the session's counts: pages, used, reads, and writes
 - RECALL HIT RATE: the share of suggested pages that were read, as a
   percentage and a bar that runs from red into green as it fills
+- a pointer to `/iirc help`
+
+`/iirc help` draws the rest:
+
 - SETTINGS: the line under the prompt and the number of suggested pages,
-  each with its value and the command that changes it
+  each with its command and current value
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `index`, `search QUERY`, `topics`, and `read PAGE`.
-  `/iirc doctor` draws its checks as a card too: a result chip, the
-  failures with their fixes first, then notes, then the checks that passed. A page you
-  read this way does not count toward the session's reads, which are the
-  agent's.
-- ASK IN WORDS: `/iirc` followed by a request, such as
-  `/iirc what do we know about ollama hangs?`, which goes to the skill.
-  So do the commands that need a question first: `stores add`, `setup`,
-  `init`, `write`, `delete`, and `approve`
+  `sync`, `stores`, `stats`, `index`, `search QUERY`, `topics`, and
+  `read PAGE`. A page you read this way does not count toward the
+  session's reads, which are the agent's. `/iirc doctor` draws its checks
+  as a card too: a result chip, the failures with their fixes first, then
+  notes, then the checks that passed.
+- `/iirc <request>`, which goes to the skill, as do the commands that need
+  a question first: `stores add`, `setup`, `init`, `write`, `delete`, and
+  `approve`
 
-It costs no tokens: the plugin answers, and the skill does not load. The choice is kept in the plugin's own store, so
-it holds on that machine.
+Neither card costs tokens: the plugin answers, and the skill does not load.
 
 ## Toasts
 

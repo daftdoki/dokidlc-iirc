@@ -113,10 +113,10 @@ list the pages:
 The second line sits under the prompt for the whole session. Its circle is
 green when all is well; yellow or red, it ends with the command that
 fixes it, such as `· run iirc doubt`.
-A plain `/iirc` draws a card with the status, the counts, the hit rate,
-the settings, and the commands. `/iirc doctor`, `/iirc doubt`,
-`/iirc search QUERY`, and the rest of its maintenance and look-up commands
-run directly and print their output.
+A plain `/iirc` draws a card with the status, the counts, and the hit
+rate; `/iirc help` lists the settings and commands. `/iirc doctor`,
+`/iirc doubt`, `/iirc search QUERY`, and the rest of its maintenance and
+look-up commands run directly and print their output.
 
 ![The iirc card: status all good, counts of pages, used, reads, and writes, a recall hit rate bar at 74%, the two settings with their commands, and examples of asking in words](docs/images/iirc-card.png)
 [docs/ui.md](docs/ui.md) explains every part.

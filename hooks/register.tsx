@@ -196,8 +196,8 @@ async function runDirect($: EngineInterface, args: string): Promise<string> {
   }
 }
 
-/** What a plain /iirc prints: the session's line, the two settings, and the forms /iirc takes. */
-async function helpText($: EngineInterface): Promise<string> {
+/** The text a plain /iirc or /iirc help returns; the cards draw over it, and it stands where they cannot. */
+async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<string> {
   const s = await read($, status)
   let max = '?'
   try {
@@ -208,8 +208,9 @@ async function helpText($: EngineInterface): Promise<string> {
   // the engine puts the plugin's name in front of a command's text
   const head = s === null ? 'no session brief yet' : statusText(s, await read($, counts)).replace(/^iirc: /, '')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
+  if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands`
   return [
-    `${head} · status ${shown} · max-suggested ${max}`,
+    `status ${shown} · max-suggested ${max}`,
     '/iirc status on|off       show or hide the line under the prompt',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
@@ -312,7 +313,8 @@ export const register: Register = on => {
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
     // bare or `help`, it is help; the skill loads by itself when a task needs it
-    if (!e.args.trim() || e.args.trim() === 'help') return { text: await helpText($) }
+    if (!e.args.trim()) return { text: await helpText($, 'home') }
+    if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
     const direct = DIRECT_RE.exec(e.args.trim())
@@ -346,8 +348,9 @@ export const register: Register = on => {
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
     }
     if (!isIirc || (args !== '' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
-    if (args === 'demo') return drawHelp($, e, DEMO_STATUS, DEMO_COUNTS, true, 3)
-    return drawHelp($, e, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
+    const view = args === 'help' ? 'help' : 'home'
+    if (args === 'demo') return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3)
+    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
   })
 
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
@@ -426,7 +429,8 @@ function gaugeColor(t: number): string {
   return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * u).toString(16).padStart(2, '0')).join('')
 }
 
-function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
+/** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
+function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
   const { Box, Text } = $.ui.resolve(e)
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
@@ -474,6 +478,28 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
     </Box>
   )
   const heading = (text: string) => <Text bold color="subtle">{text}</Text>
+  const command = (cmd: string, what: string) => (
+    <Box key={cmd} flexDirection="row" paddingLeft={2}>
+      <Box width={24} flexShrink={0}><Text color="suggestion">{cmd}</Text></Box>
+      <Text color="subtle">{what}</Text>
+    </Box>
+  )
+  const helpBody = (
+    <Box flexDirection="column">
+      <Text> </Text>
+      {heading('SETTINGS')}
+      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
+      {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
+      {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
+        <Box key={group} flexDirection="column">
+          <Text> </Text>
+          {heading(group)}
+          {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => command(`/iirc ${cmd}`, what))}
+          {group === 'LOOK UP' && command('/iirc <request>', 'ask in words; goes to the skill')}
+        </Box>
+      ))}
+    </Box>
+  )
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
@@ -481,21 +507,22 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
       <Box flexDirection="row" paddingLeft={9}>
         <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
       </Box>
-      <Text> </Text>
-      <Box flexDirection="row">
+      {view === 'help' && helpBody}
+      {view === 'home' && <Text> </Text>}
+      {view === 'home' && <Box flexDirection="row">
         <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
         <Text color="suggestion">/iirc &lt;request&gt;</Text>
-      </Box>
-      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
+      </Box>}
+      {view === 'home' && ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
         <Box key={example} flexDirection="row" paddingLeft={2}>
           <Text color="claude">{'› '}</Text>
           <Text dimColor italic>{example}</Text>
         </Box>
       ))}
-      <Text> </Text>
-      <Box flexDirection="row">{statusRow}</Box>
-      {tiles.length > 0 && <Text> </Text>}
-      {tiles.length > 0 && (
+      {view === 'home' && <Text> </Text>}
+      {view === 'home' && <Box flexDirection="row">{statusRow}</Box>}
+      {view === 'home' && tiles.length > 0 && <Text> </Text>}
+      {view === 'home' && tiles.length > 0 && (
         <Box flexDirection="row" paddingLeft={2}>
           {tiles.map(([n, label]) => (
             <Box key={label} flexDirection="column" width={13} flexShrink={0}>
@@ -505,15 +532,15 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
           ))}
         </Box>
       )}
-      {c.suggested > 0 && <Text> </Text>}
-      {c.suggested > 0 && (
+      {view === 'home' && c.suggested > 0 && <Text> </Text>}
+      {view === 'home' && c.suggested > 0 && (
         <Box flexDirection="row" width={BAR + 2}>
           <Box flexGrow={1}>{heading('RECALL HIT RATE')}</Box>
           <Text bold color={band}>{`${pct}%`}</Text>
         </Box>
       )}
-      {c.suggested > 0 && <Box flexDirection="row" paddingLeft={2}>{cells}</Box>}
-      {c.suggested > 0 && (
+      {view === 'home' && c.suggested > 0 && <Box flexDirection="row" paddingLeft={2}>{cells}</Box>}
+      {view === 'home' && c.suggested > 0 && (
         <Box flexDirection="row" paddingLeft={2}>
           <Text bold color="claude">{String(c.used)}</Text>
           <Text color="subtle">{' of '}</Text>
@@ -521,22 +548,13 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
           <Text color="subtle">{' suggested pages were read'}</Text>
         </Box>
       )}
-      <Text> </Text>
-      {heading('SETTINGS')}
-      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
-      {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
-      {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
-        <Box key={group} flexDirection="column">
-          <Text> </Text>
-          {heading(group)}
-          {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => (
-            <Box key={cmd} flexDirection="row" paddingLeft={2}>
-              <Box width={24} flexShrink={0}><Text color="suggestion">{`/iirc ${cmd}`}</Text></Box>
-              <Text color="subtle">{what}</Text>
-            </Box>
-          ))}
+      {view === 'home' && <Text> </Text>}
+      {view === 'home' && (
+        <Box flexDirection="row">
+          <Text color="subtle">{'settings and every command: '}</Text>
+          <Text color="suggestion">/iirc help</Text>
         </Box>
-      ))}
+      )}
     </Box>
   )
 }

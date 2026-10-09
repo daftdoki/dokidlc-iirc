@@ -268,9 +268,12 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'recall suggests up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await hookRow($, 'SessionStart', BRIEF, 'h8')
   const text = (await $.command.run({ command: 'iirc:iirc', args: '  ' })).text
-  expect(text).toContain(LINE.replace('iirc: ', '') + ' · status on · max-suggested 4')
-  expect(text).toContain('/iirc max-suggested N')
+  expect(text).toContain(LINE.replace('iirc: ', ''))
+  expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
+  const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
+  expect(helpText).toContain('status on · max-suggested 4')
+  expect(helpText).toContain('/iirc max-suggested N')
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({
       plugin: 'iirc',
@@ -280,10 +283,9 @@ test('a plain /iirc prints help with the session line, and does not load the ski
       props: { command: 'iirc:iirc', args: '', text, isErrored: false },
     })
     expect(await panel.find({ text: '68' })).toBeDefined()
-    expect(await panel.find({ text: 'up to 4' })).toBeDefined()
-    expect(await panel.find({ text: '/iirc doctor --fix' })).toBeDefined()
+    expect(await panel.find({ text: '/iirc help' })).toBeDefined()
+    expect(await panel.find({ text: '/iirc doctor --fix' })).toBeUndefined()   // commands live in /iirc help
     expect(await panel.find({ text: 'ecall' })).toBeDefined()
-    expect(await panel.find({ text: '/iirc max-suggested N' })).toBeDefined()
     expect(await panel.find({ text: 'iirc doctor' })).toBeDefined()
     expect(await panel.find({ text: ' ▲ needs a look ' })).toBeDefined()
   }
