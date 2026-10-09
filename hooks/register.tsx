@@ -291,9 +291,10 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
 }
 
 /** A page name as a tab label: no `.md`, cut to TAB_TITLE_MAX. */
-export function tabTitle(name: string): string {
+export function tabTitle(name: string, max = TAB_TITLE_MAX): string {
   const bare = name.replace(/\.md$/, '')
-  return bare.length > TAB_TITLE_MAX ? bare.slice(0, TAB_TITLE_MAX - 1) + '…' : bare
+  const room = Math.min(max, TAB_TITLE_MAX)
+  return bare.length > room ? bare.slice(0, room - 1) + '…' : bare
 }
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
@@ -413,7 +414,8 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   if (isPage) {
     // a paragraph comes to the top; the linked pages are the last item; item 0 is the page's heading
     const paras = r.page ? paragraphs(r.page.body).length : 0
-    const top = step === 'start' ? 0 : key.startsWith('para-') ? 1 + Number(key.slice(5)) : 1 + paras
+    // `k` on the first paragraph scrolls up to the page's heading, as `g` does
+    const top = step === 'start' || (step === -1 && c.page === 0) ? 0 : key.startsWith('para-') ? 1 + Number(key.slice(5)) : 1 + paras
     await update($, cursor, x => ({ ...x, page: next, pageTop: top }))
   } else {
     const row = Math.max(0, sessionRowStops.indexOf(key))
@@ -1227,10 +1229,10 @@ const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb
 
 // the keys row: key, label, the glyph a narrow pane shows instead, what it does
 const KEYS: [string, string, string, 'down' | 'up' | 'top' | 'end' | 'session' | 'page' | 'close'][] = [
-  ['j', '↓', '↓', 'down'], ['k', '↑', '↑', 'up'], ['g', 'top', '⤒', 'top'], ['e', 'end', '⤓', 'end'],
-  ['h', '◂', '◂', 'session'], ['l', '▸', '▸', 'page'], ['q', 'close', '✕', 'close'],
+  ['h', '◂', '◂', 'session'], ['j', '↓', '↓', 'down'], ['k', '↑', '↑', 'up'], ['l', '▸', '▸', 'page'],
+  ['g', 'top', '⤒', 'top'], ['e', 'end', '⤓', 'end'], ['q', 'close', '✕', 'close'],
 ]
-// columns the labelled keys row takes, `j: ↓  k: ↑  g: top  e: end  h: ◂  l: ▸  q: close`; under it, glyphs alone
+// columns the labelled keys row takes, `h: ◂  j: ↓  k: ↑  l: ▸  g: top  e: end  q: close`; under it, glyphs alone
 const KEYS_WIDE = 50
 
 /** What a key of the keys row does. */
@@ -1261,13 +1263,15 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
         <Box flexDirection="row" flexGrow={1}>
           {tab('tab-session', '1', 'session', !isPage, () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
           {name && <Text>{' '}</Text>}
-          {name && tab('tab-page', '2', tabTitle(name), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
+          {/* the page's tab takes the room the session tab, the close marks, and the iirc mark leave */}
+          {name && tab('tab-page', '2', tabTitle(name, Math.max(8, columns - 36)), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
           {name && (
             <Button key="tab-close" plain hotkey="x" onPress={() => void update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))}>
-              <Text color="subtle">✕</Text>
+              <Text color="subtle">{' ✕ '}</Text>
             </Button>
           )}
         </Box>
+        <Text>{' '}</Text>
         {/* the mark is green while the pane holds the keys, gray while they are the prompt's */}
         <Text color={isFocused ? LEVEL_COLOR.ok : 'inactive'}>● </Text>
         <Text bold color="claude">iirc</Text>
