@@ -11,6 +11,10 @@ tested on Claude Code 2.1.295.
 
 ![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
 
+![The same row unfolded by /iirc open: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
+
+A click on `[+]` unfolds the row; `/iirc open` unfolds the latest one from the keyboard.
+
 When recall finds pages for your prompt, a row appears under it:
 
 ```

@@ -35,8 +35,9 @@ tape() {
     echo "Set Height $height"
     echo 'Set TypingSpeed 15ms'
     echo 'Hide'
-    # unset the marker a parent Claude Code session leaves, so this one keeps its transcript
-    echo "Type \"cd $repo && env -u CLAUDE_CODE_CHILD_SESSION claude\""
+    # unset the marker a parent Claude Code session leaves, so this one keeps its transcript; no shell commands, so the
+    # recorded session's agent cannot reach git, ssh, or anything that asks 1Password
+    echo "Type \"cd $repo && env -u CLAUDE_CODE_CHILD_SESSION claude --disallowedTools Bash\""
     echo 'Enter'
     echo 'Sleep 8s'
     echo 'Show'
@@ -62,7 +63,7 @@ shot() {
   shot '/iirc doctor' 10s card-doctor
   shot '/iirc session demo' 4s card-session
   shot "/iirc show $page" 4s card-page
-  printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\n' "$prompt"
+  printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc open"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
   shot '/iirc pane demo' 4s pane-docked-session
   printf 'Enter\nSleep 3s\nScreenshot pane-docked-page.png\nEscape\nSleep 1s\nScreenshot pane-docked-keys-off.png\nType "q"\nSleep 500ms\nCtrl+U\n'
 } | tape wide 1600 1300
@@ -77,7 +78,7 @@ shot() {
 for card in home status help doctor session page; do
   uv run --quiet "$here/scripts/crop-card.py" "$work/card-$card.png" "$out/iirc-card-$card.png"
 done
-for shot in prompt-row pane-docked-session pane-docked-page pane-docked-keys-off pane-inline-session pane-inline-page; do
+for shot in prompt-row prompt-row-open pane-docked-session pane-docked-page pane-docked-keys-off pane-inline-session pane-inline-page; do
   cp "$work/$shot.png" "$out/iirc-$shot.png"
   echo "$out/iirc-$shot.png"
 done

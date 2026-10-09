@@ -164,6 +164,7 @@ The `command.run` handler in
 | `/iirc topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
+| `/iirc open` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
 | `/iirc pane` | A pane with this session's suggested, written, and suspect pages. A click on a page name, here or anywhere iirc draws one, opens the page in a reader tab. See [UI.md](UI.md#the-pane). |
 | `/iirc session` | The pane's session tab as a card in the transcript. |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |

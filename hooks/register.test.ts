@@ -534,7 +534,9 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   await promptRow($, 'p-tree')
   await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read before you investigate: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
   const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
-  await row.press({ key: 'toggle-p-tree' })
+  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeUndefined()      // folded
+  expect((await $.command.run({ command: 'iirc', args: 'open' })).text).toContain('unfolded')
+  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc open unfolds the latest row
   await row.press({ key: 'open-p-tree-0-0-1' })
   expect(opened).toEqual(['iirc:iirc'])
 })

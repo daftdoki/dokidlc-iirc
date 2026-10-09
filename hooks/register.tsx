@@ -102,6 +102,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
+  ['open', 'unfold the latest suggested pages', 'LOOK UP'],
   ['pane', "this session's pages; a click reads one", 'LOOK UP'],
   ['session', "the same, as a card in the transcript", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
@@ -631,6 +632,14 @@ export const register: Register = on => {
       }
       const sp = await read($, sessionPages)
       return { text: `this session: ${sp.suggested.length} pages suggested, ${sp.used.length} read; ${sp.written.length} written` }
+    }
+    if (e.args.trim() === 'open') {
+      // unfold the latest suggested-pages row, the keyboard's way to what a click on [+] does
+      const keys = Object.keys(await read($, byPrompt))
+      const last = keys[keys.length - 1]
+      if (!last) return { text: 'iirc: no suggested pages yet this session' }
+      await update($, open, map => keepLast(map, last, true))
+      return { text: 'iirc: the latest suggested pages are unfolded above' }
     }
     if (e.args.trim() === 'pane' || e.args.trim() === 'pane demo') {
       // `pane demo` fills the session tab with sample numbers over real pages, for screenshots

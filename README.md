@@ -28,7 +28,7 @@ Nothing in the pages needs your approval, and nothing you asked for goes
 there. The pages are what the agent learned by itself; documents you review
 stay in `docs/`.
 
-![A prompt with three suggested pages listed under it, each with its match score, and the iirc line under the prompt with its page, used, read, and write counts](docs/images/iirc-ui.png)
+![iirc in a Claude Code session: a prompt with three suggested pages under it, unfolded to show each page's match; the /iirc and /iirc status cards; then the pane stepping through the session's pages and opening one](docs/images/iirc-demo.gif)
 
 ## Why another memory system?
 
