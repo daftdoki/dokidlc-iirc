@@ -71,6 +71,10 @@ const TITLE = '#e6edf3'
 const TAGLINE = 'what past sessions learned, recalled by meaning'
 const TAGLINE_FROM = '#e8875f'
 const TAGLINE_TO = '#a78bfa'
+// the card's frame is the gradient's violet end; the STATUS chip carries the health color
+const FRAME = '#a78bfa'
+// the title rule spans the tagline's line: its indent of 9 and its length
+const RULE = 9 + TAGLINE.length
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
 const KEEP = 200
@@ -519,13 +523,19 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
     </Box>
   )
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} alignSelf="flex-start">
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start">
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
         {/* one Text per character, each a step along the gradient */}
         {[...TAGLINE].map((ch, k) => (
           <Text key={k} italic color={mix(TAGLINE_FROM, TAGLINE_TO, k / (TAGLINE.length - 1))}>{ch}</Text>
+        ))}
+      </Box>
+      {/* a rule under the title, orange to violet, as long as the tagline line */}
+      <Box flexDirection="row">
+        {Array.from({ length: RULE }, (_, k) => (
+          <Text key={k} color={mix(TAGLINE_FROM, TAGLINE_TO, k / (RULE - 1))}>━</Text>
         ))}
       </Box>
       {view === 'help' && helpBody}
@@ -636,7 +646,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
     </Box>
   )
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} alignSelf="flex-start">
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start">
       <Box flexDirection="row">
         <Text color={tone}>● </Text>
         <Text bold color="claude">iirc</Text>

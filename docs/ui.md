@@ -97,8 +97,7 @@ A plain `/iirc`, or `/iirc status`, draws a card in place of its output row:
 - ASK IN WORDS: `/iirc` followed by a request, such as
   `/iirc what do we know about ollama hangs?`, which goes to the skill
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
-  state's name, with the command that fixes it; the card's border takes
-  the same green, yellow, or red
+  state's name, with the command that fixes it, in green, yellow, or red
 - the counts, under STORE (pages) and THIS SESSION (used, reads, and
   writes)
 - RECALL HIT RATE, for this session: the share of suggested pages that were read, as a
