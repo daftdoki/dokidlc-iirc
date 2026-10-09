@@ -622,10 +622,13 @@ export const register: Register = on => {
       // the card draws over this text; the text stands where the card cannot
       return { text: page ? `${String(page.fm.title ?? page.name)}\n${String(page.fm.summary ?? '')}\n\n${page.body.trim()}` : `iirc show ${ref}: ${error}` }
     }
-    if (e.args.trim() === 'session') {
-      // the pane's session tab as a card in the transcript, with the numbers fresh
-      await loadCounts($).catch(() => {})
-      await refreshHealth($)
+    if (e.args.trim() === 'session' || e.args.trim() === 'session demo') {
+      // the pane's session tab as a card in the transcript, with the numbers fresh, or sample ones for a screenshot
+      if (e.args.trim() === 'session demo') await loadDemoSession($)
+      else {
+        await loadCounts($).catch(() => {})
+        await refreshHealth($)
+      }
       const sp = await read($, sessionPages)
       return { text: `this session: ${sp.suggested.length} pages suggested, ${sp.used.length} read; ${sp.written.length} written` }
     }
@@ -662,7 +665,7 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
     const args = e.props.args.trim()
-    if (isIirc && !e.props.isErrored && args === 'session') {
+    if (isIirc && !e.props.isErrored && (args === 'session' || args === 'session demo')) {
       return drawSessionCard($, e, await read($, sessionPages), await read($, counts), await read($, health))
     }
     const shown = isIirc && !e.props.isErrored ? SHOW_ARGS_RE.exec(args) : null
