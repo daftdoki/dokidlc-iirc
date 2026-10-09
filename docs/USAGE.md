@@ -163,13 +163,14 @@ The `command.run` handler in
 | `/iirc topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
+| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,
 `sync`, and `index` may run for up to ten minutes; the rest stop after
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
-`stores add`, `setup`, `init`, `write`, `delete`, `approve`, and
-`doubt --network`. The agent's own commands are listed by `iirc --help`.
+`stores add`, `setup`, `init`, `write`, `delete`, `approve`,
+`knobs set`, and `doubt --network`. The agent's own commands are listed by `iirc --help`.
 
 ## Every setting
 
@@ -179,8 +180,8 @@ words. That includes the commands that need a question first:
 | `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc setup --host URL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested N`, when the row brings too much or too little. |
 | `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc setup`, which warns when this is exported. |
-| `[recall] semantic_only` | `.claude/iirc.toml`, committed, so every clone | `0.28` | 0.10 to 0.60 | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records. |
-| `[recall] both` | `.claude/iirc.toml` | `0.34` | 0.10 to 0.60, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | Only on evidence from the records. |
+| `[recall] semantic_only` | `.claude/iirc.toml`, committed, so every clone | `0.28` | 0.10 to 0.60 | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc knobs set` on your yes. |
+| `[recall] both` | `.claude/iirc.toml` | `0.34` | 0.10 to 0.60, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
 | `write` | `.claude/iirc.toml` | the project store, else the only store | the name of a store | The store `iirc write` uses without `--store`. | `iirc stores add NAME URL --default` sets it. |
