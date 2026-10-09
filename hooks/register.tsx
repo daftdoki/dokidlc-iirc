@@ -307,15 +307,16 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
   const label = verb === 'suggested' ? `${noun} suggested` : `${noun} ${pages.length === 1 ? 'matches' : 'match'} this error`
   return (
     <Box key={`iirc-${id}`} flexDirection="column" paddingLeft={3}>
-      <Box flexDirection="row">
-        <Button key={`toggle-${id}`} plain label={isOpen ? '−' : '+'} onPress={toggle} />
+      {/* the whole row is one button, so a click on the words opens the list too */}
+      <Button key={`toggle-${id}`} plain onPress={toggle}>
+        <Text bold color="suggestion">{isOpen ? '[−]' : '[+]'}</Text>
         <Text> </Text>
         <Text bold color="claude">iirc: </Text>
         <Text color="subtle">[</Text>
         <Text bold color="claude">{String(pages.length)}</Text>
         <Text color="subtle">] </Text>
         <Text color="suggestion">{label}</Text>
-      </Box>
+      </Button>
       {isOpen &&
         pages.map((p, i) => (
           <Box flexDirection="row" paddingLeft={2}>
