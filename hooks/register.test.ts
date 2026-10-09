@@ -568,7 +568,7 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
   const cursorOn = async () => {
     for (const name of ['a', 'n']) {
       const row = await view.find({ key: `s-${name}.md` })
-      if (row && JSON.stringify(row).includes('"›"')) return name
+      if (row && JSON.stringify(row).includes('"▶"')) return name
     }
     return null
   }
@@ -587,7 +587,7 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
   const paraOn = async () => {
     for (const i of [0, 1]) {
       const box = await view.find({ key: `p-${i}` })
-      if (box && JSON.stringify(box).includes('"›"')) return i
+      if (box && JSON.stringify(box).includes('"▶"')) return i
     }
     return null
   }
@@ -630,7 +630,7 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   expect(await view.find({ key: 'key-q' })).toBeDefined()
   expect(await view.find({ key: 'open-s-p8.md' })).toBeDefined()             // the cursor's row is in view
   expect(await view.find({ key: 'open-s-p0.md' })).toBeUndefined()           // the top of the list scrolled away
-  expect(JSON.stringify(await view.find({ key: 's-p8.md' }))).toContain('"›"')
+  expect(JSON.stringify(await view.find({ key: 's-p8.md' }))).toContain('"▶"')
   await view.press({ key: 'key-g' })
   expect(await view.find({ text: 'SUGGESTED' })).toBeDefined()             // g shows the very top; the pane has no counts
   expect(await view.find({ text: '  ↑ 1 above' })).toBeUndefined()

@@ -1318,8 +1318,13 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
       stop: isGone ? null : `open-${key}`,
       el: (
         <Box key={key} flexDirection="row">
-          <Box width={2} flexShrink={0}><Text bold color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
-          <Box width={3} flexShrink={0}><Text bold color={color}>{mark}</Text></Box>
+          {/* the cursor: a filled marker and the mark on an orange chip, unlike the inversion the pointer makes */}
+          <Box width={2} flexShrink={0}><Text bold color={TAGLINE_FROM}>{here === `open-${key}` ? '▶' : ' '}</Text></Box>
+          <Box width={3} flexShrink={0}>
+            {here === `open-${key}`
+              ? <Text bold color="#0d1117" backgroundColor={TAGLINE_FROM}>{` ${mark} `}</Text>
+              : <Text bold color={color}>{mark}</Text>}
+          </Box>
           {/* the times suggested, left of the name in a column that will not shrink, as on the status card */}
           <Box width={5} flexShrink={0}><Text bold color={LEVEL_COLOR.warn}>{isGone ? '' : tail.trim()}</Text></Box>
           {/* a page renamed or deleted since is no link: there is nothing to open */}
@@ -1476,7 +1481,7 @@ function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, c
   paragraphs(page.body).forEach((text, i) => {
     items.push(
       <Box key={`p-${i}`} flexDirection="row" marginBottom={1}>
-        <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{at === i ? '›' : ' '}</Text></Box>
+        <Box width={2} flexShrink={0}><Text bold color={TAGLINE_FROM}>{at === i ? '▶' : ' '}</Text></Box>
         <Markdown key={`para-${i}`} text={text} />
       </Box>,
     )
