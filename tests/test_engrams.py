@@ -1574,3 +1574,42 @@ def test_doctor_brief_offers_migration(tmp_path, monkeypatch, capsys):
     (Path(engrams.os.environ["XDG_DATA_HOME"]) / "dokidlc-memory").mkdir(parents=True)
     for argv in (["doctor", "--brief"], ["doctor", "--brief", "--hook"]):
         assert MIGRATION_LINE in _brief(argv, monkeypatch, capsys)
+
+
+def test_migrate_fixture(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    repo = tmp_path / "repo"; repo.mkdir(); _repo(repo); _old_layout(repo)
+    (repo / ".claude" / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"memory@memory-dev": True}}) + "\n")
+    _git(repo, "add", "."); _git(repo, "commit", "-qm", "old layout")
+    bases = [Path(engrams.os.environ[v]) for v in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")]
+    for b in bases:
+        (b / "dokidlc-memory").mkdir(parents=True); (b / "dokidlc-memory" / "kept.txt").write_text("x\n")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    reindexed = []
+    monkeypatch.setattr(engrams, "reindex", lambda: reindexed.append(1))
+    commits = _git(repo, "rev-list", "--count", "HEAD")
+    assert MIGRATION_LINE in _brief(["doctor", "--brief"], monkeypatch, capsys)
+
+    engrams.main(["migrate"])
+    out = capsys.readouterr().out.strip().splitlines()
+    assert out[-1] == 'Suggested commit: git commit -m "engrams: migrate from the memory plugin"'
+    assert any("settings.local.json" in line and "memory@memory-dev" in line for line in out)
+    assert not (repo / ".memory").exists() and sorted(p.name for p in (repo / ".engrams").iterdir()) == ["a-page.md", "index.md"]
+    assert not (repo / ".claude" / "memory.toml").exists()
+    assert 'path = ".engrams"' in (repo / ".claude" / "engrams.toml").read_text()
+    claude_md = (repo / "CLAUDE.md").read_text()
+    assert "## Engrams <!-- engrams -->" in claude_md and "<!-- memory -->" not in claude_md and "## Other\n\nKept." in claude_md
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())["enabledPlugins"]
+    assert settings == {"engrams@dokidlc": True, "questlog@dokidlc": True}
+    assert "memory@memory-dev" in (repo / ".claude" / "settings.local.json").read_text()
+    page = (repo / ".engrams" / "a-page.md").read_text()
+    assert "`engrams read b.md`" in page and "`engrams doctor --fix`" in page and "memory as a word stays" in page
+    assert "engrams format" in (repo / ".engrams" / "index.md").read_text() and reindexed
+    for b in bases:
+        assert not (b / "dokidlc-memory").exists() and (b / "dokidlc-engrams" / "kept.txt").is_file()
+    assert _git(repo, "rev-list", "--count", "HEAD") == commits
+    assert ".engrams/a-page.md" in _git(repo, "diff", "--cached", "--name-only")
+
+    engrams.main(["migrate"])
+    assert capsys.readouterr().out.strip() == "nothing to migrate"
+    assert MIGRATION_LINE not in _brief(["doctor", "--brief"], monkeypatch, capsys)

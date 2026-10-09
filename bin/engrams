@@ -1784,6 +1784,91 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f"engrams: {label} ({fix})")
 
 
+# --- migrate from the memory plugin -------------------------------------------
+
+OLD_VERBS = "search|pull|read|write|delete|verify|doubt|approve|index|cost|doctor|setup|init|sync|stores|stats|recall|nudge"
+OLD_COMMAND_RE = re.compile(r"`memory (" + OLD_VERBS + r")\b")
+OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
+SUGGESTED_COMMIT = 'Suggested commit: git commit -m "engrams: migrate from the memory plugin"'
+
+
+def move(old: Path, new: Path) -> None:
+    """git mv when git tracks the path, else a plain move."""
+    tracked = git("ls-files", "--", str(old.relative_to(ROOT))) if old.is_relative_to(ROOT) else None
+    if not (tracked and git("mv", str(old), str(new)) is not None):
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old), str(new))
+
+
+def cmd_migrate(args: argparse.Namespace) -> None:
+    if (ROOT / ".memory").exists() and (ROOT / ".engrams").exists():
+        die("both .memory/ and .engrams/ exist; merge them by hand, then run engrams migrate again")
+    done: list[str] = []
+    staged: list[str] = []
+    for old, new in old_layout():
+        move(old, new)
+        here = old.is_relative_to(ROOT)
+        done.append(f"moved {old.relative_to(ROOT) if here else old} to {new.relative_to(ROOT) if here else new}")
+        if here:
+            staged.append(str(new.relative_to(ROOT)))
+    toml = ROOT / STORE_CONFIG
+    if toml.is_file():
+        text = toml.read_text()
+        new_text = re.sub(r'(path\s*=\s*")\.memory(")', r"\1.engrams\2", text)
+        if new_text != text:
+            toml.write_text(new_text)
+            done.append(f"{STORE_CONFIG}: project store path is .engrams")
+            staged.append(STORE_CONFIG)
+    claude_md = ROOT / "CLAUDE.md"
+    if claude_md.is_file() and not claude_md.is_symlink():
+        text = claude_md.read_text()
+        if OLD_SECTION_RE.search(text):
+            claude_md.write_text(OLD_SECTION_RE.sub(lambda m: CLAUDE_MD_PARAGRAPH.strip("\n"), text, count=1))
+            done.append("CLAUDE.md: the Memory section is now the Engrams section")
+            staged.append("CLAUDE.md")
+    settings = ROOT / ".claude" / "settings.json"
+    if settings.is_file():
+        data = json.loads(settings.read_text())
+        plugins = data.get("enabledPlugins")
+        if isinstance(plugins, dict) and "memory@dokidlc" in plugins:
+            data["enabledPlugins"] = {("engrams@dokidlc" if k == "memory@dokidlc" else k): v for k, v in plugins.items()}
+            settings.write_text(json.dumps(data, indent=2) + "\n")
+            done.append(".claude/settings.json: memory@dokidlc is now engrams@dokidlc")
+            staged.append(".claude/settings.json")
+    set_root(ROOT)
+    store = project_store()
+    if store and store.dir.is_dir():
+        rewritten = 0
+        for page in list_pages(store.dir):
+            text = page.read_text()
+            new_text = OLD_COMMAND_RE.sub(r"`engrams \1", text)
+            if new_text != text:
+                page.write_text(new_text)
+                rewritten += 1
+        if rewritten:
+            done.append(f"rewrote the memory commands in {rewritten} page{'' if rewritten == 1 else 's'}")
+        if done:
+            regenerate_index(store.dir)
+            try:
+                reindex()
+            except SystemExit:
+                done.append("the search index was not rebuilt; run engrams index")
+        staged.append(str(store.dir.relative_to(ROOT)))
+    notes = []
+    local = ROOT / ".claude" / "settings.local.json"
+    if local.is_file():
+        for key in re.findall(r'"(memory@[^"]+)"', local.read_text()):
+            notes.append(f"note .claude/settings.local.json still names {key}; change it by hand")
+    if not done:
+        print("nothing to migrate")
+        return
+    git_add(staged)
+    for line in done + notes:
+        print(line)
+    if any(git("diff", "--cached", "--quiet", "--", p) is None for p in staged):
+        print(SUGGESTED_COMMIT)
+
+
 # --- setup ------------------------------------------------------------------
 
 
@@ -2668,6 +2753,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--stop", action="store_true")
     p.set_defaults(func=cmd_nudge)
 
+    p = sub.add_parser("migrate", help="move this repository and machine from the memory plugin's layout; stages, never commits")
+    p.set_defaults(func=cmd_migrate)
+
     p = sub.add_parser("stats", help="how engrams is being used, from the local log")
     p.add_argument("--days", type=int, default=7)
     p.set_defaults(func=cmd_stats)
@@ -2679,7 +2767,7 @@ def main(argv: list[str] | None = None) -> None:
             return   # hooks fail open
         if args.command not in ("setup", "stats"):
             die(CONFIG_ERROR)
-    if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats"):
+    if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats", "migrate"):
         check_format()
     args.func(args)
 
