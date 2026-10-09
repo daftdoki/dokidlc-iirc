@@ -7,8 +7,8 @@
 
 A thin layer over memoryfield-tool (used as published, at the commit in
 iirc.pin). It generates the tool's per-machine config from the
-repository location, guards the embedding host, keeps index.md current, and
-computes suspicion. It never reimplements storage, search, or indexing.
+repository location, guards the embedding host, computes suspicion, and
+records what recall did so it can be tuned. It never reimplements storage, search, or indexing.
 
 Usage:
   iirc search QUERY...       ranked pages; several terms are searched separately and merged
@@ -19,15 +19,17 @@ Usage:
   iirc verify PAGE           record that the page was re-confirmed
   iirc doubt [--all]         pages with evidence they may be wrong
   iirc approve PAGE          run a page's check once and approve it on this machine
-  iirc index                 full reindex and index.md regeneration
+  iirc index                 rebuild the search index
   iirc topics                every topic with its page count
   iirc cost                  bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
   iirc stats [--days N]      how the pages are being used
+  iirc max-suggested [N]     pages recall suggests at most; N sets it on this machine
   iirc knobs [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
   iirc tune gather|judge|sweep|done  evidence and judgments for tuning recall, and a sweep of the knobs
   iirc setup                 semantic (default) or string search, and the embedding host; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
+  iirc migrate               move a repository and this machine from the memory plugin's layout
   iirc sync                  commit, pull, and push every remote store
   iirc stores [add NAME URL] list the stores, or add a remote store (ask the creator first)
 """

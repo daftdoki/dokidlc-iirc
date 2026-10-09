@@ -75,7 +75,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
   ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
-  ['index', 'rebuild the search index and index.md', 'MAINTENANCE'],
+  ['index', 'rebuild the search index', 'MAINTENANCE'],
   ['knobs', "the recall gate's distances and ranges", 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],

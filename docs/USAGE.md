@@ -277,8 +277,17 @@ cards and `/iirc stats` show it. Each number has a response:
 `/iirc max-suggested N` gives more or fewer pages per prompt. The line's
 byte cap grows with N, so each extra page allows up to 200 more bytes of
 context. Change `[recall]` only on evidence from the recorded sessions.
-The planned `iirc tune` command will propose values from those records
-for you to approve.
+
+Say "tune recall", or run `/iirc tune`. The agent follows
+[the tune reference](../skills/iirc/references/tune.md): it gathers the
+recorded sessions, judges each suggestion against what the session
+needed, and sweeps the knobs over those judgements. You then see each
+proposal with its evidence: a page to narrow, split, or write, or a knob
+value with the counts before and after. Nothing changes until you say
+yes. A knob change edits `.claude/iirc.toml`, which you commit. Expect
+the first knob proposal only after a few sessions: the sweep needs 30
+judged pairs with a distance, and only recalls since plugin commit
+699d710 record distances.
 
 ### Where the records live
 

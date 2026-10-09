@@ -462,7 +462,22 @@ change the records support, and a code finding for the developer when the
 records contradict a rule. The replay that keeps plain words out of the
 gate is that kind of finding.
 
-A planned `iirc tune` command, not yet built, will do this work. The plan
-is that it joins the records to the transcripts, the agent judges each
-suggestion, a sweep tests knob values against those judgements, and a
-change applies only when you say yes.
+`iirc tune` does this work, in four steps the agent runs from
+[the tune reference](../skills/iirc/references/tune.md):
+
+1. `iirc tune gather` joins the log, the candidate rows, and the prompt
+   excerpts to each session's transcript. It writes one evidence file
+   per session to `~/.local/state/dokidlc-iirc/tune/`: each recall's
+   prompt, the pages it suggested, the candidates worth judging, and what
+   the agent did next. A script does the joining, so no tokens go to it.
+2. The agent reads each page with `iirc read --for-tune`, which is not
+   counted as a read by the session, and records a verdict per pair with
+   `iirc tune judge`: relevant, noise, or unsure. It judges from the prompt
+   and what happened next, not from the match percentage.
+3. `iirc tune sweep` replays the gate over the judged pairs for a grid of
+   `semantic_only` and `both` values and prints precision, recall, and
+   F1 for each. Below 30 judged pairs with a distance, it proposes nothing.
+4. The agent proposes page fixes and, when the sweep supports one, a knob
+   change with `iirc knobs set`. Code findings go in a section for the
+   developer. Nothing applies until you say yes. `iirc tune done` marks
+   each session, and gather skips a session that did the judging itself.
