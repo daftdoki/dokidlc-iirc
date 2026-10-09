@@ -25,7 +25,9 @@ const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, hi
 const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0, sessionTop: 0, pageTop: 0 } as Cursor)
 // The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
-const HEADER_ROWS = 3
+const HEADER_ROWS = 4
+// the keys row, `j: down  k: up ... q: close`, in columns
+const LEGEND_COLUMNS = 60
 let paneRows = 20
 let sessionRowStops: (string | null)[] = []
 let pageHeights: number[] = []
@@ -587,7 +589,8 @@ export const register: Register = on => {
     const r = await read($, reader)
     const c = await read($, cursor)
     const { Box, Text } = $.ui.resolve(e)
-    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS)
+    // the keys row wraps in a narrow pane, and the header grows by a row
+    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0))
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
     let items: unknown[]
     let top: number
@@ -608,8 +611,8 @@ export const register: Register = on => {
     // the content past the window is drawn and clipped: the window never moves, this hook moves `top`
     return (
       <Box flexDirection="column">
-        {drawTabs($, e, r)}
-        <Text color="subtle">{top > 0 ? `↑ ${top} above` : ' '}</Text>
+        {drawTabs($, e, r, e.props.bodyColumns)}
+        <Text color="subtle">{top > 0 ? `  ↑ ${top} above` : ' '}</Text>
         {items.slice(top) as never}
       </Box>
     )
@@ -1116,45 +1119,68 @@ export function ageText(iso: unknown, now = Date.now()): string {
   return days < 1 ? 'today' : days === 1 ? '1 day ago' : days < 60 ? `${days} days ago` : `${Math.floor(days / 30)} months ago`
 }
 
-/** The pane's own tab row: the Session tab, and the page tab with its close mark while a page is open. */
-function drawTabs($: EngineInterface, e: ResolveInput, r: Reader) {
+/** A gradient rule, orange to violet, as the cards draw under their title. */
+function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 'rule') {
+  const { Box, Text } = $.ui.resolve(e)
+  const n = Math.max(1, width)
+  return (
+    <Box key={key} flexDirection="row">
+      {Array.from({ length: n }, (_, k) => <Text key={`r${k}`} color={mix(TAGLINE_FROM, TAGLINE_TO, n > 1 ? k / (n - 1) : 0)}>━</Text>)}
+    </Box>
+  )
+}
+
+/** A filled chip, as the card's STATUS: dark text on a color. */
+function chip($: EngineInterface, e: ResolveInput, key: string, text: string, color: string) {
+  const { Text } = $.ui.resolve(e)
+  return <Text key={key} bold color="#0d1117" backgroundColor={color}>{` ${text} `}</Text>
+}
+
+// a kind's chip color: decisions violet, findings blue, procedures green, environment facts amber
+const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb6ff', procedure: '#57ab5a', environment: '#d4a72c' }
+
+/** The pane's fixed header: its tabs as chips with the iirc mark, the gradient rule, and the keys. */
+function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number) {
   const { Box, Button, Text } = $.ui.resolve(e)
   const name = r.loading ?? r.page?.name
   const isPage = r.tab === 'page' && !!name
+  // the shown tab is a filled chip; the other is plain, dim until the pointer or the focus is on it
   const tab = (key: string, hotkey: string, label: string, isOn: boolean, onPress: () => void) => (
     <Button key={key} plain hotkey={hotkey} onPress={onPress}>
-      <Text bold={isOn} color={isOn ? HEADING : 'subtle'} underline={isOn}>{label}</Text>
+      {isOn ? <Text bold color="#0d1117" backgroundColor={HEADING}>{` ${label} `}</Text> : <Text color="subtle">{` ${label} `}</Text>}
     </Button>
+  )
+  const key = (k: string, label: string, onPress: () => void) => (
+    <Box key={`vi-${k}`} flexShrink={0} marginRight={2}>
+      <Button key={`key-${k}`} plain hotkey={k} onPress={onPress}><Text color="subtle">{label}</Text></Button>
+    </Box>
   )
   return (
     <Box flexDirection="column">
       <Box flexDirection="row">
-        {tab('tab-session', '1', 'session', !isPage, () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
-        {name && <Text color="subtle">{'   '}</Text>}
-        {name && tab('tab-page', '2', tabTitle(name), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
-        {name && <Text>{' '}</Text>}
-        {name && (
-          <Button key="tab-close" plain hotkey="x" onPress={() => void update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))}>
-            <Text color="subtle">✕</Text>
-          </Button>
-        )}
+        <Box flexDirection="row" flexGrow={1}>
+          {tab('tab-session', '1', 'session', !isPage, () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
+          {name && <Text>{' '}</Text>}
+          {name && tab('tab-page', '2', tabTitle(name), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
+          {name && (
+            <Button key="tab-close" plain hotkey="x" onPress={() => void update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))}>
+              <Text color="subtle">✕</Text>
+            </Button>
+          )}
+        </Box>
+        <Text color={LEVEL_COLOR.ok}>● </Text>
+        <Text bold color="claude">iirc</Text>
       </Box>
+      {gradientRule($, e, columns)}
       {/* the vi keys: each a Button, since a hotkey belongs to one; the row is also their legend */}
       <Box flexDirection="row" flexWrap="wrap">
-        {([['j', 'down', 1], ['k', 'up', -1], ['g', 'top', 'start'], ['e', 'end', 'end']] as const).map(([key, label, step]) => (
-          <Box key={`vi-${key}`} flexShrink={0} marginRight={2}>
-            <Button key={`key-${key}`} plain dimColor hotkey={key} onPress={() => void moveCursor($, step)}>{label}</Button>
-          </Box>
-        ))}
-        <Box flexShrink={0} marginRight={2}>
-          <Button key="key-h" plain dimColor hotkey="h" onPress={() => void update($, reader, x => ({ ...x, tab: 'session' as const }))}>session</Button>
-        </Box>
-        <Box flexShrink={0} marginRight={2}>
-          <Button key="key-l" plain dimColor hotkey="l" onPress={() => void update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x))}>page</Button>
-        </Box>
-        <Box flexShrink={0}>
-          <Button key="key-q" plain dimColor hotkey="q" onPress={() => void $.ui.close({ id: PANE }).catch(() => undefined)}>close pane</Button>
-        </Box>
+        {key('j', 'down', () => void moveCursor($, 1))}
+        {key('k', 'up', () => void moveCursor($, -1))}
+        {key('g', 'top', () => void moveCursor($, 'start'))}
+        {key('e', 'end', () => void moveCursor($, 'end'))}
+        {key('h', 'session', () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
+        {key('l', 'page', () => void update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x)))}
+        {key('q', 'close', () => void $.ui.close({ id: PANE }).catch(() => undefined))}
       </Box>
     </Box>
   )
@@ -1176,22 +1202,41 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
       stop: isGone ? null : `open-${key}`,
       el: (
         <Box key={key} flexDirection="row">
-          <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
-          <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
+          <Box width={2} flexShrink={0}><Text bold color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
+          <Box width={3} flexShrink={0}><Text bold color={color}>{mark}</Text></Box>
           {/* a page renamed or deleted since is no link: there is nothing to open */}
           {isGone ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
-          <Text color="subtle">{isGone ? '  renamed or deleted' : tail}</Text>
+          {isGone && <Text color="subtle">{'  renamed or deleted'}</Text>}
+          {!isGone && tail && <Text>{' '}</Text>}
+          {!isGone && tail && chip($, e, 'times', tail.trim(), LEVEL_COLOR.warn)}
         </Box>
       ),
     })
   }
   const blank = (key: string) => line(key, <Text> </Text>)
-  // short rows: a row wider than the pane shrinks every piece in it
-  line('h1', [<Text key="n" bold color="claude">{`${c.used}/${c.suggested}`}</Text>, <Text key="t" color="subtle">{' suggested pages read'}</Text>])
-  line('h2', <Text color="subtle">{'click a name to read the page'}</Text>)
+  // THIS SESSION as the status card draws it: tiles of big numbers, then the hit rate as a gradient gauge
+  out.push({ stop: null, el: sectionTitle($, e, 'THIS SESSION') })
+  const tiles: [string, string][] = [[`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
+  line('tiles-n', tiles.map(([n, label]) => <Box key={label} width={12} flexShrink={0}><Text bold color="claude">{n}</Text></Box>))
+  line('tiles-l', tiles.map(([, label]) => <Box key={label} width={12} flexShrink={0}><Text color="subtle">{label}</Text></Box>))
+  if (c.suggested > 0) {
+    const BAR = 24
+    const share = c.used / c.suggested
+    const filled = Math.round(share * BAR)
+    const pct = Math.round(share * 100)
+    const band = pct >= 50 ? GAUGE[2] : pct >= 25 ? GAUGE[1] : GAUGE[0]
+    line('gauge', [
+      ...Array.from({ length: BAR }, (_, k) => (k < filled ? <Text key={`g${k}`} color={gaugeColor(k / (BAR - 1))}>█</Text> : <Text key={`g${k}`} color="inactive">░</Text>)),
+      <Text key="pct" bold color={band}>{`  ${pct}% read`}</Text>,
+    ])
+  }
   blank('b1')
   out.push({ stop: null, el: sectionTitle($, e, 'SUGGESTED') })
-  line('legend', <Box paddingLeft={2}><Text color="subtle">{'✓ read · not read, ×N times suggested'}</Text></Box>)
+  line('legend', [
+    <Text key="a" color={LEVEL_COLOR.ok}>{'  ✓ '}</Text>, <Text key="b" color="subtle">{'read   '}</Text>,
+    <Text key="c" color="subtle">{'· '}</Text>, <Text key="d" color="subtle">{'not read   '}</Text>,
+    chip($, e, 'e', '×N', LEVEL_COLOR.warn), <Text key="f" color="subtle">{' times suggested'}</Text>,
+  ])
   const suggested = sortSuggested(sp, c)
   if (suggested.length === 0) line('none', <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>)
   for (const name of suggested) {
@@ -1231,27 +1276,45 @@ function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, c
   const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
   const topics = Array.isArray(fm.topics) ? fm.topics.map(String).join(', ') : str(fm.topics)
   const verified = fm.verified ? `verified ${ageText(fm.verified)}` : 'never verified'
-  const meta = `${str(fm.kind) || 'page'} · ${page.label} · updated ${ageText(fm.updated)} · ${verified}`
+  const meta = `${page.label} · updated ${ageText(fm.updated)} · ${verified}`
   const items: unknown[] = []
   const heights: number[] = []
+  const kind = str(fm.kind) || 'page'
+  const suspect = page.signals.find(sig => sig.level === 'suspect')
+  const trust = suspect ? chip($, e, 'trust', '▲ suspect', LEVEL_COLOR.warn) : chip($, e, 'trust', '✔ trusted', LEVEL_COLOR.ok)
   items.push(
     <Box key="head" flexDirection="column" marginBottom={1}>
-      <Box flexDirection="row">
-        {r.history.length > 0 && <Button key="back" hotkey="b" onPress={() => void goBack($)}>← Back</Button>}
-        {r.history.length > 0 && <Text> </Text>}
-        <Text bold color={TITLE}>{str(fm.title) || page.name}</Text>
+      {r.history.length > 0 && (
+        <Box flexDirection="row" marginBottom={1}>
+          <Button key="back" plain hotkey="b" onPress={() => void goBack($)}><Text color="subtle">{'← back'}</Text></Button>
+        </Box>
+      )}
+      <Text bold color={TITLE}>{str(fm.title) || page.name}</Text>
+      <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
+        {chip($, e, 'kind', kind, KIND_COLOR[kind] ?? HEADING)}
+        <Text>{' '}</Text>
+        {trust}
+        <Text color="subtle">{`  ${meta}`}</Text>
       </Box>
-      <Text color="subtle">{meta}</Text>
       {r.error && <Text color="error">{r.error}</Text>}
       {page.signals.map(sig => (
-        <Text key={`sig-${sig.signal}`} color={sig.level === 'suspect' ? 'warning' : 'subtle'}>{`${sig.level === 'suspect' ? '▲' : '·'} ${sig.level}: ${sig.reason}`}</Text>
+        <Text key={`sig-${sig.signal}`} color={sig.level === 'suspect' ? LEVEL_COLOR.warn : 'subtle'}>{`${sig.level === 'suspect' ? '▲' : '·'} ${sig.level}: ${sig.reason}`}</Text>
       ))}
-      <Text> </Text>
-      <Text italic color="suggestion">{str(fm.summary)}</Text>
-      {topics && <Text color="subtle">{`topics: ${topics}`}</Text>}
+      {/* the summary set off as a quote, the cards' orange bar beside it */}
+      <Box flexDirection="row" marginTop={1}>
+        <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+        <Text italic color="suggestion">{str(fm.summary)}</Text>
+      </Box>
+      {topics && (
+        <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
+          {topics.split(', ').map(t => <Text key={`t-${t}`} color="claude">{`#${t}  `}</Text>)}
+        </Box>
+      )}
+      <Box marginTop={1}>{gradientRule($, e, Math.min(columns, 48), 'head-rule')}</Box>
     </Box>,
   )
-  heights.push(rowsAt(str(fm.title), columns) + rowsAt(meta, columns) + (r.error ? 1 : 0) + page.signals.length + 1 + rowsAt(str(fm.summary), columns) + (topics ? 1 : 0) + 1)
+  heights.push((r.history.length > 0 ? 2 : 0) + rowsAt(str(fm.title), columns) + 1 + rowsAt(`${kind} ✔ trusted  ${meta}`, columns) + (r.error ? 1 : 0)
+    + page.signals.length + 1 + rowsAt(str(fm.summary), columns - 2) + (topics ? 2 : 0) + 2 + 1)
   // one block per paragraph, so j and k have places to stop
   paragraphs(page.body).forEach((text, i) => {
     items.push(
