@@ -283,7 +283,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
       props: { command: 'iirc:iirc', args: '', text, isErrored: false },
     })
     expect(await panel.find({ text: '68' })).toBeDefined()
-    expect(await panel.find({ text: '/iirc help' })).toBeDefined()
+    expect(await panel.find({ text: ' /iirc help ' })).toBeDefined()
     expect(await panel.find({ text: '/iirc doctor --fix' })).toBeUndefined()   // commands live in /iirc help
     expect(await panel.find({ text: 'ecall' })).toBeDefined()
     expect(await panel.find({ text: 'iirc doctor' })).toBeDefined()
