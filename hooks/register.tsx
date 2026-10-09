@@ -61,6 +61,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
   ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
+  ['index', 'rebuild the search index and index.md', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
 ]
@@ -182,7 +183,8 @@ async function showBrief($: EngineInterface, text: string) {
 async function runDirect($: EngineInterface, args: string): Promise<string> {
   const [verb, ...rest] = args.split(/\s+/)
   const argv = verb === 'search' ? [verb, rest.join(' ')] : [verb, ...rest]
-  const slow = args === 'doctor --fix' || verb === 'sync'
+  // these may embed or fetch: up to ten minutes
+  const slow = args === 'doctor --fix' || verb === 'sync' || verb === 'index'
   try {
     const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, ...argv], { cwd: await $.session.root(), timeoutMs: slow ? 600000 : 60000 })
     if (['doctor', 'sync', 'index'].includes(verb)) refreshBrief($)

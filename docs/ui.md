@@ -104,7 +104,7 @@ A plain `/iirc` draws a card in place of its output row:
   each with its value and the command that changes it
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `search QUERY`, and `read PAGE`. A page you
+  `sync`, `stores`, `stats`, `index`, `search QUERY`, and `read PAGE`. A page you
   read this way does not count toward the session's reads, which are the
   agent's.
 - ASK IN WORDS: `/iirc` followed by a request, such as
