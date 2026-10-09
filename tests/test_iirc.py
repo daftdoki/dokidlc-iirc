@@ -797,6 +797,18 @@ def test_stats(tmp_path, monkeypatch, capsys):
     assert "1 session" in out and "read after a search or recall named it: 1/1" in out
 
 
+def test_stats_session_counts_distinct_pages_read(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s5"); iirc.set_root(tmp_path)
+    iirc.log_event("read", pages=["a.md", "b.md"]); iirc.log_event("pull", query="q", hits=2, pages=["b.md", "c.md"])
+    iirc.log_event("search", query="q", hits=1, pages=["d.md"])
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
+    iirc.main(["stats", "--session", "s5"])
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"]}
+    iirc.main(["stats", "--session"])
+    assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
+
+
 def test_approved_checks_gate_doubt(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); iirc.set_root(tmp_path)
     fm = {"kind": "finding", "check": "true", "updated": "2026-09-04T00:00:00Z"}

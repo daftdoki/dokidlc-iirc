@@ -156,8 +156,11 @@ plugin draws them for you:
 - Under a failed command, the pages its error recalled, in the same form.
 - Under a command that failed and then worked, a row saying the agent was
   asked to write a page.
-- On the status line, the page count and the search mode. Warnings from the
-  session-start check, and the nudge at stop, come as toasts.
+- On the status line, the page count, the search mode, and how many pages
+  this session has read, as `◆ iirc 73 · semantic · 3 read`. A `write`,
+  `delete`, or `sync` updates the count, and a `read` or `pull` updates the
+  read count. Warnings from the session-start check, and the nudge at stop,
+  come as toasts.
 
 Both switches live in `.claude/iirc.toml`. A file that holds only these
 keys keeps the default `.iirc/` store.

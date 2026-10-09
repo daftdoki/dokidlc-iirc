@@ -12,6 +12,10 @@ declare module 'claude-code' {
       lastPrompt: string | null
       lastTool: string | null
       briefShown: string | null
+      /** The status line from the brief, before the read count joins it. */
+      status: string | null
+      /** Distinct pages this session read or pulled, from `iirc stats --session`. */
+      readCount: number
     }
   }
 }

@@ -6,8 +6,9 @@ import type { RecalledPage, ToolNote } from '../types'
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
 // pages as a folding list under the prompt or the failed command, a pencil row
-// under a command that failed and then worked, the session brief on the status
-// line, and warnings as toasts. `ui = false` in .claude/iirc.toml turns it off.
+// under a command that failed and then worked, the session brief and the count
+// of pages read this session on the status line, and warnings as toasts.
+// `ui = false` in .claude/iirc.toml turns it off.
 
 const byPrompt = atom({ plugin: 'iirc', key: 'byPrompt' } as const, {})
 const byTool = atom({ plugin: 'iirc', key: 'byTool' } as const, {})
@@ -15,6 +16,8 @@ const open = atom({ plugin: 'iirc', key: 'open' } as const, {})
 const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
+const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
+const readCount = atom({ plugin: 'iirc', key: 'readCount' } as const, 0)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -23,7 +26,9 @@ const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plug
 const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
-const CHANGES_BRIEF_RE = /\biirc\s+(migrate|setup|init|doctor)\b/
+// commands that change the page count or the setup the brief reports, and commands that read pages
+const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)\b/
+const READS_RE = /\biirc\s+(read|pull)\b/
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -90,12 +95,38 @@ async function uiEnabled($: EngineInterface): Promise<boolean> {
 async function showBrief($: EngineInterface, text: string) {
   const brief = parseBrief(text)
   if (!brief) return
-  $.ui.status(brief.status)
+  await update($, status, () => brief.status)
+  await drawStatus($)
   const warned = brief.warnings.join(' ')
   if (warned && (await read($, briefShown)) !== warned) {
     await update($, briefShown, () => warned)
     $.ui.toast(`iirc: ${brief.warnings.join(' ')}`)
   }
+}
+
+/** The brief's status, with the session's read count once the brief reports a page count. */
+async function drawStatus($: EngineInterface) {
+  const base = await read($, status)
+  if (base === null) return
+  $.ui.status(/^◆ iirc \d+/.test(base) ? `${base} · ${await read($, readCount)} read` : base)
+}
+
+/** Ask iirc how many distinct pages this session has read, from its log. */
+function refreshReads($: EngineInterface) {
+  $.clock.after(0, () => {
+    void (async () => {
+      if (!(await uiEnabled($))) return
+      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'stats', '--session', await $.session.id()], {
+        cwd: await $.session.root(),
+        timeoutMs: 15000,
+      })
+      if (ran.exitCode !== 0) return
+      const pages = (JSON.parse(ran.stdout) as { read?: unknown }).read
+      if (!Array.isArray(pages)) return
+      await update($, readCount, () => pages.length)
+      await drawStatus($)
+    })().catch(() => {})
+  })
 }
 
 /** Ask iirc for the brief and show it. Without --hook, doctor --brief reads no stdin and pulls nothing. */
@@ -119,15 +150,19 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     refreshBrief($)
+    refreshReads($)
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) await update($, lastTool, () => e.tool_use_id)
     const result = await next(e)
-    // these change what the brief says, so the status line would go stale until the next session
+    // keep the status line's page count and read count current within the session
     const command = (e.input as { command?: unknown } | undefined)?.command
-    if (e.tool === 'Bash' && typeof command === 'string' && CHANGES_BRIEF_RE.test(command)) refreshBrief($)
+    if (e.tool === 'Bash' && typeof command === 'string') {
+      if (CHANGES_BRIEF_RE.test(command)) refreshBrief($)
+      if (READS_RE.test(command)) refreshReads($)
+    }
     return result
   })
 

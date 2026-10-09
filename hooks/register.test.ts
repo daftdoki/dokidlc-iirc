@@ -137,7 +137,7 @@ test('sets the status line and toasts the brief warnings, and toasts the stop nu
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
   await hookRow($, 'SessionStart', BRIEF, 'h4')
   await hookRow($, 'Stop', STOP, 'h5')
-  expect(status).toEqual(['◆ iirc 68 · semantic'])
+  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read'])
   expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
 })
@@ -157,7 +157,7 @@ test('at session start, asks iirc for the brief and shows it once', async ($: En
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
   expect(String((argv[0] as string[])[0])).toContain('bin/iirc')
-  expect(status).toEqual(['◆ iirc 68 · semantic', '◆ iirc 68 · semantic'])
+  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read', '◆ iirc 68 · semantic · 0 read'])
   expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.'])
 })
 
@@ -172,7 +172,30 @@ test('after a command that changes the brief, asks iirc for it again', async ($:
   await $.tool.call({ tool: 'Bash', input: { command: '~/x/bin/iirc migrate' }, tool_use_id: 't5' })
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
-  expect(status).toEqual(['◆ iirc 68 · semantic'])
+  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read'])
+})
+
+test('after a read, counts the pages this session read', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const status: unknown[] = []
+  const argv: string[][] = []
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('session.id', () => ({ value: 's1' }))
+  on('process.run', ($, e) => {
+    argv.push([...e.argv])
+    return e.argv.includes('stats') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'] })) : ran(BRIEF)
+  })
+  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  await $.tool.call({ tool: 'Bash', input: { command: 'iirc doctor --brief' }, tool_use_id: 't6' })
+  await clock.settle()
+  for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
+  await $.tool.call({ tool: 'Bash', input: { command: 'iirc read a.md b.md' }, tool_use_id: 't7' })
+  await clock.settle()
+  for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
+  expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
+  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read', '◆ iirc 68 · semantic · 2 read'])
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
