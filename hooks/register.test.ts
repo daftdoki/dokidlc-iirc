@@ -520,6 +520,9 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
   expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
   await view.press({ key: 'tab-page' })
   expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
+  await view.press({ key: 'key-x' })
+  expect(await view.find({ key: 'tab-page' })).toBeUndefined()            // x closes the page tab
+  expect(await view.find({ key: 'key-x' })).toBeUndefined()
 
 })
 

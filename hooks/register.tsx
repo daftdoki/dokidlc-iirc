@@ -1229,12 +1229,15 @@ function chip($: EngineInterface, e: ResolveInput, key: string, text: string, co
 const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb6ff', procedure: '#57ab5a', environment: '#d4a72c' }
 
 // the keys row: key, label, the glyph a narrow pane shows instead, what it does
-const KEYS: [string, string, string, 'down' | 'up' | 'top' | 'end' | 'session' | 'page' | 'close'][] = [
+const KEYS: [string, string, string, 'down' | 'up' | 'top' | 'end' | 'session' | 'page' | 'closeTab' | 'close'][] = [
   ['h', '◂', '◂', 'session'], ['j', '↓', '↓', 'down'], ['k', '↑', '↑', 'up'], ['l', '▸', '▸', 'page'],
-  ['g', 'top', '⤒', 'top'], ['e', 'end', '⤓', 'end'], ['q', 'close', '✕', 'close'],
+  ['g', 'top', '⤒', 'top'], ['e', 'end', '⤓', 'end'], ['x', 'close tab', '✕', 'closeTab'], ['q', 'close', '⏏', 'close'],
 ]
-// columns the labelled keys row takes, `h: ◂  j: ↓  k: ↑  l: ▸  g: top  e: end  q: close`; under it, glyphs alone
-const KEYS_WIDE = 50
+
+/** The keys row's columns with labels: each `k: label` and two spaces after. Narrower panes show glyphs alone. */
+function keysWidth(keys: typeof KEYS): number {
+  return keys.reduce((n, [k, label]) => n + k.length + 2 + label.length + 2, 0)
+}
 
 /** What a key of the keys row does. */
 function runKey($: EngineInterface, act: (typeof KEYS)[number][3]) {
@@ -1244,6 +1247,7 @@ function runKey($: EngineInterface, act: (typeof KEYS)[number][3]) {
   if (act === 'end') return moveCursor($, 'end')
   if (act === 'session') return update($, reader, x => ({ ...x, tab: 'session' as const }))
   if (act === 'page') return update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x))
+  if (act === 'closeTab') return update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   return $.ui.close({ id: PANE }).catch(() => undefined)
 }
 
@@ -1281,11 +1285,16 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
       )}
       {/* the vi keys on one line: each a Button, since a hotkey belongs to one; glyphs alone in a narrow pane */}
       {isFocused && <Box flexDirection="row">
-        {KEYS.map(([k, label, glyph, act]) => (
-          <Box key={`vi-${k}`} flexShrink={0} marginRight={2}>
-            <Button key={`key-${k}`} plain hotkey={k} onPress={() => void runKey($, act)}><Text color="subtle">{columns >= KEYS_WIDE ? label : glyph}</Text></Button>
-          </Box>
-        ))}
+        {/* x shows only while a page tab is open: there is nothing else to close */}
+        {(() => {
+          const keys = KEYS.filter(([, , , act]) => act !== 'closeTab' || !!name)
+          const isWide = columns >= keysWidth(keys)
+          return keys.map(([k, label, glyph, act]) => (
+            <Box key={`vi-${k}`} flexShrink={0} marginRight={2}>
+              <Button key={`key-${k}`} plain hotkey={k} onPress={() => void runKey($, act)}><Text color="subtle">{isWide ? label : glyph}</Text></Button>
+            </Box>
+          ))
+        })()}
       </Box>}
       {/* the rule closes the header: the content starts below it */}
       {gradientRule($, e, columns)}

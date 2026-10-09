@@ -158,6 +158,7 @@ tabs: `session`, and, while a page is open, the page's name. Under it, a row of 
 | `g`, `e` | the top, the end | the top, the end |
 | `h`, `l` | the session tab, the page tab | the same |
 | `1`, `2`, `b` | the session tab, the page tab | the same, and `b` goes back |
+| `x` | | close the page tab, back to the session tab |
 | `q` | close the pane | close the pane |
 
 The keys work while the pane has the keyboard. Without it, the `●` beside
