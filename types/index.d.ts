@@ -29,8 +29,8 @@ export type ShownPage = {
   signals: { signal: string; level: 'suspect' | 'glance'; reason: string }[]
 }
 
-/** The reader tab: the page shown, and the pages before it for Back. */
-export type Reader = { page: ShownPage | null; history: string[]; error: string | null; loading: string | null }
+/** The pane's tabs: which one shows, the page in the page tab, and the pages before it for Back. */
+export type Reader = { page: ShownPage | null; history: string[]; error: string | null; loading: string | null; tab: 'session' | 'page' }
 
 /** This session's pages by name, from `iirc stats --session`, for the Session tab. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[] }

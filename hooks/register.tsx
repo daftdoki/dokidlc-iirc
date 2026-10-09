@@ -21,11 +21,12 @@ const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
-const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null } as Reader)
+const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [] } as SessionPages)
-// the pane's two tabs: this session's pages, and a reader the page names open
-const SESSION_PANE = 'iirc'
-const READER_PANE = 'iirc-page'
+// one pane with two tabs of its own: this session's pages, and a reader the page names open.
+// Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
+// 144 columns; tabs inside one pane switch with no open at all
+const PANE = 'iirc'
 // a tab label past this many characters is cut
 const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
@@ -280,12 +281,10 @@ export function tabTitle(name: string): string {
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
-  // open first, while the press still counts as the person's: an open after an await may count as
-  // unasked, and an unasked pane waits undrawn on a terminal under 144 columns
-  await update($, reader, r => ({ ...r, loading: ref }))
-  const opened = await $.ui.open({ id: READER_PANE, title: tabTitle(ref), focus: true, rows: 24 })
-  $.ui.log(`iirc: reader open for ${ref}: ${JSON.stringify(opened)}`)
-  if (!opened.isPlaced) $.ui.toast(`iirc: the page tab is waiting: ${opened.reason}`)
+  await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
+  // a name in the tree or a card opens the pane; inside the pane this only retitles it
+  const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
+  if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
   let page: ShownPage | null = null
   let error: string | null = null
   try {
@@ -300,6 +299,7 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
     error = `iirc show ${ref} did not finish: ${String(err)}`
   }
   await update($, reader, r => ({
+    ...r,
     page: page ?? r.page,
     error,
     loading: null,
@@ -320,7 +320,8 @@ async function goBack($: EngineInterface) {
 async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
-  await $.ui.open({ id: SESSION_PANE, title: 'iirc', focus: true })
+  await update($, reader, r => ({ ...r, tab: 'session' as const }))
+  await $.ui.open({ id: PANE, title: 'iirc', focus: true })
 }
 
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
@@ -501,12 +502,19 @@ export const register: Register = on => {
     return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
   })
 
-  on('ui.render', { component: 'Pane', requestId: SESSION_PANE }, async ($, e) =>
-    drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health)))
-  on('ui.render', { component: 'Pane', requestId: READER_PANE }, async ($, e) => drawReader($, e, await read($, reader)))
-  // a closed reader starts empty next time, with no stale page or way back
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const r = await read($, reader)
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {drawTabs($, e, r)}
+        {r.tab === 'page' ? drawReader($, e, r) : drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health))}
+      </Box>
+    )
+  })
+  // a closed pane starts at the Session tab next time, with no stale page or way back
   on('ui.close', async ($, e, next) => {
-    if (e.id === READER_PANE) await update($, reader, () => ({ page: null, history: [], error: null, loading: null }))
+    if (e.id === PANE) await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
     return next(e)
   })
 
@@ -988,6 +996,34 @@ export function ageText(iso: unknown, now = Date.now()): string {
   if (Number.isNaN(t)) return 'unknown'
   const days = Math.floor((now - t) / 86400000)
   return days < 1 ? 'today' : days === 1 ? '1 day ago' : days < 60 ? `${days} days ago` : `${Math.floor(days / 30)} months ago`
+}
+
+/** The pane's own tab row: the Session tab, and the page tab with its close mark while a page is open. */
+function drawTabs($: EngineInterface, e: ResolveInput, r: Reader) {
+  const { Box, Button, Text } = $.ui.resolve(e)
+  const name = r.loading ?? r.page?.name
+  const isPage = r.tab === 'page' && !!name
+  const tab = (key: string, hotkey: string, label: string, isOn: boolean, onPress: () => void) => (
+    <Button key={key} plain hotkey={hotkey} onPress={onPress}>
+      <Text bold={isOn} color={isOn ? HEADING : 'subtle'} underline={isOn}>{label}</Text>
+    </Button>
+  )
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        {tab('tab-session', '1', 'session', !isPage, () => void update($, reader, x => ({ ...x, tab: 'session' as const })))}
+        {name && <Text color="subtle">{'   '}</Text>}
+        {name && tab('tab-page', '2', tabTitle(name), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
+        {name && <Text>{' '}</Text>}
+        {name && (
+          <Button key="tab-close" plain hotkey="x" onPress={() => void update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))}>
+            <Text color="subtle">✕</Text>
+          </Button>
+        )}
+      </Box>
+      <Text> </Text>
+    </Box>
+  )
 }
 
 /** The Session tab: what recall suggested this session and whether it was read, what was written, and what may be wrong. */

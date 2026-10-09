@@ -147,18 +147,19 @@ Neither card costs tokens: the plugin answers, and the skill does not load.
 ## The pane
 
 `/iirc pane` opens a pane beside the transcript, or above the prompt on
-a terminal that is not in fullscreen. It has two tabs, which Claude Code
-draws once both are open.
+a terminal that is not in fullscreen. A row at its top holds its own
+tabs: `session`, and, while a page is open, the page's name and a `✕`
+that closes it. While the pane has the keys, `1` and `2` switch tabs and
+`x` closes the page.
 
-The `iirc` tab lists this session's pages:
+The session tab lists this session's pages:
 
 - SUGGESTED: every page recall suggested, read ones first with `✓ read`,
   then the rest with `· not read` and how many times recall suggested it
 - WRITTEN: the pages the agent wrote, marked `✎`
 - SUSPECT: pages whose cited file changed
 
-A click on any page name opens the page in the second tab, named after
-the page. Page names are links in the same way under your prompt and
+A click on any page name opens the page in the page tab. Page names are links in the same way under your prompt and
 under a failed command, and in the TRUST and SUGGESTED, NOT READ lists
 of the `/iirc status` card.
 
@@ -166,8 +167,13 @@ The page tab shows the title, the kind, the store, when the page was
 updated and verified, any suspect or glance marker, the summary and
 topics, the body, and the path. Pages the body links with `[[name]]` are
 listed under LINKED PAGES; a click opens one in the same tab, and Back
-(`b` while the pane has the keys) returns to the page before. Close the
-tab with its close mark.
+(`b` while the pane has the keys) returns to the page before.
+
+A page name outside the pane opens the pane too. Claude Code counts that
+open as the plugin's, not yours, and places such a pane only on a
+terminal at least 144 columns wide, or 110 once you have opened the pane
+yourself with `/iirc pane`. On a narrower terminal a toast says the pane
+is waiting.
 
 Reading a page here is your read, not the agent's: it runs `iirc show`,
 which the log records as `show`, so the session's reads and hit rate

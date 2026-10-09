@@ -494,25 +494,33 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
     plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
     props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
   })
-  const session = await pane('iirc', 'iirc')
-  expect(await session.find({ text: ' ×3' })).toBeDefined()
-  expect(await session.find({ text: 'w' })).toBeDefined()                       // written
-  expect(await session.find({ key: 'open-x-old.md' })).toBeDefined()          // suspect
-  await session.press({ key: 'open-s-a.md' })
+  const view = await pane('iirc', 'iirc')
+  expect(await view.find({ text: ' ×3' })).toBeDefined()
+  expect(await view.find({ text: 'w' })).toBeDefined()                       // written
+  expect(await view.find({ key: 'open-x-old.md' })).toBeDefined()           // suspect
+  expect(await view.find({ key: 'tab-page' })).toBeUndefined()              // no page tab until a page is open
+  await view.press({ key: 'open-s-a.md' })
   expect(shown).toEqual(['a.md'])
-  expect(opened.at(-1)).toBe('iirc-page:a')
-  const reader = await pane('iirc-page', 'a')
-  expect(await reader.find({ text: 'Title of a.md' })).toBeDefined()
-  expect(await reader.find({ text: 'one line' })).toBeDefined()
-  expect(await reader.find({ key: 'back' })).toBeUndefined()                    // nothing to go back to yet
-  await reader.press({ key: 'link-b.md' })
-  expect(opened.at(-1)).toBe('iirc-page:b')
-  expect(await reader.find({ text: 'Title of b.md' })).toBeDefined()
-  expect(await reader.find({ key: 'back' })).toBeDefined()
-  await reader.press({ key: 'back' })
+  expect(opened).toEqual(['iirc:iirc', 'iirc:iirc'])                        // the same pane, never a second one
+  expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
+  expect(await view.find({ text: 'one line' })).toBeDefined()
+  expect(await view.find({ key: 'back' })).toBeUndefined()                  // nothing to go back to yet
+  await view.press({ key: 'link-b.md' })
+  expect(await view.find({ text: 'Title of b.md' })).toBeDefined()
+  expect(await view.find({ key: 'back' })).toBeDefined()
+  await view.press({ key: 'back' })
   expect(shown).toEqual(['a.md', 'b.md', 'a.md'])
-  expect(await reader.find({ text: 'Title of a.md' })).toBeDefined()
-  expect(await reader.find({ key: 'back' })).toBeUndefined()
+  expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
+  expect(await view.find({ key: 'back' })).toBeUndefined()
+  // the tab row switches without losing the page, and the close mark drops it
+  await view.press({ key: 'tab-session' })
+  expect(await view.find({ text: 'Title of a.md' })).toBeUndefined()
+  expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
+  await view.press({ key: 'tab-page' })
+  expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
+  await view.press({ key: 'tab-close' })
+  expect(await view.find({ key: 'tab-page' })).toBeUndefined()
+  expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
 })
 
 test('a page name in the suggested-pages tree opens the reader', async ($: Engine, on: On) => {
@@ -525,5 +533,5 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
   await row.press({ key: 'toggle-p-tree' })
   await row.press({ key: 'open-p-tree-0-0-1' })
-  expect(opened).toEqual(['iirc-page:pysqlite3-install-override'])
+  expect(opened).toEqual(['iirc:iirc'])
 })
