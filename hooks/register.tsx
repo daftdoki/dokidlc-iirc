@@ -503,15 +503,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
-      <Box flexDirection="row" justifyContent="space-between">
-        <Box flexDirection="row">{head}</Box>
-        {view === 'home' && (
-          <Box flexDirection="row" flexShrink={0}>
-            <Text bold color="suggestion">{'? '}</Text>
-            <Text bold color="suggestion">/iirc help</Text>
-          </Box>
-        )}
-      </Box>
+      <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
         <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
       </Box>
@@ -527,6 +519,19 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
           <Text dimColor italic>{example}</Text>
         </Box>
       ))}
+      {view === 'home' && <Text> </Text>}
+      {view === 'home' && (
+        <Box flexDirection="row">
+          <Box width={16} flexShrink={0}>{heading('COMMANDS')}</Box>
+          <Text color="suggestion">/iirc help</Text>
+        </Box>
+      )}
+      {view === 'home' && (
+        <Box flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor italic>settings, maintenance, and look-up</Text>
+        </Box>
+      )}
       {view === 'home' && <Text> </Text>}
       {view === 'home' && <Box flexDirection="row">{statusRow}</Box>}
       {view === 'home' && tiles.length > 0 && <Text> </Text>}
