@@ -2203,3 +2203,18 @@ def test_worth_judging_takes_one_page_past_max_suggested():
     cands = [{"page": "a.md", "verdict": "passed", "distance": 0.2}, {"page": "b.md", "verdict": "over_max", "distance": 0.22},
              {"page": "c.md", "verdict": "over_max", "distance": 0.23}, {"page": "d.md", "verdict": "too_far", "distance": 0.35}]
     assert [c["page"] for c in iirc.worth_judging(cands, knobs)] == ["a.md", "b.md", "d.md"]
+
+
+def test_show_returns_the_page_as_json_and_is_not_the_agents_read(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s12")
+    field = tmp_path / ".iirc"; field.mkdir()
+    (field / "a.md").write_text("---\ntitle: A\nsummary: s\ntopics: [x]\nkind: finding\n---\nSee [[b]] and [[gone]].\n")
+    (field / "b.md").write_text("---\ntitle: B\n---\nb\n")
+    iirc.set_root(tmp_path)
+    iirc.main(["show", "a.md"])
+    out = json.loads(capsys.readouterr().out)
+    assert (out["name"], out["store"], out["fm"]["title"]) == ("a.md", "project", "A")
+    assert out["body"].startswith("See [[b]]") and out["links"] == ["b.md"] and out["signals"] == []
+    assert [r["cmd"] for r in iirc.read_log(session="s12")] == ["show"]
+    assert iirc.session_summary("s12")["read"] == []

@@ -1370,6 +1370,32 @@ def cmd_read(args: argparse.Namespace) -> None:
         die(failed.stderr.strip() or "read failed", failed.returncode)
 
 
+LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
+
+
+def cmd_show(args: argparse.Namespace) -> None:
+    """One page as JSON for the pane's reader. The person's read: logged as `show`, never as the agent's `read`."""
+    require_stores()
+    store, page = resolve_page(args.page)
+    path = store.dir / page
+    if not path.is_file():
+        die(f"no page {args.page}; `iirc search` finds pages")
+    log_event("show", pages=[args.page])
+    fm, body = parse_page(path.read_text())
+    # [[name]] links that name a page in some store, so the reader can open them
+    links = []
+    for m in LINK_RE.finditer(body):
+        name = m[1].strip()
+        name = name if name.endswith(".md") else name + ".md"
+        if find_page(name) and name not in links:
+            links.append(name)
+    print(json.dumps({
+        "store": store.name, "name": page, "label": page_label(store.name, page), "path": str(path),
+        "fm": fm, "body": body, "links": links,
+        "signals": [{"signal": sig, "level": SIGNALS[sig][1], "reason": reason} for sig, reason in suspicion(fm)],
+    }, default=str))
+
+
 # --- pages and frontmatter --------------------------------------------------
 
 
@@ -3559,6 +3585,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("pages", nargs="+")
     p.add_argument("--for-tune", action="store_true", help="a read to judge a page for `iirc tune`; logged apart from the session's reads")
     p.set_defaults(func=cmd_read)
+
+    p = sub.add_parser("show", help="one page as JSON, for the person's reader; not counted as the agent's read")
+    p.add_argument("page")
+    p.set_defaults(func=cmd_show)
 
     p = sub.add_parser(
         "write", help="write a page; body on stdin", formatter_class=argparse.RawDescriptionHelpFormatter,
