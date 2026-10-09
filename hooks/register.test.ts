@@ -635,3 +635,36 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   await view.press({ key: 'key-q' })
   expect(closed).toEqual(['iirc'])
 })
+
+test('transcript reader: /iirc session draws the session tab as a card; with /iirc reader transcript a name runs /iirc show, whose output is the page card', async ($: Engine, on: On) => {
+  engine(on)
+  const opened: string[] = []
+  on('ui.open', ($, e) => (opened.push(e.id), { value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => {
+    if (e.argv.includes('show')) {
+      return ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'Title of a', kind: 'finding', summary: 'one line' }, body: 'First.\n\nSecond.', links: [], signals: [] }))
+    }
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
+    if (e.argv.includes('stats')) return ran(JSON.stringify({ read: ['a.md'], written: ['w.md'], suggested: ['a.md'], used: ['a.md'], missed: [], match: {}, timeouts: 0, gone: [] }))
+    return ran(BRIEF)
+  })
+  const text = (await $.command.run({ command: 'iirc', args: 'session' })).text
+  expect(text).toContain('1 pages suggested, 1 read; 1 written')
+  const card = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'sess', props: { command: 'iirc', args: 'session', text, isErrored: false } })
+  expect(await card.find({ text: 'THIS SESSION' })).toBeDefined()
+  expect(await card.find({ key: 'open-s-a.md' })).toBeDefined()
+  expect(await card.find({ key: 'open-w-w.md' })).toBeDefined()
+  expect((await $.command.run({ command: 'iirc', args: 'reader' })).text).toContain('reader is pane')
+  expect((await $.command.run({ command: 'iirc', args: 'reader nowhere' })).text).toContain('takes pane or transcript')
+  expect((await $.command.run({ command: 'iirc', args: 'reader transcript' })).text).toContain('card in the transcript')
+  await card.press({ key: 'open-s-a.md' })
+  expect(opened).toEqual([])                                     // no pane: the page went to the transcript
+  const showText = (await $.command.run({ command: 'iirc', args: 'show a.md' })).text
+  expect(showText).toContain('Title of a')
+  const pageCard = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'show-a', props: { command: 'iirc', args: 'show a.md', text: showText, isErrored: false } })
+  expect(await pageCard.find({ text: 'Title of a' })).toBeDefined()
+  expect(await pageCard.find({ text: ' finding ' })).toBeDefined()
+  expect(await pageCard.find({ key: 'para-1' })).toBeDefined()
+})

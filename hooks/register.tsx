@@ -22,6 +22,12 @@ const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
+// where a click on a page name opens it: the pane's page tab, or a card in the transcript (`/iirc show`)
+const readerPlace = atom({ plugin: 'iirc', key: 'readerPlace' } as const, 'pane' as const)
+// pages `/iirc show` read, by name, for the transcript card that draws each
+const shownPages = atom({ plugin: 'iirc', key: 'shownPages' } as const, {})
+const READER_ARGS_RE = /^\s*reader(?:\s+(\S+))?\s*$/
+const SHOW_ARGS_RE = /^\s*show\s+(\S+)\s*$/
 const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0, sessionTop: 0, pageTop: 0 } as Cursor)
 // The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
@@ -99,6 +105,8 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
   ['pane', "this session's pages; a click reads one", 'LOOK UP'],
+  ['session', "the same, as a card in the transcript", 'LOOK UP'],
+  ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
@@ -277,6 +285,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   return [
     `status-line ${shown} · max-suggested ${max}`,
     '/iirc status-line on|off  show or hide the line under the prompt',
+    '/iirc reader pane|transcript  where a page name opens the page',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
@@ -291,6 +300,11 @@ export function tabTitle(name: string): string {
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
+  if (!isBack && (await read($, readerPlace)) === 'transcript') {
+    // as if the person typed it: the command's output row becomes the page's card
+    await $.command.run({ command: 'iirc', args: `show ${ref}` }).catch(() => undefined)
+    return
+  }
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
@@ -316,6 +330,23 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
     loading: null,
     history: isBack || !page || !r.page || r.page.label === page.label ? r.history : [...r.history, r.page.label].slice(-20),
   }))
+}
+
+/** `iirc show PAGE` for a transcript card: the page, kept by name for the card's drawing, or why not. */
+async function showPage($: EngineInterface, ref: string): Promise<{ page: ShownPage | null; error: string | null }> {
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'show', ref], {
+      cwd: await $.session.root(),
+      timeoutMs: 15000,
+      env: { CLAUDE_CODE_SESSION_ID: await $.session.id() },
+    })
+    if (ran.exitCode !== 0) return { page: null, error: (ran.stderr || ran.stdout).trim().replace(/^iirc: /, '') || `iirc show exited ${ran.exitCode}` }
+    const page = JSON.parse(ran.stdout) as ShownPage
+    await update($, shownPages, map => keepLast(map, page.name, page))
+    return { page, error: null }
+  } catch (err) {
+    return { page: null, error: `iirc show ${ref} did not finish: ${String(err)}` }
+  }
 }
 
 /** The page before this one, if the reader has one. */
@@ -437,8 +468,12 @@ export function storeText(x: IircHealth['stores'][number]): string {
 
 /** Ask iirc how many distinct pages this session has read and written, from its log. */
 function refreshCounts($: EngineInterface) {
-  $.clock.after(0, () => {
-    void (async () => {
+  // on a timer, so the run outlives this dispatch and no prompt or tool waits for it
+  $.clock.after(0, () => void loadCounts($).catch(() => {}))
+}
+
+/** This session's counts and page lists from `iirc stats --session`, awaited. */
+async function loadCounts($: EngineInterface) {
       if (!(await uiEnabled($))) return
       const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'stats', '--session', await $.session.id()], {
         cwd: await $.session.root(),
@@ -453,8 +488,6 @@ function refreshCounts($: EngineInterface) {
       await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
       await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
-    })().catch(() => {})
-  })
 }
 
 /** Ask iirc which pages are suspect and what each store holds back, for the card. */
@@ -491,6 +524,8 @@ export const register: Register = on => {
     $.clock.after(0, () => void refreshHealth($))
     try {
       if ((await $.store.get('isStatusShown')) === false) await update($, isStatusShown, () => false)
+      const place = await $.store.get('readerPlace')
+      if (place === 'pane' || place === 'transcript') await update($, readerPlace, () => place)
     } catch {}   // the line stays on, the default
     return result
   })
@@ -548,6 +583,29 @@ export const register: Register = on => {
     if (!e.args.trim()) return { text: await helpText($, 'home') }
     if (e.args.trim() === 'status') return { text: await helpText($, 'status') }
     if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
+    const placeArgs = READER_ARGS_RE.exec(e.args)
+    if (placeArgs) {
+      if (!placeArgs[1]) return { text: `iirc reader is ${await read($, readerPlace)}; /iirc reader pane|transcript changes where a page name opens` }
+      if (placeArgs[1] !== 'pane' && placeArgs[1] !== 'transcript') return { text: `iirc reader takes pane or transcript, not ${placeArgs[1]}` }
+      const place = placeArgs[1]
+      await $.store.set('readerPlace', place)
+      await update($, readerPlace, () => place)
+      return { text: place === 'pane' ? 'iirc reader pane: a page name opens the page in the pane' : 'iirc reader transcript: a page name opens the page as a card in the transcript' }
+    }
+    const showArgs = SHOW_ARGS_RE.exec(e.args)
+    if (showArgs) {
+      const ref = showArgs[1] ?? ''
+      const { page, error } = await showPage($, ref)
+      // the card draws over this text; the text stands where the card cannot
+      return { text: page ? `${String(page.fm.title ?? page.name)}\n${String(page.fm.summary ?? '')}\n\n${page.body.trim()}` : `iirc show ${ref}: ${error}` }
+    }
+    if (e.args.trim() === 'session') {
+      // the pane's session tab as a card in the transcript, with the numbers fresh
+      await loadCounts($).catch(() => {})
+      await refreshHealth($)
+      const sp = await read($, sessionPages)
+      return { text: `this session: ${sp.suggested.length} pages suggested, ${sp.used.length} read; ${sp.written.length} written` }
+    }
     if (e.args.trim() === 'pane') {
       await openSession($)
       return { text: 'iirc pane opened: this session\'s pages; a page name opens it in a reader tab' }
@@ -580,14 +638,24 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
     const args = e.props.args.trim()
+    if (isIirc && !e.props.isErrored && args === 'session') {
+      return drawSessionCard($, e, await read($, sessionPages), await read($, counts), await read($, health))
+    }
+    const shown = isIirc && !e.props.isErrored ? SHOW_ARGS_RE.exec(args) : null
+    if (shown) {
+      const pages = await read($, shownPages)
+      const name = shown[1] ?? ''
+      const page = pages[name] ?? pages[`${name}.md`]
+      return page ? drawPageCard($, e, page) : next(e)
+    }
     if (isIirc && !e.props.isErrored && (args === 'doctor' || args === 'doctor --fix')) {
       const report = parseDoctor(e.props.text)
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
     }
     if (!isIirc || !['', 'status', 'help', 'demo', 'demo status'].includes(args) || e.props.isErrored) return next(e)
     const view: CardView = args === 'help' ? 'help' : args.endsWith('status') ? 'status' : 'home'
-    if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
-    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
+    if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH, 'pane')
+    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health), await read($, readerPlace))
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -735,7 +803,7 @@ function mix(a: string, b: string, t: number): string {
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
 // The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
-function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
+function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null, place: string) {
   const { Box, Text } = $.ui.resolve(e)
   if (s) s = liveStatus(s, c)
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
@@ -846,6 +914,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
+      {setting('pages open in', place, '/iirc reader pane|transcript')}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>
@@ -1279,13 +1348,51 @@ function drawReaderNote($: EngineInterface, e: ResolveInput, r: Reader) {
   return <Text key="note" color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the session tab, the suggested pages, or a card opens the page here.'}</Text>
 }
 
+/** The pane's session tab as a card in the transcript: every row, no cursor, in the cards' frame. */
+function drawSessionCard($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null) {
+  const { Box, Text } = $.ui.resolve(e)
+  const columns = (e as { viewport?: { columns: number } }).viewport?.columns ?? 80
+  const rows = sessionItems($, e, sp, c, checkup, -1)
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1}>
+      <Box flexDirection="row">
+        <Text color={LEVEL_COLOR.ok}>● </Text>
+        <Text bold color="claude">iirc</Text>
+        <Text color="subtle">{'   this session'}</Text>
+      </Box>
+      {gradientRule($, e, Math.min(columns - 4, 60), 'session-rule')}
+      <Text> </Text>
+      {rows.map(x => x.el) as never}
+    </Box>
+  )
+}
+
+/** A page as a card in the transcript: the reader tab's drawing, whole, in the cards' frame. */
+function drawPageCard($: EngineInterface, e: ResolveInput, page: ShownPage) {
+  const { Box, Text } = $.ui.resolve(e)
+  const columns = (e as { viewport?: { columns: number } }).viewport?.columns ?? 80
+  const { items } = pageItems($, e, { page, history: [], error: null, loading: null, tab: 'page' }, -1, columns - 4, 'card-')
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1}>
+      <Box flexDirection="row">
+        <Text color={LEVEL_COLOR.ok}>● </Text>
+        <Text bold color="claude">iirc</Text>
+        <Text color="subtle">{`   ${page.label}`}</Text>
+      </Box>
+      {gradientRule($, e, Math.min(columns - 4, 60), 'card-rule')}
+      <Text> </Text>
+      {items as never}
+    </Box>
+  )
+}
+
 /** Rows a text takes at a width, wrapped by word: an estimate for scrolling, not for drawing. */
 function rowsAt(text: string, width: number): number {
   return text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / Math.max(10, width))), 0)
 }
 
 /** The page tab as items the pane can start at: the heading, each paragraph, then the links; with each item's height. */
-function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, columns: number) {
+function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, columns: number, keyPrefix = '') {
   const { Box, Button, Markdown, Text } = $.ui.resolve(e)
   const page = r.page as ShownPage
   const fm = page.fm

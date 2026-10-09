@@ -202,6 +202,16 @@ Reading a page here is your read, not the agent's: it runs `iirc show`,
 which the log records as `show`, so the session's reads and hit rate
 count only what the agent read.
 
+## The same, in the transcript
+
+`/iirc session` draws the pane's session tab as a card in the transcript:
+the same tiles, gauge, and lists, with the same clickable names, at the
+transcript's full width. `/iirc show PAGE` draws a page the way the page
+tab does, as a card. `/iirc reader transcript` makes a click on any page
+name run `/iirc show` for that page, so the page appears as a card below;
+`/iirc reader pane`, the default, opens it in the pane. Like the pane,
+`/iirc show` is your read, not the agent's.
+
 ## Toasts
 
 The warnings from the session-start check come as a toast, once per
