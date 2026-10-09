@@ -544,8 +544,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       )}
       {view === 'home' && tiles.length > 0 && (
         <Box flexDirection="row" paddingLeft={2}>
-          {tiles.map(([n, label]) => (
-            <Box key={label} flexDirection="column" width={13} flexShrink={0}>
+          {/* the last tile takes only its own width, so it adds no space before the right border */}
+          {tiles.map(([n, label], k) => (
+            <Box key={label} flexDirection="column" width={k < tiles.length - 1 ? 13 : undefined} flexShrink={0}>
               <Text bold color="claude">{n}</Text>
               <Text color="subtle">{label}</Text>
             </Box>
