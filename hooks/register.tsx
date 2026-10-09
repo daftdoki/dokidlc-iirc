@@ -482,6 +482,17 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
         <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
       </Box>
       <Text> </Text>
+      <Box flexDirection="row">
+        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
+        <Text color="suggestion">/iirc &lt;request&gt;</Text>
+      </Box>
+      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
+        <Box key={example} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor italic>{example}</Text>
+        </Box>
+      ))}
+      <Text> </Text>
       <Box flexDirection="row">{statusRow}</Box>
       {tiles.length > 0 && <Text> </Text>}
       {tiles.length > 0 && (
@@ -510,17 +521,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
           <Text color="subtle">{' suggested pages were read'}</Text>
         </Box>
       )}
-      <Text> </Text>
-      <Box flexDirection="row">
-        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
-        <Text color="suggestion">/iirc &lt;request&gt;</Text>
-      </Box>
-      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
-        <Box key={example} flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          <Text dimColor italic>{example}</Text>
-        </Box>
-      ))}
       <Text> </Text>
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
