@@ -430,11 +430,11 @@ function gaugeColor(t: number): string {
 }
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
+// The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
 function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
   const { Box, Text } = $.ui.resolve(e)
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
-  const width = Math.max(48, Math.min(72, (e.viewport?.columns ?? 76) - 4))
   // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
   const head: unknown[] = [
     <Text key="dot" color={tone}>● </Text>,
@@ -501,7 +501,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
     </Box>
   )
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
+    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} alignSelf="flex-start">
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
@@ -587,7 +587,6 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
   const { Box, Text } = $.ui.resolve(e)
   const level = r.failed.length > 0 ? 'error' : r.notes.length > 0 ? 'warn' : 'ok'
   const tone = LEVEL_COLOR[level]
-  const width = Math.max(48, Math.min(96, (e.viewport?.columns ?? 80) - 4))
   const total = r.ok.length + r.failed.length
   const chip = level === 'error'
     ? `✖ ${r.failed.length} of ${total} failed`
@@ -602,7 +601,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
     </Box>
   )
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
+    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} alignSelf="flex-start">
       <Box flexDirection="row">
         <Text color={tone}>● </Text>
         <Text bold color="claude">iirc</Text>
