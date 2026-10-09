@@ -622,7 +622,7 @@ export const register: Register = on => {
     // the content past the window is drawn and clipped: the window never moves, this hook moves `top`
     return (
       <Box flexDirection="column">
-        {drawTabs($, e, r, e.props.bodyColumns, e.viewport?.columns)}
+        {drawTabs($, e, r, e.props.bodyColumns, e.viewport?.columns, `${e.props.scroll.bodyRows}${e.viewport ? `/${e.viewport.rows}` : ''}`)}
         <Text color="subtle">{top > 0 ? `  ↑ ${top} above` : ' '}</Text>
         {items.slice(top) as never}
       </Box>
@@ -1152,7 +1152,7 @@ function chip($: EngineInterface, e: ResolveInput, key: string, text: string, co
 const KIND_COLOR: Record<string, string> = { decision: '#a78bfa', finding: '#6cb6ff', procedure: '#57ab5a', environment: '#d4a72c' }
 
 /** The pane's fixed header: its tabs as chips with the iirc mark, the gradient rule, and the keys. */
-function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number, terminal?: number) {
+function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: number, terminal?: number, rows?: string) {
   const { Box, Button, Text } = $.ui.resolve(e)
   const name = r.loading ?? r.page?.name
   const isPage = r.tab === 'page' && !!name
@@ -1183,7 +1183,7 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
         <Text color={LEVEL_COLOR.ok}>● </Text>
         <Text bold color="claude">iirc</Text>
         {/* the pane's width, and the terminal's when known: drag the edge to change it */}
-        <Text color="subtle">{` · ${columns}${terminal ? `/${terminal}` : ''} cols`}</Text>
+        <Text color="subtle">{` · ${columns}${terminal ? `/${terminal}` : ''} cols${rows ? ` × ${rows} rows` : ''}`}</Text>
       </Box>
       {gradientRule($, e, columns)}
       {/* the vi keys: each a Button, since a hotkey belongs to one; the row is also their legend */}
