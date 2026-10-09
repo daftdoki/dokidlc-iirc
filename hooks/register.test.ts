@@ -161,6 +161,20 @@ test('at session start, asks iirc for the brief and shows it once', async ($: En
   expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.'])
 })
 
+test('after a command that changes the brief, asks iirc for it again', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const status: unknown[] = []
+  on('process.run', () => ({ value: { exitCode: 0, stdout: BRIEF, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.status', ($, e) => (status.push(e.text), { value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  await $.tool.call({ tool: 'Bash', input: { command: 'git status' }, tool_use_id: 't4' })
+  await $.tool.call({ tool: 'Bash', input: { command: '~/x/bin/iirc migrate' }, tool_use_id: 't5' })
+  await clock.settle()
+  for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
+  expect(status).toEqual(['◆ iirc 68 · semantic'])
+})
+
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
   engine(on, 'ui = false\n')
   await promptRow($, 'p2')

@@ -23,6 +23,7 @@ const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plug
 const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
+const CHANGES_BRIEF_RE = /\biirc\s+(migrate|setup|init|doctor)\b/
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -97,29 +98,37 @@ async function showBrief($: EngineInterface, text: string) {
   }
 }
 
+/** Ask iirc for the brief and show it. Without --hook, doctor --brief reads no stdin and pulls nothing. */
+function refreshBrief($: EngineInterface) {
+  // on a timer, so the run outlives this dispatch and no prompt or tool waits for it
+  $.clock.after(0, () => {
+    void (async () => {
+      if (!(await uiEnabled($))) return
+      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'doctor', '--brief'], {
+        cwd: await $.session.root(),
+        timeoutMs: 15000,
+      })
+      if (ran.exitCode === 0) await showBrief($, ran.stdout)
+    })().catch(() => {})
+  })
+}
+
 export const register: Register = on => {
   // A resumed session stores its SessionStart line where neither session.append
   // nor $.session.messages() shows it, so ask iirc for the brief directly.
-  // Without --hook, doctor --brief reads no stdin and pulls nothing.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    // on a timer, so the run outlives this dispatch and the first prompt never waits for it
-    $.clock.after(0, () => {
-      void (async () => {
-        if (!(await uiEnabled($))) return
-        const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'doctor', '--brief'], {
-          cwd: await $.session.root(),
-          timeoutMs: 15000,
-        })
-        if (ran.exitCode === 0) await showBrief($, ran.stdout)
-      })().catch(() => {})
-    })
+    refreshBrief($)
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId === undefined) await update($, lastTool, () => e.tool_use_id)
-    return next(e)
+    const result = await next(e)
+    // these change what the brief says, so the status line would go stale until the next session
+    const command = (e.input as { command?: unknown } | undefined)?.command
+    if (e.tool === 'Bash' && typeof command === 'string' && CHANGES_BRIEF_RE.test(command)) refreshBrief($)
+    return result
   })
 
   on('session.append', async ($, e, next) => {
