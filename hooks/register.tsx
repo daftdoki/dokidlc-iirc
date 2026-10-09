@@ -71,6 +71,8 @@ const TITLE = '#e6edf3'
 const TAGLINE = 'what past sessions learned, recalled by meaning'
 const TAGLINE_FROM = '#e8875f'
 const TAGLINE_TO = '#a78bfa'
+// section titles: brighter than the tagline's end, so they read before the rows under them
+const HEADING = '#c4b5fd'
 const KEEP = 200
 
 /**
@@ -459,8 +461,15 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   }
 
   const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
+  // a section title: an orange bar and the text in the tagline's violet; the space leads, as a trailing one is not drawn
+  const heading = (text: string) => (
+    <Box flexDirection="row">
+      <Text color={TAGLINE_FROM}>▍</Text>
+      <Text bold color={HEADING}>{' ' + text}</Text>
+    </Box>
+  )
   const statusRow: unknown[] = [
-    <Box key="label" width={10} flexShrink={0}><Text bold color="subtle">STATUS</Text></Box>,
+    <Box key="label" width={12} flexShrink={0}>{heading('STATUS')}</Box>,
     <Text key="chip" bold color="#0d1117" backgroundColor={tone}>{` ${chipText} `}</Text>,
   ]
   if (s && level !== 'ok' && s.fix) {
@@ -487,7 +496,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       <Text bold color="claude">{value}</Text>
     </Box>
   )
-  const heading = (text: string) => <Text bold color="subtle">{text}</Text>
   const command = (cmd: string, what: string) => (
     <Box key={cmd} flexDirection="row" paddingLeft={2}>
       <Box width={24} flexShrink={0}><Text color="suggestion">{cmd}</Text></Box>
@@ -614,7 +622,13 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
     : level === 'warn'
       ? `▲ ${r.ok.length} pass, ${r.notes.length} ${r.notes.length === 1 ? 'note' : 'notes'}`
       : `✔ all ${total} checks pass`
-  const heading = (text: string) => <Text bold color="subtle">{text}</Text>
+  // a section title: an orange bar and the text in the tagline's violet; the space leads, as a trailing one is not drawn
+  const heading = (text: string) => (
+    <Box flexDirection="row">
+      <Text color={TAGLINE_FROM}>▍</Text>
+      <Text bold color={HEADING}>{' ' + text}</Text>
+    </Box>
+  )
   const row = (key: string, mark: string, color: string, text: string, dim = false) => (
     <Box key={key} flexDirection="row" paddingLeft={2}>
       <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
@@ -630,7 +644,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
       </Box>
       <Text> </Text>
       <Box flexDirection="row">
-        <Box width={10} flexShrink={0}><Text bold color="subtle">RESULT</Text></Box>
+        <Box width={12} flexShrink={0}>{heading('RESULT')}</Box>
         <Text bold color="#0d1117" backgroundColor={tone}>{` ${chip} `}</Text>
       </Box>
       {r.failed.length > 0 && <Text> </Text>}
