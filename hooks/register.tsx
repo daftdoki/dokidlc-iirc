@@ -417,9 +417,9 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   } else {
     const row = Math.max(0, sessionRowStops.indexOf(key))
     await update($, cursor, x => {
-      // `g` starts the list at its top, then the cursor's row must still show
-      const from = step === 'start' ? 0 : x.sessionTop
-      const top = row < from ? row : row >= from + paneRows ? row - paneRows + 1 : from
+      // `g` shows the very top, and `k` on the first page name scrolls up to it: the counts sit above the names
+      if (step === 'start' || (step === -1 && x.session === 0)) return { ...x, session: next, sessionTop: 0 }
+      const top = row < x.sessionTop ? row : row >= x.sessionTop + paneRows ? row - paneRows + 1 : x.sessionTop
       return { ...x, session: next, sessionTop: top }
     })
   }
@@ -701,7 +701,7 @@ export const register: Register = on => {
     )
   })
   // the wheel and the scroll keys move the content under the header, not the window
-  on('ui.scroll', { requestId: PANE }, async ($, e) => {
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
     const r = await read($, reader)
     if (r.tab === 'page' && r.page) {
       scrollRest += e.by
@@ -714,7 +714,8 @@ export const register: Register = on => {
     } else {
       await update($, cursor, x => ({ ...x, sessionTop: Math.max(0, Math.min(Math.max(0, sessionRowStops.length - paneRows), x.sessionTop + e.by)) }))
     }
-    return {}
+    // the window itself stays at row 0, and goes back there if Claude Code moved it on its own to show the focus
+    return next({ ...e, offset: 0 })
   })
   // a closed pane starts at the Session tab next time, with no stale page or way back
   on('ui.close', async ($, e, next) => {

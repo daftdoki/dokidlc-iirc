@@ -631,7 +631,8 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   expect(await view.find({ key: 'open-s-p0.md' })).toBeUndefined()           // the top of the list scrolled away
   expect(JSON.stringify(await view.find({ key: 's-p8.md' }))).toContain('"›"')
   await view.press({ key: 'key-g' })
-  expect(await view.find({ key: 'open-s-p0.md' })).toBeDefined()
+  expect(await view.find({ text: 'THIS SESSION' })).toBeDefined()          // g shows the very top, the counts above the names
+  expect(await view.find({ text: '  ↑ 1 above' })).toBeUndefined()
   await view.press({ key: 'key-q' })
   expect(closed).toEqual(['iirc'])
 })
