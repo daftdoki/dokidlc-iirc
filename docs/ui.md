@@ -87,15 +87,26 @@ line cannot carry color, so the line sits in the hint row.
 back; `/iirc status-line` says which. `/iirc status` shows the home card,
 the same as a plain `/iirc`.
 
-## A plain `/iirc`, and `/iirc help`
+## A plain `/iirc`, `/iirc status`, and `/iirc help`
 
 ![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
 
-A plain `/iirc`, or `/iirc status`, draws a card in place of its output row:
+A plain `/iirc` draws a short card in place of its output row:
 
 - the name, "If I Recall Correctly", and what the plugin does
 - ASK IN WORDS: `/iirc` followed by a request, such as
   `/iirc what do we know about ollama hangs?`, which goes to the skill
+- MORE COMMANDS: a pointer to `/iirc help`
+- FULL STATUS: a pointer to `/iirc status`, in yellow or red with
+  `▲ needs a look` when the status is not green
+- RECALL HIT RATE, for this session: the share of suggested pages that
+  were read, as a percentage and a bar that runs from red into green as
+  it fills, and the average match of the suggestions: all of them, the
+  ones read, and the ones not read
+- STORE: the page count
+
+`/iirc status` draws every number:
+
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it, in green, yellow, or red
 - TRUST: the number of suspect pages, whose cited file changed since
@@ -104,17 +115,16 @@ A plain `/iirc`, or `/iirc status`, draws a card in place of its output row:
   and unpushed commits, with `iirc sync` as the fix for unpushed ones
 - the counts, under STORE (pages) and THIS SESSION (used, reads, and
   writes)
-- RECALL HIT RATE, for this session: the share of suggested pages that were read, as a
-  percentage and a bar that runs from red into green as it fills
+- RECALL HIT RATE, as on the short card
 - SUGGESTED, NOT READ: up to three pages recall suggested this session
   that nobody read, most often suggested first, with the count. A page
   that keeps coming back here is recall's noise.
 
-TRUST and STORES come from `iirc doctor --health`, run as the card
+TRUST and STORES come from `iirc doctor --health`, run as the status card
 opens, so they are current. The STATUS chip comes from the session-start
 brief; when TRUST or STORES finds a problem the brief did not, the chip
-turns yellow and names the fix.
-- a pointer to `/iirc help`
+turns yellow and names the fix. `/iirc demo` and `/iirc demo status`
+draw the two cards with sample numbers.
 
 `/iirc help` draws the rest:
 

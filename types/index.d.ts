@@ -6,7 +6,10 @@ export type RecalledPage = { name: string; summary: string; isSuspect: boolean; 
 export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string }
 
 /** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `missed` is each page suggested and never read, with how often, most first. */
-export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][] }
+export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages }
+
+/** The average match percentage of this session's suggestions: all of them, the ones read, and the ones not read; null with none. */
+export type MatchAverages = { all: number | null; read: number | null; unread: number | null }
 
 /** One store's state for the card, from `iirc doctor --health`. */
 export type StoreHealth = { name: string; kind: string; pages: number; uncommitted: number; unpushed: number }

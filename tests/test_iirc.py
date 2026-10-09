@@ -702,6 +702,16 @@ def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeyp
     assert json.loads(capsys.readouterr().out)["missed"] == [["b.md", 3], ["a.md", 1]]
 
 
+def test_stats_session_averages_match_for_read_and_unread(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s8"); iirc.set_root(tmp_path)
+    iirc.log_event("recall", hits=3, pages=["a.md", "b.md", "c.md"], scores=["80% match, meaning", "60% match, meaning+term", "term match"], via="prompt")
+    iirc.log_event("recall", hits=1, pages=["b.md"], scores=["70% match, meaning"], via="prompt")
+    iirc.log_event("read", pages=["a.md"])
+    iirc.main(["stats", "--session", "s8"])
+    assert json.loads(capsys.readouterr().out)["match"] == {"all": 70, "read": 80, "unread": 65}
+
+
 def test_a_term_match_needs_an_identifier():
     word = {"filename": "a.md", "summary": "s", "via": ["plain"], "rare_terms": ["without"], "head_terms": ["without"]}
     ident = {"filename": "b.md", "summary": "s", "via": ["2.1.290"], "rare_terms": ["2.1.290"], "head_terms": []}
@@ -894,7 +904,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": []}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

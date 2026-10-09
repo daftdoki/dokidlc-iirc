@@ -2746,7 +2746,18 @@ def cmd_stats(args: argparse.Namespace) -> None:
                 for p in r.get("pages") or []:
                     times[p] = times.get(p, 0) + 1
         missed = sorted(([p, n] for p, n in times.items() if p not in used), key=lambda pn: (-pn[1], pn[0]))
-        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed}))
+        # the average match percentage of every suggestion this session, and of the read and unread ones apart;
+        # a term-only match has no percentage and stays out
+        pcts: dict[str, list[int]] = {"all": [], "read": [], "unread": []}
+        for r in rows:
+            if r["cmd"] == "recall":
+                for p, score in zip(r.get("pages") or [], r.get("scores") or []):
+                    m = re.match(r"(\d+)% match", str(score))
+                    if m:
+                        pcts["all"].append(int(m[1]))
+                        pcts["read" if p in used else "unread"].append(int(m[1]))
+        match = {k: round(sum(v) / len(v)) if v else None for k, v in pcts.items()}
+        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed, "match": match}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}

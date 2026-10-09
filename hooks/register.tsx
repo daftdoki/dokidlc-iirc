@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { IircHealth, IircStatus, RecalledPage, SessionCounts, ToolNote } from '../types'
+import type { IircHealth, IircStatus, MatchAverages, RecalledPage, SessionCounts, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -11,6 +11,7 @@ import type { IircHealth, IircStatus, RecalledPage, SessionCounts, ToolNote } fr
 // toasts.
 // `ui = false` in .claude/iirc.toml turns it off.
 
+const NO_MATCH: MatchAverages = { all: null, read: null, unread: null }
 const byPrompt = atom({ plugin: 'iirc', key: 'byPrompt' } as const, {})
 const byTool = atom({ plugin: 'iirc', key: 'byTool' } as const, {})
 const open = atom({ plugin: 'iirc', key: 'open' } as const, {})
@@ -18,7 +19,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [] })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
@@ -55,6 +56,7 @@ const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
 const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keyword', note: null }
 const DEMO_COUNTS: SessionCounts = {
   reads: 58, writes: 9, suggested: 42, used: 31,
+  match: { all: 68, read: 74, unread: 55 },
   missed: [['ollama-keep-alive-for-the-embed-model.md', 4], ['plugin-cache-keeps-old-versions.md', 3], ['gh-auth-on-a-new-machine.md', 2]],
 }
 const DEMO_HEALTH: IircHealth = {
@@ -85,6 +87,7 @@ const TAGLINE_TO = '#a78bfa'
 const FRAME = '#a78bfa'
 const EXAMPLES = ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"]
 const MORE_HINT = 'settings, maintenance, and look-up'
+const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
@@ -220,8 +223,11 @@ async function runDirect($: EngineInterface, args: string): Promise<string> {
   }
 }
 
-/** The text a plain /iirc or /iirc help returns; the cards draw over it, and it stands where they cannot. */
-async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<string> {
+/** A plain /iirc is home, the short card; status is every number; help is the settings and commands. */
+type CardView = 'home' | 'status' | 'help'
+
+/** The text a plain /iirc, /iirc status, or /iirc help returns; the cards draw over it, and it stands where they cannot. */
+async function helpText($: EngineInterface, view: CardView): Promise<string> {
   const s = await read($, status)
   let max = '?'
   try {
@@ -232,9 +238,10 @@ async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<stri
   // the engine puts the plugin's name in front of a command's text
   const head = s === null ? 'no session brief yet' : statusText(s, await read($, counts)).replace(/^iirc: /, '')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
-  if (view === 'home') {
+  if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
+  if (view === 'status') {
     await refreshHealth($)
-    return [head, ...healthLines(await read($, health), await read($, counts)), '/iirc <request> asks iirc in words; /iirc help lists the settings and commands'].join('\n')
+    return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
     `status-line ${shown} · max-suggested ${max}`,
@@ -252,8 +259,14 @@ export function healthLines(checkup: IircHealth | null, c: SessionCounts): strin
     lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with iirc doubt`)
     lines.push('stores: ' + checkup.stores.map(storeText).join('; ') + (checkup.stores.some(x => x.unpushed > 0) ? '; fix with iirc sync' : ''))
   }
+  if (c.match.all !== null) lines.push(`average match: ${matchText(c.match)}`)
   if (c.missed.length > 0) lines.push('suggested, not read: ' + c.missed.slice(0, LIST_MAX).map(([p, n]) => `${p} ×${n}`).join(', '))
   return lines
+}
+
+/** The session's average match, and the read and unread averages when both exist. */
+export function matchText(m: MatchAverages): string {
+  return `${m.all}%` + (m.read !== null && m.unread !== null ? ` · read ${m.read}% · not read ${m.unread}%` : '')
 }
 
 /** One store as the card says it: its pages, then clean or what it holds back. */
@@ -275,7 +288,8 @@ function refreshCounts($: EngineInterface) {
       const got = JSON.parse(ran.stdout) as Record<string, unknown>
       const n = (key: string) => (Array.isArray(got[key]) ? (got[key] as unknown[]).length : 0)
       const missed = Array.isArray(got.missed) ? (got.missed as [string, number][]) : []
-      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed }))
+      const match = { ...NO_MATCH, ...(got.match as Partial<MatchAverages> | undefined) }
+      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match }))
     })().catch(() => {})
   })
 }
@@ -368,10 +382,11 @@ export const register: Register = on => {
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
     // bare or `help`, it is help; the skill loads by itself when a task needs it
-    if (!e.args.trim() || e.args.trim() === 'status') return { text: await helpText($, 'home') }
+    if (!e.args.trim()) return { text: await helpText($, 'home') }
+    if (e.args.trim() === 'status') return { text: await helpText($, 'status') }
     if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
-    if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
+    if (/^demo(\s+status)?$/.test(e.args.trim())) return { text: 'the /iirc card with sample numbers' }
     const direct = DIRECT_RE.exec(e.args.trim())
     if (direct) return { text: await runDirect($, direct[1]) }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
@@ -402,9 +417,9 @@ export const register: Register = on => {
       const report = parseDoctor(e.props.text)
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
     }
-    if (!isIirc || (args !== '' && args !== 'status' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
-    const view = args === 'help' ? 'help' : 'home'
-    if (args === 'demo') return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
+    if (!isIirc || !['', 'status', 'help', 'demo', 'demo status'].includes(args) || e.props.isErrored) return next(e)
+    const view: CardView = args === 'help' ? 'help' : args.endsWith('status') ? 'status' : 'home'
+    if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
     return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
   })
 
@@ -490,7 +505,7 @@ function mix(a: string, b: string, t: number): string {
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
 // The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
-function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
+function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
   const { Box, Text } = $.ui.resolve(e)
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
   // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
@@ -610,12 +625,71 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       ))}
     </Box>
   )
+  const blank = (key: string) => <Text key={key}> </Text>
+  // a pointer to another view: its title and command on one row, what it holds under it
+  const pointer = (key: string, title: string, cmd: string, hint: string, color?: string) => [
+    <Box key={key} flexDirection="row">
+      <Box width={16} flexShrink={0}>{heading(title)}</Box>
+      <Text color="suggestion">{cmd}</Text>
+    </Box>,
+    <Box key={`${key}-hint`} flexDirection="row" paddingLeft={2}>
+      <Text color="claude">{'› '}</Text>
+      <Text dimColor={!color} color={color} italic>{hint}</Text>
+    </Box>,
+  ]
+  const ask = [
+    <Box key="ask" flexDirection="row">
+      <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
+      <Text color="suggestion">/iirc &lt;request&gt;</Text>
+    </Box>,
+    ...EXAMPLES.map(example => (
+      <Box key={example} flexDirection="row" paddingLeft={2}>
+        <Text color="claude">{'› '}</Text>
+        <Text dimColor italic>{example}</Text>
+      </Box>
+    )),
+  ]
+  const gauge = c.suggested > 0 ? [
+    <Box key="gauge-title" flexDirection="row" width={BAR + 2}>
+      <Box flexGrow={1}>{heading('RECALL HIT RATE · THIS SESSION')}</Box>
+      <Text bold color={band}>{`${pct}%`}</Text>
+    </Box>,
+    <Box key="gauge-bar" flexDirection="row" paddingLeft={2}>{cells}</Box>,
+    <Box key="gauge-count" flexDirection="row" paddingLeft={2}>
+      <Text bold color="claude">{String(c.used)}</Text>
+      <Text color="subtle">{' of '}</Text>
+      <Text bold color="claude">{String(c.suggested)}</Text>
+      <Text color="subtle">{' suggested pages were read'}</Text>
+    </Box>,
+    ...(c.match.all !== null ? [
+      <Box key="gauge-match" flexDirection="row" paddingLeft={2}>
+        <Text color="subtle">{'average match '}</Text>
+        <Text bold color="claude">{`${c.match.all}%`}</Text>
+        {c.match.read !== null && c.match.unread !== null && <Text color="subtle">{' · read '}</Text>}
+        {c.match.read !== null && c.match.unread !== null && <Text bold color="claude">{`${c.match.read}%`}</Text>}
+        {c.match.read !== null && c.match.unread !== null && <Text color="subtle">{' · not read '}</Text>}
+        {c.match.read !== null && c.match.unread !== null && <Text bold color="claude">{`${c.match.unread}%`}</Text>}
+      </Box>,
+    ] : []),
+  ] : []
+  const tile = (n: string, label: string) => (
+    <Box key={label} flexDirection="column" flexShrink={0}>
+      <Text bold color="claude">{n}</Text>
+      <Text color="subtle">{label}</Text>
+    </Box>
+  )
+  // the pointer to /iirc status says when there is something to look at there
+  const statusHint = level === 'ok' ? STATUS_HINT : `▲ needs a look: ${STATUS_HINT}`
   // The card is as wide as its widest row, measured here, so the title rule can span it exactly:
   // a row of Text cannot stretch to fill a box. Every glyph used is one column wide.
   const widths = [9 + 'If I Recall Correctly'.length, 9 + TAGLINE.length]
   if (view === 'home') {
     widths.push(16 + '/iirc <request>'.length, ...EXAMPLES.map(x => 4 + x.length))
     widths.push(16 + '/iirc help'.length, 4 + MORE_HINT.length)
+    widths.push(16 + '/iirc status'.length, 4 + statusHint.length)
+    if (s && s.pages !== null) widths.push(2 + 'STORE'.length, 2 + String(s.pages).length, 2 + 'pages'.length)
+    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
+  } else if (view === 'status') {
     const fixWidth = s && level !== 'ok' && s.fix ? '   fix with '.length + s.fix.length : 0
     const modeWidth = s && s.mode && s.mode !== 'semantic+keyword' ? `   ${s.mode} mode`.length : 0
     widths.push(12 + chipText.length + 2 + fixWidth + modeWidth)
@@ -623,7 +697,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       const [n, label] = tiles[tiles.length - 1]
       widths.push(15 + 2 + 'THIS SESSION'.length, 2 + 13 * (tiles.length - 1) + Math.max(n.length, label.length))
     }
-    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length)
+    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
     widths.push(...factWidths)
     if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name, n]) => 4 + name.length + ` ×${n}`.length))
   } else {
@@ -631,6 +705,62 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
   }
   const inner = Math.max(...widths)
+  // home: how to ask, where the rest is, and the two numbers worth a glance
+  const homeBody = (
+    <Box flexDirection="column">
+      {blank('b1')}
+      {ask}
+      {blank('b2')}
+      {pointer('more', 'MORE COMMANDS', '/iirc help', MORE_HINT)}
+      {blank('b3')}
+      {pointer('full', 'FULL STATUS', '/iirc status', statusHint, level === 'ok' ? undefined : LEVEL_COLOR[level])}
+      {gauge.length > 0 && blank('b4')}
+      {gauge}
+      {s && s.pages !== null && blank('b5')}
+      {s && s.pages !== null && heading('STORE')}
+      {s && s.pages !== null && <Box flexDirection="row" paddingLeft={2}>{tile(String(s.pages), s.pages === 1 ? 'page' : 'pages')}</Box>}
+    </Box>
+  )
+  // status: every number the card knows
+  const statusBody = (
+    <Box flexDirection="column">
+      {blank('s1')}
+      <Box flexDirection="row">{statusRow}</Box>
+      {trustRows}
+      {storeRows}
+      {tiles.length > 0 && blank('s2')}
+      {/* pages counts the store; the other tiles and the hit rate count this session */}
+      {tiles.length > 0 && (
+        <Box flexDirection="row">
+          <Box width={15} flexShrink={0}>{heading('STORE')}</Box>
+          {heading('THIS SESSION')}
+        </Box>
+      )}
+      {tiles.length > 0 && (
+        <Box flexDirection="row" paddingLeft={2}>
+          {/* the last tile takes only its own width, so it adds no space before the right border */}
+          {tiles.map(([n, label], k) => (
+            <Box key={label} flexDirection="column" width={k < tiles.length - 1 ? 13 : undefined} flexShrink={0}>
+              <Text bold color="claude">{n}</Text>
+              <Text color="subtle">{label}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+      {gauge.length > 0 && blank('s3')}
+      {gauge}
+      {/* recall's noise: pages it kept suggesting that nobody read, most often first */}
+      {missed.length > 0 && blank('s4')}
+      {missed.length > 0 && heading('SUGGESTED, NOT READ')}
+      {missed.map(([name, n]) => (
+        <Box key={`m${name}`} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor>{name}</Text>
+          <Text color={LEVEL_COLOR.warn}>{` ×${n}`}</Text>
+        </Box>
+      ))}
+    </Box>
+  )
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} alignSelf="flex-start" width={inner + 4}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
@@ -648,79 +778,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
         ))}
       </Box>
       {view === 'help' && helpBody}
-      {view === 'home' && <Text> </Text>}
-      {view === 'home' && <Box flexDirection="row">
-        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
-        <Text color="suggestion">/iirc &lt;request&gt;</Text>
-      </Box>}
-      {view === 'home' && EXAMPLES.map(example => (
-        <Box key={example} flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          <Text dimColor italic>{example}</Text>
-        </Box>
-      ))}
-      {view === 'home' && <Text> </Text>}
-      {view === 'home' && (
-        <Box flexDirection="row">
-          <Box width={16} flexShrink={0}>{heading('MORE COMMANDS')}</Box>
-          <Text color="suggestion">/iirc help</Text>
-        </Box>
-      )}
-      {view === 'home' && (
-        <Box flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          <Text dimColor italic>{MORE_HINT}</Text>
-        </Box>
-      )}
-      {view === 'home' && <Text> </Text>}
-      {view === 'home' && <Box flexDirection="row">{statusRow}</Box>}
-      {view === 'home' && trustRows}
-      {view === 'home' && storeRows}
-      {view === 'home' && tiles.length > 0 && <Text> </Text>}
-      {/* pages counts the store; the other tiles and the hit rate count this session */}
-      {view === 'home' && tiles.length > 0 && (
-        <Box flexDirection="row">
-          <Box width={15} flexShrink={0}>{heading('STORE')}</Box>
-          {heading('THIS SESSION')}
-        </Box>
-      )}
-      {view === 'home' && tiles.length > 0 && (
-        <Box flexDirection="row" paddingLeft={2}>
-          {/* the last tile takes only its own width, so it adds no space before the right border */}
-          {tiles.map(([n, label], k) => (
-            <Box key={label} flexDirection="column" width={k < tiles.length - 1 ? 13 : undefined} flexShrink={0}>
-              <Text bold color="claude">{n}</Text>
-              <Text color="subtle">{label}</Text>
-            </Box>
-          ))}
-        </Box>
-      )}
-      {view === 'home' && c.suggested > 0 && <Text> </Text>}
-      {view === 'home' && c.suggested > 0 && (
-        <Box flexDirection="row" width={BAR + 2}>
-          <Box flexGrow={1}>{heading('RECALL HIT RATE · THIS SESSION')}</Box>
-          <Text bold color={band}>{`${pct}%`}</Text>
-        </Box>
-      )}
-      {view === 'home' && c.suggested > 0 && <Box flexDirection="row" paddingLeft={2}>{cells}</Box>}
-      {view === 'home' && c.suggested > 0 && (
-        <Box flexDirection="row" paddingLeft={2}>
-          <Text bold color="claude">{String(c.used)}</Text>
-          <Text color="subtle">{' of '}</Text>
-          <Text bold color="claude">{String(c.suggested)}</Text>
-          <Text color="subtle">{' suggested pages were read'}</Text>
-        </Box>
-      )}
-      {/* recall's noise: pages it kept suggesting that nobody read, most often first */}
-      {view === 'home' && missed.length > 0 && <Text> </Text>}
-      {view === 'home' && missed.length > 0 && heading('SUGGESTED, NOT READ')}
-      {view === 'home' && missed.map(([name, n]) => (
-        <Box key={`m${name}`} flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          <Text dimColor>{name}</Text>
-          <Text color={LEVEL_COLOR.warn}>{` ×${n}`}</Text>
-        </Box>
-      ))}
+      {view === 'home' && homeBody}
+      {view === 'status' && statusBody}
     </Box>
   )
 }
