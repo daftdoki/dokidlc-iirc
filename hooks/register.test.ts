@@ -328,6 +328,22 @@ test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
   expect(await ui.find({ text: 'suggested' })).toBeUndefined()
 })
 
+test('finds the pages when the row requestId has the uuid last group zeroed', async ($: Engine, on: On) => {
+  engine(on)
+  await promptRow($, '40d603b1-96c7-41d7-9dc0-00885dcac635')
+  await hookRow($, 'UserPromptSubmit', RECALL, 'h9')
+  const ui = await $.ui.mount({
+    plugin: 'iirc',
+    surface: 'terminal',
+    component: 'UserMessage',
+    requestId: '40d603b1-96c7-41d7-9dc0-000000000000',
+    props: { text: 'a prompt', origin: { kind: 'composer' }, isExpanded: false },
+  })
+  expect(await ui.find({ text: 'pages suggested' })).toBeDefined()
+  await ui.press({ key: 'toggle-40d603b1-96c7-41d7-9dc0' })
+  expect(await ui.find({ text: 'alpha-page' })).toBeDefined()
+})
+
 test('leaves a prompt with no recall alone', async ($: Engine, on: On) => {
   engine(on)
   const ui = await $.ui.mount({

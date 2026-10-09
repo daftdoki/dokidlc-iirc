@@ -53,6 +53,16 @@ const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keywo
 const DEMO_COUNTS: SessionCounts = { reads: 58, writes: 9, suggested: 42, used: 31 }
 const KEEP = 200
 
+/**
+ * A prompt's key: its uuid's first four groups. The UserMessage row's requestId
+ * can carry the prompt's uuid with the last group zeroed
+ * (40d603b1-96c7-41d7-9dc0-000000000000 for …-00885dcac635, Claude Code 2.1.295),
+ * so the two meet on the part they share.
+ */
+export function promptKey(id: string): string {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id.slice(0, 23) : id
+}
+
 export function textOf(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -235,7 +245,7 @@ export const register: Register = on => {
   on('session.append', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
     if (e.door === 'prompt') {
-      await update($, lastPrompt, () => e.uuid)
+      await update($, lastPrompt, () => promptKey(e.uuid))
       return next(e)
     }
     if (e.door !== 'hook-context' || e.origin.kind !== 'hook') return next(e)
@@ -321,15 +331,16 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
-    const pages = (await read($, byPrompt))[e.requestId]
+    const key = promptKey(e.requestId)
+    const pages = (await read($, byPrompt))[key]
     if (!pages || pages.length === 0) return next(e)
     const original = await next(e)
-    const isOpen = (await read($, open))[e.requestId] === true
+    const isOpen = (await read($, open))[key] === true
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {original}
-        {drawPages($, e, e.requestId, pages, isOpen, 'suggested')}
+        {drawPages($, e, key, pages, isOpen, 'suggested')}
       </Box>
     )
   })
