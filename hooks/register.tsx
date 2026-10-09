@@ -68,7 +68,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
-const TAGLINE = 'what past sessions learned, found by meaning'
+const TAGLINE = 'what past sessions learned, recalled by meaning'
 const TAGLINE_FROM = '#e8875f'
 const TAGLINE_TO = '#a78bfa'
 const KEEP = 200
