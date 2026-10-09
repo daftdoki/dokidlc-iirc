@@ -43,7 +43,7 @@ const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, tr
 // the pane's share of the terminal when docked, in percent; null leaves Claude Code's own share
 const paneWidth = atom({ plugin: 'iirc', key: 'paneWidth' } as const, null as number | null)
 const PANE_WIDTHS = [90, 50, 33] as const
-const PANE_WIDTH_ARGS_RE = /^\s*pane-width(?:\s+(\S+))?\s*$/
+const PANE_WIDTH_ARGS_RE = /^\s*pane-width(?:\s+(90|50|33|auto))?\s*$/
 // the terminal's width, as the last drawing measured it: an open needs columns, and only drawings see the viewport
 let terminalColumns: number | null = null
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
@@ -582,17 +582,12 @@ export const register: Register = on => {
         const pct = await read($, paneWidth)
         return { text: `iirc pane-width is ${pct === null ? 'auto' : `${pct}%`}; /iirc pane-width 90|50|33|auto changes it` }
       }
-      // 50 and 50% both mean half
-      const arg = w[1].replace(/%$/, '')
-      if (arg !== 'auto' && !PANE_WIDTHS.includes(Number(arg) as never)) {
-        return { text: `iirc pane-width takes 90, 50, 33, or auto, not ${w[1]}` }
-      }
-      const pct = arg === 'auto' ? null : Number(arg)
+      const pct = w[1] === 'auto' ? null : Number(w[1])
       await $.store.set('paneWidth', pct)
       await update($, paneWidth, () => pct)
       // an open pane takes the new width now
       if ((await $.ui.panes()).some(pane => pane.id === PANE)) await openPane($)
-      return { text: `iirc pane-width ${pct === null ? 'auto: Claude Code\'s own share' : `${pct}% of the terminal, when docked`}` }
+      return { text: `iirc pane-width ${w[1] === 'auto' ? 'auto: Claude Code\'s own share' : `${pct}% of the terminal, when docked`}` }
     }
     const m = STATUS_LINE_ARGS_RE.exec(e.args)
     if (!m) return next(e)
