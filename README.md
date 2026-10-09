@@ -3,7 +3,7 @@
 A Claude Code plugin that keeps what your agent learns in the repository, searchable by meaning.
 
 The name is "if I recall correctly". It installs as `iirc@dokidlc`; the
-repository is `dokidlc-skill-iirc`, prefixed for the dokidlc marketplace.
+repository is `dokidlc-iirc`, prefixed for the dokidlc marketplace.
 Pages are markdown files in `.iirc/` in the
 [memoryfield](https://github.com/calpaterson/memoryfield-spec) format, so
 they travel with the code in git and any memoryfield tool can read them; a
@@ -183,7 +183,7 @@ by hand; [INSTALL.md](INSTALL.md) shows the two keys.
 ## Support
 
 File a bug or ask a question in
-[GitHub issues](https://github.com/daftdoki/dokidlc-skill-iirc/issues).
+[GitHub issues](https://github.com/daftdoki/dokidlc-iirc/issues).
 
 ## Built on memoryfields
 

@@ -20,7 +20,7 @@ computes suspicion. It never reimplements storage, search, or indexing.
 ## Run it from a checkout
 
 ```
-claude --plugin-dir /path/to/dokidlc-skill-iirc
+claude --plugin-dir /path/to/dokidlc-iirc
 ```
 
 Outside a session:

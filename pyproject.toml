@@ -1,5 +1,5 @@
 [project]
-name = "dokidlc-skill-iirc"
+name = "dokidlc-iirc"
 version = "0.0.0"
 description = "Test harness for the iirc plugin. The plugin itself is bin/iirc and skills/."
 requires-python = ">=3.12"

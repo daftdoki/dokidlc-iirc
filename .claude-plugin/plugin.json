@@ -5,6 +5,6 @@
     "name": "DaftDoki"
   },
   "license": "MIT",
-  "homepage": "https://github.com/daftdoki/dokidlc-skill-iirc",
+  "homepage": "https://github.com/daftdoki/dokidlc-iirc",
   "types": "./types/index.d.ts"
 }
