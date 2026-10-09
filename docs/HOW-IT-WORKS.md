@@ -138,9 +138,13 @@ comments out each bad knob line so the default applies
 
 ### Each prompt
 
-`UserPromptSubmit` runs `iirc recall` (5-second timeout). It skips slash
-commands, prompts under 40 characters, and short answers such as "yes",
-and logs a `skipped` row. Otherwise it searches, applies
+`UserPromptSubmit` runs `iirc recall` (5-second timeout). It first removes
+the blocks Claude Code adds around a prompt: system reminders, task
+notifications, subagent hand-backs, and messages from other sessions. A
+prompt that is nothing but those blocks is skipped as `machine`; otherwise
+recall searches the person's words alone. It also skips slash commands,
+prompts under 40 characters, and short answers such as "yes", and logs a
+`skipped` row for each. Otherwise it searches, applies
 [the gate](#the-recall-gate), and prints one line when a page passes:
 
 ```
@@ -408,8 +412,8 @@ The log rows that matter for tuning:
 - `recall`: the pages named and their scores, `via` (prompt or failure),
   a `recall_id` that joins it to its candidates and excerpt, the
   transcript path, a prompt hash, and the time in `ms`.
-- `skipped`: the reason (`slash_command`, `short`, `numbered_answer`,
-  `answer`), the prompt length, and its hash.
+- `skipped`: the reason (`machine`, `slash_command`, `short`,
+  `numbered_answer`, `answer`), the prompt length, and its hash.
 - `timeout`: a recall killed at the hook's 5-second limit
   (`RECALL_HOOK_TIMEOUT`), with the time it started.
 - `start`: the conditions from `conditions()`: plugin commit, knobs,

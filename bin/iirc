@@ -942,6 +942,9 @@ def row_current(r: dict) -> bool:
 RECALL_MIN_PROMPT = 40
 MAX_SUGGESTED = 3            # pages a recall line suggests at most; `iirc max-suggested N` changes it per machine
 IDENTIFIER_RE = re.compile(r"[0-9._-]")
+# Text Claude Code wraps around what the person typed, or sends with no person at all: a subagent's
+# hand-back, a task finishing, another session's message, a system reminder. Recall searches what is left.
+MACHINE_BLOCK_RE = re.compile(r"<(system-reminder|task-notification|agent-message|cross-session-message)\b[^>]*>.*?(?:</\1>|\Z)", re.S)
 ANSWER_RE = re.compile(r"^(yes|yeah|no|nope|ok|okay|agreed?|go( ahead)?|sure|done|thanks?|correct)\b", re.I)
 
 
@@ -1029,9 +1032,16 @@ def recall_worthy(prompt: str) -> bool:
     return skip_reason(prompt) is None
 
 
+def person_text(prompt: str) -> str:
+    """The prompt without the blocks Claude Code adds around it, so recall searches the person's own words."""
+    return MACHINE_BLOCK_RE.sub(" ", prompt).strip()
+
+
 def skip_reason(prompt: str) -> str | None:
     """Why recall passes a prompt by, or None when it searches."""
-    p = prompt.strip()
+    p = person_text(prompt)
+    if not p and prompt.strip():
+        return "machine"
     if p.startswith("/"):
         return "slash_command"
     if len(p) < RECALL_MIN_PROMPT:
@@ -1290,7 +1300,7 @@ def cmd_recall(args: argparse.Namespace) -> None:
             log_event("skipped", reason=reason, chars=len(prompt), prompt_hash=prompt_hash(prompt), transcript=event.get("transcript_path"))
             keep_prompt(prompt, skipped=reason)
             return
-        line = run_recall(prompt, "prompt", event, prompt_hash=prompt_hash(prompt))
+        line = run_recall(person_text(prompt), "prompt", event, prompt_hash=prompt_hash(prompt))
         if line:
             print(hook_output("UserPromptSubmit", line))
     except SystemExit:

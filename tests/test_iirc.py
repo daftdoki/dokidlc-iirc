@@ -606,6 +606,29 @@ def test_recall_worthy_long_prompt_starting_with_no():
     assert not iirc.recall_worthy("No thanks, that is fine as it is, leave it there")
 
 
+def test_recall_skips_machine_prompts_and_searches_the_person_s_words(tmp_path, monkeypatch, capsys):
+    handback = '<agent-message from="a1b2">\n[Subagent hand-back] The report follows: wrote 14 lines about pysqlite3-binary\n</agent-message>'
+    done = '<task-notification>\n<task-id>x</task-id>\n<status>completed</status>\n</task-notification>'
+    reminder = '<system-reminder>\nAnother session sent a message about pysqlite3-binary\n</system-reminder>'
+    assert iirc.skip_reason(handback) == "machine"
+    assert iirc.skip_reason(done + "\n" + reminder) == "machine"
+    assert iirc.skip_reason('<agent-message from="a">cut off, never closed') == "machine"
+    mixed = reminder + "\nwhy does uv tool install memoryfield-tool fail on this mac"
+    assert iirc.skip_reason(mixed) is None
+    assert iirc.person_text(mixed) == "why does uv tool install memoryfield-tool fail on this mac"
+    assert iirc.person_text("plain <b>html</b> stays") == "plain <b>html</b> stays"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    field = tmp_path / ".iirc"; field.mkdir()
+    (field / "pysqlite3-install-override.md").write_text("---\ntitle: pysqlite3-binary blocks install\nsummary: the uv override\ntopics: [install]\nkind: environment\n---\nx\n")
+    iirc.write_config_file({"semantic": False})
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": handback})))
+    iirc.main(["recall"])
+    assert capsys.readouterr().out == ""                  # the hand-back names pysqlite3-binary, and recall stays silent
+    assert iirc.read_log()[-1]["reason"] == "machine"
+
+
 def test_guard_asks_for_approve_too():
     import json, subprocess
     shim = ROOT / "scripts" / "guard.sh"
