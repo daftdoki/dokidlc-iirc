@@ -22,7 +22,14 @@ const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
-const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0 } as Cursor)
+const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, page: 0, sessionTop: 0, pageTop: 0 } as Cursor)
+// The pane scrolls its own content under a fixed header (the tab row, the keys, a row for "↑ N above"),
+// so the hook remembers what the last drawing measured: the rows under the header, and each item's height
+const HEADER_ROWS = 3
+let paneRows = 20
+let sessionRowStops: (string | null)[] = []
+let pageHeights: number[] = []
+let scrollRest = 0
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
@@ -283,7 +290,7 @@ export function tabTitle(name: string): string {
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
-  await update($, cursor, x => ({ ...x, page: 0 }))
+  await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
   const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
@@ -358,7 +365,7 @@ function pageStops(page: ShownPage): string[] {
   return [...paragraphs(page.body).map((_, i) => `para-${i}`), ...page.links.map(n => `link-${n}`)]
 }
 
-/** Move the cursor of the shown tab: a step for `j` and `k`, or to an end for `g` and `e`. */
+/** Move the cursor of the shown tab: a step for `j` and `k`, or to an end for `g` and `e`; the content scrolls to keep it in view. */
 async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   const r = await read($, reader)
   const isPage = r.tab === 'page' && r.page !== null
@@ -367,17 +374,23 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   const c = await read($, cursor)
   const at = isPage ? c.page : c.session
   const next = step === 'start' ? 0 : step === 'end' ? stops.length - 1 : Math.max(0, Math.min(stops.length - 1, at + step))
-  await update($, cursor, x => (isPage ? { ...x, page: next } : { ...x, session: next }))
   const key = stops[next]
   if (key === undefined) return
-  try {
-    // a link takes the focus ring, so Enter opens it; a paragraph only scrolls into view
-    if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key })
-    if (step === 'start' || step === 'end') await $.ui.scroll({ in: PANE, to: step })
-    else await $.ui.scroll({ in: PANE, to: { key }, block: key.startsWith('para-') ? 'start' : 'nearest' })
-  } catch (err) {
-    $.ui.log(`iirc: vi key: ${String(err)}`)
+  if (isPage) {
+    // a paragraph comes to the top; the linked pages are the last item; item 0 is the page's heading
+    const paras = r.page ? paragraphs(r.page.body).length : 0
+    const top = step === 'start' ? 0 : key.startsWith('para-') ? 1 + Number(key.slice(5)) : 1 + paras
+    await update($, cursor, x => ({ ...x, page: next, pageTop: top }))
+  } else {
+    const row = Math.max(0, sessionRowStops.indexOf(key))
+    await update($, cursor, x => {
+      const top = step === 'start' ? 0 : row < x.sessionTop ? row : row >= x.sessionTop + paneRows ? row - paneRows + 1 : x.sessionTop
+      return { ...x, session: next, sessionTop: top }
+    })
   }
+  scrollRest = 0
+  // a link takes the focus ring, so Enter opens it; the drawn › shows where the cursor is either way
+  if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
 }
 
 /** The Session tab, with its numbers fresh. */
@@ -385,7 +398,7 @@ async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
-  await update($, cursor, x => ({ ...x, session: 0 }))
+  await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
   await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   // put the ring on the first page name, so j, k, and Enter work at once
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
@@ -572,13 +585,50 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const r = await read($, reader)
-    const { Box } = $.ui.resolve(e)
+    const c = await read($, cursor)
+    const { Box, Text } = $.ui.resolve(e)
+    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS)
+    const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
+    let items: unknown[]
+    let top: number
+    if (isPage && r.page) {
+      const page = pageItems($, e, r, c.page, e.props.bodyColumns)
+      pageHeights = page.heights
+      items = page.items
+      top = Math.min(c.pageTop, Math.max(0, items.length - 1))
+    } else if (r.tab === 'page') {
+      items = [drawReaderNote($, e, r)]
+      top = 0
+    } else {
+      const session = sessionItems($, e, await read($, sessionPages), await read($, counts), await read($, health), c.session)
+      sessionRowStops = session.map(x => x.stop)
+      items = session.map(x => x.el)
+      top = Math.min(c.sessionTop, Math.max(0, items.length - paneRows))
+    }
+    // the content past the window is drawn and clipped: the window never moves, this hook moves `top`
     return (
       <Box flexDirection="column">
         {drawTabs($, e, r)}
-        {r.tab === 'page' ? drawReader($, e, r, (await read($, cursor)).page) : drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health), (await read($, cursor)).session)}
+        <Text color="subtle">{top > 0 ? `↑ ${top} above` : ' '}</Text>
+        {items.slice(top) as never}
       </Box>
     )
+  })
+  // the wheel and the scroll keys move the content under the header, not the window
+  on('ui.scroll', { requestId: PANE }, async ($, e) => {
+    const r = await read($, reader)
+    if (r.tab === 'page' && r.page) {
+      scrollRest += e.by
+      await update($, cursor, x => {
+        let top = x.pageTop
+        while (scrollRest > 0 && top < pageHeights.length - 1 && scrollRest >= (pageHeights[top] ?? 1)) scrollRest -= pageHeights[top++] ?? 1
+        while (scrollRest < 0 && top > 0 && -scrollRest >= (pageHeights[top - 1] ?? 1)) scrollRest += pageHeights[--top] ?? 1
+        return { ...x, pageTop: top }
+      })
+    } else {
+      await update($, cursor, x => ({ ...x, sessionTop: Math.max(0, Math.min(Math.max(0, sessionRowStops.length - paneRows), x.sessionTop + e.by)) }))
+    }
+    return {}
   })
   // a closed pane starts at the Session tab next time, with no stale page or way back
   on('ui.close', async ($, e, next) => {
@@ -1099,82 +1149,99 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader) {
         <Box flexShrink={0} marginRight={2}>
           <Button key="key-h" plain dimColor hotkey="h" onPress={() => void update($, reader, x => ({ ...x, tab: 'session' as const }))}>session</Button>
         </Box>
-        {name && (
-          <Box flexShrink={0}>
-            <Button key="key-l" plain dimColor hotkey="l" onPress={() => void update($, reader, x => ({ ...x, tab: 'page' as const }))}>page</Button>
-          </Box>
-        )}
+        <Box flexShrink={0} marginRight={2}>
+          <Button key="key-l" plain dimColor hotkey="l" onPress={() => void update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x))}>page</Button>
+        </Box>
+        <Box flexShrink={0}>
+          <Button key="key-q" plain dimColor hotkey="q" onPress={() => void $.ui.close({ id: PANE }).catch(() => undefined)}>close pane</Button>
+        </Box>
       </Box>
-      <Text> </Text>
     </Box>
   )
 }
 
-/** The Session tab: what recall suggested this session and whether it was read, what was written, and what may be wrong. */
-function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null, at = 0) {
+/** The Session tab as rows of one line each, so the pane can start the list at any row: each with the page link it holds. */
+function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null, at = 0) {
   const { Box, Text } = $.ui.resolve(e)
   const times = new Map(c.missed)
   const used = new Set(sp.used)
-  const suggested = sortSuggested(sp, c)
   const gone = new Set(sp.gone)
   // the vi cursor, drawn: the focus ring is the engine's and not every surface shows it
   const here = sessionStops(sp, c, checkup)[at]
-  const row = (key: string, mark: string, color: string, name: string, tail: string) => (
-    <Box key={key} flexDirection="row">
-      <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
-      <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
-      {/* a page renamed or deleted since is no link: there is nothing to open */}
-      {gone.has(name) ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
-      <Text color="subtle">{gone.has(name) ? '  renamed or deleted' : tail}</Text>
-    </Box>
-  )
-  return (
-    <Box flexDirection="column">
-      {/* short rows: a row wider than the pane shrinks every piece in it */}
-      <Box flexDirection="row">
-        <Text bold color="claude">{`${c.used}/${c.suggested}`}</Text>
-        <Text color="subtle">{' suggested pages read'}</Text>
-      </Box>
-      <Text color="subtle">{'click a name to read the page'}</Text>
-      <Text> </Text>
-      {sectionTitle($, e, 'SUGGESTED')}
-      <Box paddingLeft={2}><Text color="subtle">{'✓ read · not read, ×N times suggested'}</Text></Box>
-      {suggested.length === 0 && <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>}
-      {suggested.map(name =>
-        used.has(name)
-          ? row(`s-${name}`, '✓', LEVEL_COLOR.ok, name, '')
-          : row(`s-${name}`, '·', 'subtle', name, times.get(name) ? ` ×${times.get(name)}` : ''),
-      )}
-      {sp.written.length > 0 && <Text> </Text>}
-      {sp.written.length > 0 && sectionTitle($, e, 'WRITTEN')}
-      {sp.written.map(name => row(`w-${name}`, '✎', LEVEL_COLOR.warn, name, ''))}
-      {checkup && checkup.suspect.length > 0 && <Text> </Text>}
-      {checkup && checkup.suspect.length > 0 && sectionTitle($, e, 'SUSPECT')}
-      {checkup?.suspect.map(name => row(`x-${name}`, '▲', LEVEL_COLOR.warn, name, ''))}
-    </Box>
-  )
+  const out: { stop: string | null; el: unknown }[] = []
+  const line = (key: string, el: unknown) => out.push({ stop: null, el: <Box key={key} flexDirection="row">{el as never}</Box> })
+  const row = (key: string, mark: string, color: string, name: string, tail: string) => {
+    const isGone = gone.has(name)
+    out.push({
+      stop: isGone ? null : `open-${key}`,
+      el: (
+        <Box key={key} flexDirection="row">
+          <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
+          <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
+          {/* a page renamed or deleted since is no link: there is nothing to open */}
+          {isGone ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
+          <Text color="subtle">{isGone ? '  renamed or deleted' : tail}</Text>
+        </Box>
+      ),
+    })
+  }
+  const blank = (key: string) => line(key, <Text> </Text>)
+  // short rows: a row wider than the pane shrinks every piece in it
+  line('h1', [<Text key="n" bold color="claude">{`${c.used}/${c.suggested}`}</Text>, <Text key="t" color="subtle">{' suggested pages read'}</Text>])
+  line('h2', <Text color="subtle">{'click a name to read the page'}</Text>)
+  blank('b1')
+  out.push({ stop: null, el: sectionTitle($, e, 'SUGGESTED') })
+  line('legend', <Box paddingLeft={2}><Text color="subtle">{'✓ read · not read, ×N times suggested'}</Text></Box>)
+  const suggested = sortSuggested(sp, c)
+  if (suggested.length === 0) line('none', <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>)
+  for (const name of suggested) {
+    if (used.has(name)) row(`s-${name}`, '✓', LEVEL_COLOR.ok, name, '')
+    else row(`s-${name}`, '·', 'subtle', name, times.get(name) ? ` ×${times.get(name)}` : '')
+  }
+  if (sp.written.length > 0) {
+    blank('b2')
+    out.push({ stop: null, el: sectionTitle($, e, 'WRITTEN') })
+    for (const name of sp.written) row(`w-${name}`, '✎', LEVEL_COLOR.warn, name, '')
+  }
+  if (checkup && checkup.suspect.length > 0) {
+    blank('b3')
+    out.push({ stop: null, el: sectionTitle($, e, 'SUSPECT') })
+    for (const name of checkup.suspect) row(`x-${name}`, '▲', LEVEL_COLOR.warn, name, '')
+  }
+  return out
 }
 
-/** The reader tab: one page, its trust, its body, and the pages it links. */
-function drawReader($: EngineInterface, e: ResolveInput, r: Reader, at = 0) {
+/** The page tab while it has no page to show: loading, an error, or how to open one. */
+function drawReaderNote($: EngineInterface, e: ResolveInput, r: Reader) {
+  const { Text } = $.ui.resolve(e)
+  if (r.loading) return <Text key="note" color="subtle">{`reading ${r.loading}…`}</Text>
+  return <Text key="note" color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the session tab, the suggested pages, or a card opens the page here.'}</Text>
+}
+
+/** Rows a text takes at a width, wrapped by word: an estimate for scrolling, not for drawing. */
+function rowsAt(text: string, width: number): number {
+  return text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / Math.max(10, width))), 0)
+}
+
+/** The page tab as items the pane can start at: the heading, each paragraph, then the links; with each item's height. */
+function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, columns: number) {
   const { Box, Button, Markdown, Text } = $.ui.resolve(e)
-  if (r.loading && (!r.page || r.page.label !== r.loading)) return <Text color="subtle">{`reading ${r.loading}…`}</Text>
-  if (!r.page) {
-    return <Text color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the Session tab, the suggested pages, or a card opens the page here.'}</Text>
-  }
-  const page = r.page
+  const page = r.page as ShownPage
   const fm = page.fm
   const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
   const topics = Array.isArray(fm.topics) ? fm.topics.map(String).join(', ') : str(fm.topics)
   const verified = fm.verified ? `verified ${ageText(fm.verified)}` : 'never verified'
-  return (
-    <Box flexDirection="column">
+  const meta = `${str(fm.kind) || 'page'} · ${page.label} · updated ${ageText(fm.updated)} · ${verified}`
+  const items: unknown[] = []
+  const heights: number[] = []
+  items.push(
+    <Box key="head" flexDirection="column" marginBottom={1}>
       <Box flexDirection="row">
         {r.history.length > 0 && <Button key="back" hotkey="b" onPress={() => void goBack($)}>← Back</Button>}
         {r.history.length > 0 && <Text> </Text>}
         <Text bold color={TITLE}>{str(fm.title) || page.name}</Text>
       </Box>
-      <Text color="subtle">{`${str(fm.kind) || 'page'} · ${page.label} · updated ${ageText(fm.updated)} · ${verified}`}</Text>
+      <Text color="subtle">{meta}</Text>
       {r.error && <Text color="error">{r.error}</Text>}
       {page.signals.map(sig => (
         <Text key={`sig-${sig.signal}`} color={sig.level === 'suspect' ? 'warning' : 'subtle'}>{`${sig.level === 'suspect' ? '▲' : '·'} ${sig.level}: ${sig.reason}`}</Text>
@@ -1182,15 +1249,21 @@ function drawReader($: EngineInterface, e: ResolveInput, r: Reader, at = 0) {
       <Text> </Text>
       <Text italic color="suggestion">{str(fm.summary)}</Text>
       {topics && <Text color="subtle">{`topics: ${topics}`}</Text>}
-      <Text> </Text>
-      {/* one block per paragraph, so j and k have places to stop */}
-      {paragraphs(page.body).map((text, i) => (
-        <Box key={`p-${i}`} flexDirection="row" marginBottom={1}>
-          <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{at === i ? '›' : ' '}</Text></Box>
-          <Markdown key={`para-${i}`} text={text} />
-        </Box>
-      ))}
-      {page.links.length > 0 && <Text> </Text>}
+    </Box>,
+  )
+  heights.push(rowsAt(str(fm.title), columns) + rowsAt(meta, columns) + (r.error ? 1 : 0) + page.signals.length + 1 + rowsAt(str(fm.summary), columns) + (topics ? 1 : 0) + 1)
+  // one block per paragraph, so j and k have places to stop
+  paragraphs(page.body).forEach((text, i) => {
+    items.push(
+      <Box key={`p-${i}`} flexDirection="row" marginBottom={1}>
+        <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>{at === i ? '›' : ' '}</Text></Box>
+        <Markdown key={`para-${i}`} text={text} />
+      </Box>,
+    )
+    heights.push(rowsAt(text, columns - 2) + 1)
+  })
+  items.push(
+    <Box key="tail" flexDirection="column">
       {page.links.length > 0 && sectionTitle($, e, 'LINKED PAGES')}
       {page.links.map(name => (
         <Box key={`l-${name}`} flexDirection="row" paddingLeft={2}>
@@ -1198,10 +1271,12 @@ function drawReader($: EngineInterface, e: ResolveInput, r: Reader, at = 0) {
           {pageLink($, e, `link-${name}`, name)}
         </Box>
       ))}
-      <Text> </Text>
+      {page.links.length > 0 && <Text> </Text>}
       <Text dimColor>{page.path}</Text>
-    </Box>
+    </Box>,
   )
+  heights.push(page.links.length + (page.links.length > 0 ? 2 : 0) + 1)
+  return { items, heights }
 }
 
 function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNote, isOpen: boolean) {

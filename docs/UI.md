@@ -158,6 +158,7 @@ that closes it. Under it, a row of keys:
 | `g`, `e` | the top, the end | the top, the end |
 | `h`, `l` | the session tab, the page tab | the same |
 | `1`, `2`, `x`, `b` | the session tab, the page tab, close the page | the same, and `b` goes back |
+| `q` | close the pane | close the pane |
 
 The keys work while the pane has the keyboard. The pane asks for it when
 it opens, and Claude Code gives it unless you were typing at the prompt;
@@ -165,6 +166,12 @@ a click on the pane, or `ctrl+x` then Tab, gives it too. A `›` marks
 where `j` and `k` stand, and the pane opens with it on the first page
 name. Arrows, Page Up and Down, and the mouse wheel scroll as in any
 pane. Shift is not a separate key here, so the end is `e`, not `G`.
+
+The tab row and the keys stay at the top; the wheel, the arrows, and the
+page keys scroll the content under them, and `↑ N above` says how much
+has scrolled away. Esc hands the keys back to the prompt and leaves the
+pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
+closes it.
 
 The session tab lists this session's pages:
 

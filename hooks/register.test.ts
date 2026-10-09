@@ -492,7 +492,7 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
   expect(opened).toEqual(['iirc:iirc'])
   const pane = (requestId: string, title: string) => $.ui.mount({
     plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
-    props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
+    props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
   })
   const view = await pane('iirc', 'iirc')
   expect(await view.find({ text: ' ×3' })).toBeDefined()
@@ -561,7 +561,7 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
   await clock.settle()
   const view = await $.ui.mount({
     plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
-    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
   })
   // the drawn cursor sits in the row of the page it is on: the row's first Text
   const cursorOn = async () => {
@@ -599,4 +599,39 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
   expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
   await view.press({ key: 'key-l' })
   expect(await view.find({ text: 'A' })).toBeDefined()
+})
+
+
+test('the tab row and the keys stay on top while j scrolls the list under them; q closes the pane', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const closed: string[] = []
+  on('ui.close', ($, e) => (closed.push(e.id), { value: undefined }))
+  on('session.id', () => ({ value: 's1' }))
+  const names = Array.from({ length: 12 }, (_, i) => `p${i}.md`)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('process.run', ($, e) => {
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
+    if (e.argv.includes('stats')) return ran(JSON.stringify({ read: [], written: [], suggested: names, used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    return ran(BRIEF)
+  })
+  await $.command.run({ command: 'iirc', args: 'pane' })
+  await clock.settle()
+  // eight rows: three for the header, five for the list
+  const view = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 8 }, view: {} },
+  })
+  expect(await view.find({ text: '↑ 1 above' })).toBeUndefined()
+  for (let i = 0; i < 8; i++) await view.press({ key: 'key-j' })
+  expect(await view.find({ key: 'tab-session' })).toBeDefined()              // the header stays
+  expect(await view.find({ key: 'key-q' })).toBeDefined()
+  expect(await view.find({ key: 'open-s-p8.md' })).toBeDefined()             // the cursor's row is in view
+  expect(await view.find({ key: 'open-s-p0.md' })).toBeUndefined()           // the top of the list scrolled away
+  expect(JSON.stringify(await view.find({ key: 's-p8.md' }))).toContain('"›"')
+  await view.press({ key: 'key-g' })
+  expect(await view.find({ key: 'open-s-p0.md' })).toBeDefined()
+  await view.press({ key: 'key-q' })
+  expect(closed).toEqual(['iirc'])
 })

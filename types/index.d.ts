@@ -32,8 +32,8 @@ export type ShownPage = {
 /** The pane's tabs: which one shows, the page in the page tab, and the pages before it for Back. */
 export type Reader = { page: ShownPage | null; history: string[]; error: string | null; loading: string | null; tab: 'session' | 'page' }
 
-/** Where `j` and `k` stand: an index into each tab's stops. */
-export type Cursor = { session: number; page: number }
+/** Where `j` and `k` stand in each tab's stops, and the item each tab's content starts at under the fixed header. */
+export type Cursor = { session: number; page: number; sessionTop: number; pageTop: number }
 
 /** This session's pages by name, from `iirc stats --session`, for the Session tab; `gone` were renamed or deleted since. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[]; gone: string[] }
