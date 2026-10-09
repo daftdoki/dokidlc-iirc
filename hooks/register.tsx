@@ -361,56 +361,75 @@ export const register: Register = on => {
 
 function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
   const { Box, Text } = $.ui.resolve(e)
-  const LABEL = 19
-  const VALUE = 12
-  // flat Text items in one row: a fragment inside a row lays out as a column
+  const level = s ? s.level : 'warn'
+  const tone = LEVEL_COLOR[level]
+  const width = Math.max(48, Math.min(72, (e.viewport?.columns ?? 76) - 4))
+  // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
   const head: unknown[] = [
-    <Text color={s ? LEVEL_COLOR[s.level] : 'subtle'}>● </Text>,
-    <Text bold color="claude">iirc</Text>,
-    <Text>{'   '}</Text>,
+    <Text key="dot" color={tone}>● </Text>,
+    <Text key="name" bold color="claude">iirc</Text>,
+    <Text key="gap">{'   '}</Text>,
+    <Text key="chip" bold color="inverseText" backgroundColor={tone}>
+      {` ${level === 'ok' ? 'all good' : level === 'warn' ? 'needs a look' : s ? s.note : 'no brief yet'} `}
+    </Text>,
   ]
-  if (s && s.pages !== null) {
-    const stats: [string, string][] = [
-      [String(s.pages), s.pages === 1 ? 'page' : 'pages'],
-      [`${c.used}/${c.suggested}`, 'used'],
-      [String(c.reads), 'reads'],
-      [String(c.writes), 'writes'],
-    ]
-    stats.forEach(([n, label], k) => {
-      if (k > 0) head.push(<Text color="subtle">{'  ·  '}</Text>)
-      head.push(<Text bold color="claude">{n}</Text>, <Text color="subtle">{` ${label}`}</Text>)
-    })
-    if (s.mode !== 'semantic+keyword') head.push(<Text color="subtle">{'  ·  '}</Text>, <Text color="warning">{`${s.mode} mode`}</Text>)
-  } else {
-    head.push(<Text color="subtle">{s ? s.note : 'no session brief yet'}</Text>)
-  }
-  const row = (label: string, value: string, command: string) => (
-    <Box flexDirection="row">
-      <Box width={LABEL} flexShrink={0}><Text color="subtle">{label}</Text></Box>
-      <Box width={VALUE} flexShrink={0}><Text bold color="claude">{value}</Text></Box>
+  if (s && s.mode && s.mode !== 'semantic+keyword') head.push(<Text key="mode" color="warning">{`   ${s.mode} mode`}</Text>)
+  const tiles: [string, string][] = s && s.pages !== null
+    ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
+    : []
+  const share = c.suggested > 0 ? c.used / c.suggested : 0
+  const BAR = 24
+  const filled = Math.round(share * BAR)
+  const setting = (label: string, value: string, command: string) => (
+    <Box key={label} flexDirection="row" paddingLeft={2}>
+      <Box width={20} flexShrink={0}><Text color="subtle">{label}</Text></Box>
+      <Box width={10} flexShrink={0}><Text bold color="claude">{value}</Text></Box>
       <Text color="suggestion">{command}</Text>
     </Box>
   )
+  const heading = (text: string) => <Text bold color="subtle">{text}</Text>
   return (
-    <Box flexDirection="column" paddingLeft={2}>
+    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
       <Box flexDirection="row">{head}</Box>
-      {s && s.level !== 'ok' && s.fix && (
+      {s && level !== 'ok' && s.fix && (
         <Box flexDirection="row" paddingLeft={2}>
-          <Text color={LEVEL_COLOR[s.level]}>{'fix  '}</Text>
-          <Text bold color="claude">{`run ${s.fix}`}</Text>
+          <Text color={tone}>{'▸ run '}</Text>
+          <Text bold color="claude">{s.fix}</Text>
+        </Box>
+      )}
+      {tiles.length > 0 && <Text> </Text>}
+      {tiles.length > 0 && (
+        <Box flexDirection="row" paddingLeft={2}>
+          {tiles.map(([n, label]) => (
+            <Box key={label} flexDirection="column" width={13} flexShrink={0}>
+              <Text bold color="claude">{n}</Text>
+              <Text color="subtle">{label}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
+      {c.suggested > 0 && (
+        <Box flexDirection="row" paddingLeft={2}>
+          <Text color="success">{'━'.repeat(filled)}</Text>
+          <Text color="inactive">{'━'.repeat(BAR - filled)}</Text>
+          <Text color="subtle">{`  ${Math.round(share * 100)}% of suggested pages read`}</Text>
         </Box>
       )}
       <Text> </Text>
-      {row('line under prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
-      {row('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
+      {heading('SETTINGS')}
+      {setting('line under prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
+      {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
       <Text> </Text>
       <Box flexDirection="row">
-        <Box width={LABEL} flexShrink={0}><Text color="subtle">ask in words</Text></Box>
+        <Box width={16} flexShrink={0}>{heading('ASK IN WORDS')}</Box>
         <Text color="suggestion">/iirc &lt;request&gt;</Text>
       </Box>
-      <Box flexDirection="row" paddingLeft={LABEL}>
-        <Text dimColor italic>what do we know about ollama hangs? · remember that… · what's out of date?</Text>
-      </Box>
+      {['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"].map(example => (
+        <Box key={example} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor italic>{example}</Text>
+        </Box>
+      ))}
     </Box>
   )
 }

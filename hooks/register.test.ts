@@ -281,7 +281,8 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     expect(await panel.find({ text: '68' })).toBeDefined()
     expect(await panel.find({ text: 'up to 4' })).toBeDefined()
     expect(await panel.find({ text: '/iirc max-suggested N' })).toBeDefined()
-    expect(await panel.find({ text: 'run iirc doctor' })).toBeDefined()
+    expect(await panel.find({ text: 'iirc doctor' })).toBeDefined()
+    expect(await panel.find({ text: ' needs a look ' })).toBeDefined()
   }
   const other = await $.ui.mount({
     plugin: 'iirc',
