@@ -438,10 +438,11 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
     props: { command: 'iirc', args: 'status', text, isErrored: false },
   })
   expect(await card.find({ text: '1 suspect page: a cited file changed' })).toBeDefined()
-  expect(await card.find({ text: 'old-fact.md' })).toBeDefined()
+  expect(await card.find({ text: 'old-fact' })).toBeDefined()
   expect(await card.find({ text: ' 5 pages, 2 not pushed' })).toBeDefined()
   expect(await card.find({ text: 'iirc sync' })).toBeDefined()
-  expect(await card.find({ text: 'noisy.md' })).toBeDefined()
+  expect(await card.find({ key: 'card-m-noisy.md' })).toBeDefined()           // a link to the reader
+  expect(await card.find({ key: 'card-s-old-fact.md' })).toBeDefined()
   expect(await card.find({ text: ' ×4' })).toBeDefined()
   expect(await card.find({ text: '62%' })).toBeDefined()
   expect(await card.find({ text: ' · not read ' })).toBeDefined()
@@ -459,4 +460,69 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. 3 recalls timed out in the last 7 days, past the hook\'s 5 s limit: iirc doctor names the cause.')!
   expect(brief.status.level).toBe('warn')
   expect(brief.status.fix).toBe('iirc doctor')
+})
+
+test('/iirc pane opens the Session tab; a page name opens the reader tab, a linked page replaces it, Back returns', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const opened: string[] = []
+  on('ui.open', ($, e) => (opened.push(`${e.id}:${e.title}`), { value: { isPlaced: true } }))
+  on('session.id', () => ({ value: 's1' }))
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const shown: string[] = []
+  on('process.run', ($, e) => {
+    if (e.argv.includes('show')) {
+      const name = e.argv[e.argv.length - 1]
+      shown.push(name)
+      return ran(JSON.stringify({
+        store: 'project', name, label: name, path: `/repo/.iirc/${name}`, body: `Body of ${name}`,
+        fm: { title: `Title of ${name}`, kind: 'finding', summary: 'one line', topics: ['x'], updated: '2026-10-01T00:00:00Z' },
+        links: name === 'a.md' ? ['b.md'] : [], signals: [],
+      }))
+    }
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: ['old.md'], stores: [] }))
+    if (e.argv.includes('stats')) {
+      return ran(JSON.stringify({ read: ['a.md'], written: ['w.md'], suggested: ['a.md', 'n.md'], used: ['a.md'], missed: [['n.md', 3]], match: {}, timeouts: 0 }))
+    }
+    return ran(BRIEF)
+  })
+  expect((await $.command.run({ command: 'iirc', args: 'pane' })).text).toContain('iirc pane opened')
+  await clock.settle()
+  expect(opened).toEqual(['iirc:iirc'])
+  const pane = (requestId: string, title: string) => $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
+    props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, rows: 30 }, view: {} },
+  })
+  const session = await pane('iirc', 'iirc')
+  expect(await session.find({ text: '  not read, suggested ×3' })).toBeDefined()
+  expect(await session.find({ text: 'w' })).toBeDefined()                       // written
+  expect(await session.find({ text: '  a cited file changed' })).toBeDefined()  // suspect
+  await session.press({ key: 'open-s-a.md' })
+  expect(shown).toEqual(['a.md'])
+  expect(opened.at(-1)).toBe('iirc-page:a')
+  const reader = await pane('iirc-page', 'a')
+  expect(await reader.find({ text: 'Title of a.md' })).toBeDefined()
+  expect(await reader.find({ text: 'one line' })).toBeDefined()
+  expect(await reader.find({ key: 'back' })).toBeUndefined()                    // nothing to go back to yet
+  await reader.press({ key: 'link-b.md' })
+  expect(opened.at(-1)).toBe('iirc-page:b')
+  expect(await reader.find({ text: 'Title of b.md' })).toBeDefined()
+  expect(await reader.find({ key: 'back' })).toBeDefined()
+  await reader.press({ key: 'back' })
+  expect(shown).toEqual(['a.md', 'b.md', 'a.md'])
+  expect(await reader.find({ text: 'Title of a.md' })).toBeDefined()
+  expect(await reader.find({ key: 'back' })).toBeUndefined()
+})
+
+test('a page name in the suggested-pages tree opens the reader', async ($: Engine, on: On) => {
+  engine(on)
+  const opened: string[] = []
+  on('ui.open', ($, e) => (opened.push(`${e.id}:${e.title}`), { value: { isPlaced: true } }))
+  on('process.run', ($, e) => ({ value: { exitCode: 0, stdout: JSON.stringify({ store: 'project', name: 'pysqlite3-install-override.md', label: 'pysqlite3-install-override.md', path: '/p', fm: {}, body: 'b', links: [], signals: [] }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await promptRow($, 'p-tree')
+  await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read before you investigate: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
+  const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
+  await row.press({ key: 'toggle-p-tree' })
+  await row.press({ key: 'open-p-tree-0-0-1' })
+  expect(opened).toEqual(['iirc-page:pysqlite3-install-override'])
 })

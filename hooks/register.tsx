@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { IircHealth, IircStatus, MatchAverages, RecalledPage, SessionCounts, ToolNote } from '../types'
+import type { IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, ShownPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -21,6 +21,13 @@ const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
+const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null } as Reader)
+const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [] } as SessionPages)
+// the pane's two tabs: this session's pages, and a reader the page names open
+const SESSION_PANE = 'iirc'
+const READER_PANE = 'iirc-page'
+// a tab label past this many characters is cut
+const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
@@ -80,6 +87,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
+  ['pane', "this session's pages; a click reads one", 'LOOK UP'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
@@ -264,6 +272,47 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   ].join('\n')
 }
 
+/** A page name as a tab label: no `.md`, cut to TAB_TITLE_MAX. */
+export function tabTitle(name: string): string {
+  const bare = name.replace(/\.md$/, '')
+  return bare.length > TAB_TITLE_MAX ? bare.slice(0, TAB_TITLE_MAX - 1) + '…' : bare
+}
+
+/** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
+async function openPage($: EngineInterface, ref: string, isBack = false) {
+  let page: ShownPage | null = null
+  let error: string | null = null
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'show', ref], { cwd: await $.session.root(), timeoutMs: 15000 })
+    if (ran.exitCode === 0) page = JSON.parse(ran.stdout) as ShownPage
+    else error = (ran.stderr || ran.stdout).trim() || `iirc show ${ref} exited ${ran.exitCode}`
+  } catch (err) {
+    error = `iirc show ${ref} did not finish: ${String(err)}`
+  }
+  await update($, reader, r => ({
+    page: page ?? r.page,
+    error,
+    history: isBack || !page || !r.page || r.page.label === page.label ? r.history : [...r.history, r.page.label].slice(-20),
+  }))
+  await $.ui.open({ id: READER_PANE, title: tabTitle(page?.name ?? ref), focus: true, rows: 24 })
+}
+
+/** The page before this one, if the reader has one. */
+async function goBack($: EngineInterface) {
+  const r = await read($, reader)
+  const prev = r.history[r.history.length - 1]
+  if (!prev) return
+  await update($, reader, x => ({ ...x, history: x.history.slice(0, -1) }))
+  await openPage($, prev, true)
+}
+
+/** The Session tab, with its numbers fresh. */
+async function openSession($: EngineInterface) {
+  refreshCounts($)
+  await refreshHealth($)
+  await $.ui.open({ id: SESSION_PANE, title: 'iirc', focus: true })
+}
+
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
 export function healthLines(checkup: IircHealth | null, c: SessionCounts): string[] {
   const lines: string[] = []
@@ -301,6 +350,8 @@ function refreshCounts($: EngineInterface) {
       const n = (key: string) => (Array.isArray(got[key]) ? (got[key] as unknown[]).length : 0)
       const missed = Array.isArray(got.missed) ? (got.missed as [string, number][]) : []
       const match = { ...NO_MATCH, ...(got.match as Partial<MatchAverages> | undefined) }
+      const list = (key: string) => (Array.isArray(got[key]) ? (got[key] as string[]) : [])
+      await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
       await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
     })().catch(() => {})
@@ -398,6 +449,10 @@ export const register: Register = on => {
     if (!e.args.trim()) return { text: await helpText($, 'home') }
     if (e.args.trim() === 'status') return { text: await helpText($, 'status') }
     if (e.args.trim() === 'help') return { text: await helpText($, 'help') }
+    if (e.args.trim() === 'pane') {
+      await openSession($)
+      return { text: 'iirc pane opened: this session\'s pages; a page name opens it in a reader tab' }
+    }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (/^demo(\s+status)?$/.test(e.args.trim())) return { text: 'the /iirc card with sample numbers' }
     const direct = DIRECT_RE.exec(e.args.trim())
@@ -434,6 +489,15 @@ export const register: Register = on => {
     const view: CardView = args === 'help' ? 'help' : args.endsWith('status') ? 'status' : 'home'
     if (args.startsWith('demo')) return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
     return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
+  })
+
+  on('ui.render', { component: 'Pane', requestId: SESSION_PANE }, async ($, e) =>
+    drawSession($, e, await read($, sessionPages), await read($, counts), await read($, health)))
+  on('ui.render', { component: 'Pane', requestId: READER_PANE }, async ($, e) => drawReader($, e, await read($, reader)))
+  // a closed reader starts empty next time, with no stale page or way back
+  on('ui.close', async ($, e, next) => {
+    if (e.id === READER_PANE) await update($, reader, () => ({ page: null, history: [], error: null }))
+    return next(e)
   })
 
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
@@ -606,10 +670,10 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       trustRows.push(
         <Box key={`s${name}`} flexDirection="row" paddingLeft={14}>
           <Text color="claude">{'› '}</Text>
-          <Text dimColor>{name}</Text>
+          {pageLink($, e, `card-s-${name}`, name, { color: 'claude' })}
         </Box>,
       )
-      factWidths.push(14 + 2 + name.length)
+      factWidths.push(14 + 2 + name.replace(/\.md$/, '').length)   // a link draws the name without .md
     }
     checkup.stores.forEach((x, k) => {
       const isOk = x.uncommitted === 0 && x.unpushed === 0
@@ -713,7 +777,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     }
     if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
     widths.push(...factWidths)
-    if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name, n]) => 4 + name.length + ` ×${n}`.length))
+    if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name, n]) => 4 + name.replace(/\.md$/, '').length + ` ×${n}`.length))
   } else {
     widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
@@ -769,7 +833,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {missed.map(([name, n]) => (
         <Box key={`m${name}`} flexDirection="row" paddingLeft={2}>
           <Text color="claude">{'› '}</Text>
-          <Text dimColor>{name}</Text>
+          {pageLink($, e, `card-m-${name}`, name, { color: 'claude' })}
           <Text color={LEVEL_COLOR.warn}>{` ×${n}`}</Text>
         </Box>
       ))}
@@ -887,6 +951,120 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
   )
 }
 
+/** A section title as the cards draw it: an orange bar and the text in violet, each in a box that will not shrink. */
+function sectionTitle($: EngineInterface, e: ResolveInput, text: string) {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box key={`title-${text}`} flexDirection="row" flexShrink={0}>
+      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
+    </Box>
+  )
+}
+
+/** A page name that opens the page in the reader tab. */
+function pageLink($: EngineInterface, e: ResolveInput, key: string, name: string, style: Piece['style'] = { bold: true, color: 'claude' }) {
+  const { Button, Text } = $.ui.resolve(e)
+  return (
+    <Button key={key} plain onPress={() => void openPage($, name)}>
+      <Text {...style}>{name.replace(/\.md$/, '')}</Text>
+    </Button>
+  )
+}
+
+/** How long ago an ISO time was, in the largest whole unit. */
+export function ageText(iso: unknown, now = Date.now()): string {
+  const t = typeof iso === 'string' ? Date.parse(iso) : NaN
+  if (Number.isNaN(t)) return 'unknown'
+  const days = Math.floor((now - t) / 86400000)
+  return days < 1 ? 'today' : days === 1 ? '1 day ago' : days < 60 ? `${days} days ago` : `${Math.floor(days / 30)} months ago`
+}
+
+/** The Session tab: what recall suggested this session and whether it was read, what was written, and what may be wrong. */
+function drawSession($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null) {
+  const { Box, Text } = $.ui.resolve(e)
+  const times = new Map(c.missed)
+  const used = new Set(sp.used)
+  // read pages first, then the unread ones most often suggested
+  const suggested = [...sp.suggested].sort((a, b) => Number(used.has(b)) - Number(used.has(a)) || (times.get(b) ?? 0) - (times.get(a) ?? 0))
+  const row = (key: string, mark: string, color: string, name: string, tail: string) => (
+    <Box key={key} flexDirection="row" paddingLeft={2}>
+      <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
+      {pageLink($, e, `open-${key}`, name)}
+      <Text color="subtle">{tail}</Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        <Text color="subtle">{'this session: '}</Text>
+        <Text bold color="claude">{`${c.used}/${c.suggested}`}</Text>
+        <Text color="subtle">{' suggested pages read · '}</Text>
+        <Text bold color="claude">{String(c.reads)}</Text>
+        <Text color="subtle">{' reads · '}</Text>
+        <Text bold color="claude">{String(c.writes)}</Text>
+        <Text color="subtle">{' writes · a page name opens it'}</Text>
+      </Box>
+      <Text> </Text>
+      {sectionTitle($, e, 'SUGGESTED')}
+      {suggested.length === 0 && <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>}
+      {suggested.map(name =>
+        used.has(name)
+          ? row(`s-${name}`, '✓', LEVEL_COLOR.ok, name, '  read')
+          : row(`s-${name}`, '·', 'subtle', name, `  not read${times.get(name) ? `, suggested ×${times.get(name)}` : ''}`),
+      )}
+      {sp.written.length > 0 && <Text> </Text>}
+      {sp.written.length > 0 && sectionTitle($, e, 'WRITTEN')}
+      {sp.written.map(name => row(`w-${name}`, '✎', LEVEL_COLOR.warn, name, ''))}
+      {checkup && checkup.suspect.length > 0 && <Text> </Text>}
+      {checkup && checkup.suspect.length > 0 && sectionTitle($, e, 'SUSPECT')}
+      {checkup?.suspect.map(name => row(`x-${name}`, '▲', LEVEL_COLOR.warn, name, '  a cited file changed'))}
+    </Box>
+  )
+}
+
+/** The reader tab: one page, its trust, its body, and the pages it links. */
+function drawReader($: EngineInterface, e: ResolveInput, r: Reader) {
+  const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+  if (!r.page) {
+    return <Text color={r.error ? 'error' : 'subtle'}>{r.error ?? 'A page name in the Session tab, the suggested pages, or a card opens the page here.'}</Text>
+  }
+  const page = r.page
+  const fm = page.fm
+  const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
+  const topics = Array.isArray(fm.topics) ? fm.topics.map(String).join(', ') : str(fm.topics)
+  const verified = fm.verified ? `verified ${ageText(fm.verified)}` : 'never verified'
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        {r.history.length > 0 && <Button key="back" hotkey="b" onPress={() => void goBack($)}>← Back</Button>}
+        {r.history.length > 0 && <Text> </Text>}
+        <Text bold color={TITLE}>{str(fm.title) || page.name}</Text>
+      </Box>
+      <Text color="subtle">{`${str(fm.kind) || 'page'} · ${page.label} · updated ${ageText(fm.updated)} · ${verified}`}</Text>
+      {r.error && <Text color="error">{r.error}</Text>}
+      {page.signals.map(sig => (
+        <Text key={`sig-${sig.signal}`} color={sig.level === 'suspect' ? 'warning' : 'subtle'}>{`${sig.level === 'suspect' ? '▲' : '·'} ${sig.level}: ${sig.reason}`}</Text>
+      ))}
+      <Text> </Text>
+      <Text italic color="suggestion">{str(fm.summary)}</Text>
+      {topics && <Text color="subtle">{`topics: ${topics}`}</Text>}
+      <Text> </Text>
+      <Markdown key="body" text={page.body.trim()} />
+      {page.links.length > 0 && <Text> </Text>}
+      {page.links.length > 0 && sectionTitle($, e, 'LINKED PAGES')}
+      {page.links.map(name => (
+        <Box key={`l-${name}`} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          {pageLink($, e, `link-${name}`, name)}
+        </Box>
+      ))}
+      <Text> </Text>
+      <Text dimColor>{page.path}</Text>
+    </Box>
+  )
+}
+
 function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNote, isOpen: boolean) {
   const { Box, Text } = $.ui.resolve(e)
   return (
@@ -924,9 +1102,11 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
       {isOpen &&
         pages.map((p, i) => {
           const isLast = i === pages.length - 1
+          // its own style object, so the drawn line can find the name and make it a link
+          const nameStyle: Piece['style'] = { bold: true, color: 'claude' }
           const pieces: Piece[] = [
             { text: '◆ ', style: { color: p.isSuspect ? 'warning' : 'success' } },
-            { text: p.name.replace(/\.md$/, ''), style: { bold: true, color: 'claude' } },
+            { text: p.name.replace(/\.md$/, ''), style: nameStyle },
             ...(p.isSuspect ? [{ text: ' (suspect)', style: { color: 'warning' } } as Piece] : []),
             ...(p.match ? [{ text: `  [${p.match}]`, style: { color: 'suggestion' } } as Piece] : []),
             { text: '  ' + p.summary, style: { dimColor: true, italic: true } },
@@ -939,11 +1119,17 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
               <Box width={3} flexShrink={0}>
                 <Text color="subtle">{j > 0 ? (isLast ? ' ' : '│') : isLast ? '└─' : '├─'}</Text>
               </Box>
-              {line.map(piece => (
-                <Text {...piece.style} wrap="truncate-end">
-                  {piece.text}
-                </Text>
-              ))}
+              {line.map((piece, k) =>
+                piece.style === nameStyle ? (
+                  <Button key={`open-${id}-${i}-${j}-${k}`} plain onPress={() => void openPage($, p.name)}>
+                    <Text {...piece.style}>{piece.text}</Text>
+                  </Button>
+                ) : (
+                  <Text {...piece.style} wrap="truncate-end">
+                    {piece.text}
+                  </Text>
+                ),
+              )}
             </Box>
           ))
         })}

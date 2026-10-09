@@ -16,7 +16,8 @@ the agent got. When the circle on the line turns yellow or red, the line
 ends with the command that clears it, such as `· run iirc doubt`; ask
 the agent to run it, or type it after `/iirc`. For anything else, ask in
 words: "what do we know about ollama hangs?", "remember that...",
-"what's out of date?".
+"what's out of date?". To read a page yourself, click its name, or run
+`/iirc pane`; your reads there do not count as the agent's.
 
 ## Tasks
 
@@ -163,6 +164,7 @@ The `command.run` handler in
 | `/iirc topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
+| `/iirc pane` | A pane with this session's suggested, written, and suspect pages. A click on a page name, here or anywhere iirc draws one, opens the page in a reader tab. See [UI.md](UI.md#the-pane). |
 | `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,

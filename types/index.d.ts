@@ -17,6 +17,24 @@ export type StoreHealth = { name: string; kind: string; pages: number; uncommitt
 /** Trust and store state for the card: pages whose cited file changed, and each store. */
 export type IircHealth = { suspect: string[]; stores: StoreHealth[] }
 
+/** One page as `iirc show` returns it, for the pane's reader. */
+export type ShownPage = {
+  store: string
+  name: string
+  label: string
+  path: string
+  fm: Record<string, unknown>
+  body: string
+  links: string[]
+  signals: { signal: string; level: 'suspect' | 'glance'; reason: string }[]
+}
+
+/** The reader tab: the page shown, and the pages before it for Back. */
+export type Reader = { page: ShownPage | null; history: string[]; error: string | null }
+
+/** This session's pages by name, from `iirc stats --session`, for the Session tab. */
+export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[] }
+
 export type ToolNote = { pages: RecalledPage[]; recovered: { command: string; failures: number }[] }
 
 declare module 'claude-code' {
@@ -34,6 +52,10 @@ declare module 'claude-code' {
       counts: SessionCounts
       /** Whether the hint row shows the brief; `/iirc status on|off`, kept in $.store. */
       isStatusShown: boolean
+      /** The page the reader tab shows, and the way back. */
+      reader: Reader
+      /** This session's suggested, read, and written pages, for the Session tab. */
+      sessionPages: SessionPages
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
       health: IircHealth | null
       /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */

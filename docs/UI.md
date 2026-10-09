@@ -144,6 +144,35 @@ draw the two cards with sample numbers.
 
 Neither card costs tokens: the plugin answers, and the skill does not load.
 
+## The pane
+
+`/iirc pane` opens a pane beside the transcript, or above the prompt on
+a terminal that is not in fullscreen. It has two tabs, which Claude Code
+draws once both are open.
+
+The `iirc` tab lists this session's pages:
+
+- SUGGESTED: every page recall suggested, read ones first with `✓ read`,
+  then the rest with `· not read` and how many times recall suggested it
+- WRITTEN: the pages the agent wrote, marked `✎`
+- SUSPECT: pages whose cited file changed
+
+A click on any page name opens the page in the second tab, named after
+the page. Page names are links in the same way under your prompt and
+under a failed command, and in the TRUST and SUGGESTED, NOT READ lists
+of the `/iirc status` card.
+
+The page tab shows the title, the kind, the store, when the page was
+updated and verified, any suspect or glance marker, the summary and
+topics, the body, and the path. Pages the body links with `[[name]]` are
+listed under LINKED PAGES; a click opens one in the same tab, and Back
+(`b` while the pane has the keys) returns to the page before. Close the
+tab with its close mark.
+
+Reading a page here is your read, not the agent's: it runs `iirc show`,
+which the log records as `show`, so the session's reads and hit rate
+count only what the agent read.
+
 ## Toasts
 
 The warnings from the session-start check come as a toast, once per
