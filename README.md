@@ -115,6 +115,8 @@ green when all is well; yellow or red, it ends with the command that
 fixes it, such as `· run iirc doubt`.
 A plain `/iirc` draws a card with the status, the counts, the hit rate,
 and the settings.
+
+![The iirc card: status all good, counts of pages, used, reads, and writes, a recall hit rate bar at 74%, the two settings with their commands, and examples of asking in words](docs/images/iirc-card.png)
 [docs/ui.md](docs/ui.md) explains every part.
 
 Ask a question and the agent searches. "Do you remember anything about

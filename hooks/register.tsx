@@ -272,7 +272,7 @@ export const register: Register = on => {
     // bare, it is help; the skill loads by itself when a task needs it
     if (!e.args.trim()) return { text: await helpText($) }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
-    if (e.args.trim() === 'demo') return { text: 'iirc: the /iirc card with sample numbers' }
+    if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
     if (maxArgs) {
       // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config

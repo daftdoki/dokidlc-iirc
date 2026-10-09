@@ -90,6 +90,9 @@ line cannot carry color, so the line sits in the hint row.
 
 A plain `/iirc` draws a card in place of its output row:
 
+![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
+
+
 - the name, "If I Recall Correctly", and what the plugin does
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it; the card's border takes
