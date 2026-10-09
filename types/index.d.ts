@@ -63,6 +63,8 @@ declare module 'claude-code' {
       sessionPages: SessionPages
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
       health: IircHealth | null
+      /** The pane's share of the terminal when docked, in percent; null is Claude Code's own share. `/iirc pane-width`, kept in $.store. */
+      paneWidth: number | null
       /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
     }

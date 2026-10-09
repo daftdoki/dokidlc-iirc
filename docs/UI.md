@@ -147,7 +147,9 @@ Neither card costs tokens: the plugin answers, and the skill does not load.
 ## The pane
 
 `/iirc pane` opens a pane beside the transcript, or above the prompt on
-a terminal that is not in fullscreen. A row at its top holds its own
+a terminal that is not in fullscreen. `/iirc pane-width 90`, `50`, or `33` sets
+its share of the terminal while docked, and `auto` leaves the width to
+Claude Code; a width you drag the pane to wins over either. A row at its top holds its own
 tabs: `session`, and, while a page is open, the page's name and a `✕`
 that closes it. Under it, a row of keys:
 
