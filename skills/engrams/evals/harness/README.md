@@ -1,25 +1,25 @@
-# Eval harness for the memory skill
+# Eval harness for the engrams skill
 
 Measures what the skill body changes in agent behavior, against a baseline
 that keeps the hooks and the CLI. Every run is a headless `claude -p` in a
 fresh copy of a fixture repository, with the plugin loaded from a copy
-through `--plugin-dir`, so hooks fire against the fixture's own `.memory/`
+through `--plugin-dir`, so hooks fire against the fixture's own `.engrams/`
 and nothing touches a real field. Built with skill-creator on 2026-09-20.
 
 ## Run it
 
 ```
-sh skills/memory/evals/harness/setup.sh            # workspace under $TMPDIR, baseline at HEAD~1
+sh skills/engrams/evals/harness/setup.sh            # workspace under $TMPDIR, baseline at HEAD~1
 export MEMORY_EVAL_WORKSPACE=...                   # the line setup.sh prints
-sh skills/memory/evals/harness/run_iteration.sh 1 "new_skill old_skill" 2
-python3 skills/memory/evals/harness/grade.py $MEMORY_EVAL_WORKSPACE/iteration-1/eval-*/*/run-*
+sh skills/engrams/evals/harness/run_iteration.sh 1 "new_skill old_skill" 2
+python3 skills/engrams/evals/harness/grade.py $MEMORY_EVAL_WORKSPACE/iteration-1/eval-*/*/run-*
 ```
 
 Then, from the skill-creator plugin directory:
 
 ```
-python3 -m scripts.aggregate_benchmark $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name memory
-python3 eval-viewer/generate_review.py $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name memory \
+python3 -m scripts.aggregate_benchmark $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name engrams
+python3 eval-viewer/generate_review.py $MEMORY_EVAL_WORKSPACE/iteration-1 --skill-name engrams \
   --benchmark $MEMORY_EVAL_WORKSPACE/iteration-1/benchmark.json
 ```
 

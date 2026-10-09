@@ -8,7 +8,7 @@
 set -eu
 H=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$H/../../../.." && pwd)
-W=${1:-${TMPDIR:-/tmp}/memory-eval-workspace}
+W=${1:-${TMPDIR:-/tmp}/engrams-eval-workspace}
 OLD_REV=${2:-HEAD~1}
 mkdir -p "$W"
 for c in plugin-live plugin-noskill plugin-snapshot; do rm -rf "$W/$c"; done

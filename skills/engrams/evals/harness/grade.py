@@ -35,9 +35,9 @@ def load(run: Path):
     texts = [c["text"] for e in events if e.get("type") == "assistant" for c in e["message"]["content"] if c["type"] == "text" and c["text"].strip()]
     answer = "\n\n".join(texts)
     (run / "outputs" / "answer.md").write_text(answer + "\n")
-    log = [json.loads(l) for l in (run / "outputs" / "memory-log.jsonl").read_text().splitlines() if l.strip()]
+    log = [json.loads(l) for l in (run / "outputs" / "engrams-log.jsonl").read_text().splitlines() if l.strip()]
     field = {}
-    for p in sorted((run / "outputs" / "memory-after").glob("*.md")):
+    for p in sorted((run / "outputs" / "engrams-after").glob("*.md")):
         if p.name == "index.md":
             continue
         m = FM_RE.match(p.read_text())
@@ -76,9 +76,9 @@ def any_index(calls, pattern):
 
 
 def wrote_memory_directly(calls):
-    """Steps that touch a page file without going through `memory write`: the Write/Edit tools, or a shell redirect into .memory/."""
-    out = [i for i, c in enumerate(calls) if c["tool"] in ("Write", "Edit", "MultiEdit") and "/.memory/" in str(c["input"].get("file_path", ""))]
-    out += [i for i, cmd in bash(calls) if re.search(r"(>>?|tee(?: -a)?)\s*\.?\S*\.memory/\S+\.md", cmd)]
+    """Steps that touch a page file without going through `engrams write`: the Write/Edit tools, or a shell redirect into .engrams/."""
+    out = [i for i, c in enumerate(calls) if c["tool"] in ("Write", "Edit", "MultiEdit") and "/.engrams/" in str(c["input"].get("file_path", ""))]
+    out += [i for i, cmd in bash(calls) if re.search(r"(>>?|tee(?: -a)?)\s*\.?\S*\.engrams/\S+\.md", cmd)]
     return sorted(out)
 
 
@@ -99,18 +99,18 @@ def grade(run: Path, eval_name: str):
         ex.append({"text": text, "passed": bool(passed), "evidence": str(evidence)[:400]})
 
     fixture_pages = {"ledger": 4, "syncproj": 2, "devserver": 3}
-    reads = any_index(calls, r"memory (read|pull)\b")
-    searches = any_index(calls, r"memory (search|pull)\b")
+    reads = any_index(calls, r"engrams (read|pull)\b")
+    searches = any_index(calls, r"engrams (search|pull)\b")
 
     if eval_name in ("search-before-debug", "search-when-hook-is-silent"):
         first_fix = first_index(calls, r"make db|build_db\.py")
         first_mem = min(searches + reads, default=None)
-        add("Memory is consulted (search, read, or pull) before the fix is applied",
+        add("Engrams is consulted (search, read, or pull) before the fix is applied",
             first_mem is not None and (first_fix is None or first_mem < first_fix),
-            f"first memory call at step {first_mem}, make db at step {first_fix}")
-        cats = any_index(calls, r"(cat|head|sed|tail|less|more)\s+[^;|&>]*\.memory/[a-z0-9-]+\.md")
-        add("Pages are read with memory read or pull, not cat", not cats, f"cat of a page at steps {cats}")
-        read_page = any_index(calls, r"memory (read|pull).*ledger-tests-need-make-db")
+            f"first engrams call at step {first_mem}, make db at step {first_fix}")
+        cats = any_index(calls, r"(cat|head|sed|tail|less|more)\s+[^;|&>]*\.engrams/[a-z0-9-]+\.md")
+        add("Pages are read with engrams read or pull, not cat", not cats, f"cat of a page at steps {cats}")
+        read_page = any_index(calls, r"engrams (read|pull).*ledger-tests-need-make-db")
         make_db = first_index(calls, r"make db|build_db\.py")
         add("The agent reads ledger-tests-need-make-db.md before running make db",
             read_page and (make_db is None or min(read_page) < make_db),
@@ -122,7 +122,7 @@ def grade(run: Path, eval_name: str):
         pg = field.get("ledger-tests-need-make-db.md", {})
         add("ledger-tests-need-make-db.md carries a verified stamp after the run", "verified" in pg.get("fm", {}), f"frontmatter keys: {sorted(pg.get('fm', {}))}")
         add("The reply names make db and the missing database as the cause", re.search(r"make db", answer) and re.search(r"sample\.db|database|gitignore", answer), answer[:200])
-        add("No page file is written except through memory write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through engrams write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
 
     elif eval_name == "write-after-learning":
         synced = [i for i, c in enumerate(calls) if "12 records synced" in c["result"]]
@@ -137,11 +137,11 @@ def grade(run: Path, eval_name: str):
         add("The new pages say what they work around: the stale lock and the vpn route", re.search(r"lock", alltext, re.I) and re.search(r"vpn|route|E_NOROUTE", alltext, re.I), "")
         add("Every new page's summary is one sentence", ps and all(one_sentence(p["fm"].get("summary", "")) for p in ps), [p["fm"].get("summary") for p in ps])
         add("Every new page is under 8KB and is more than a command and a path", ps and all(p["bytes"] < 8192 and len(p["body"].strip()) > 120 for p in ps), [p["bytes"] for p in ps])
-        add("No page file is written except through memory write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
-        add("A memory search runs before the first sync attempt", (min(searches + reads, default=10**6) < (first_index(calls, r"sync\.py") or 10**6)), f"memory at {min(searches + reads, default=None)}, sync at {first_index(calls, r'sync\.py')}")
+        add("No page file is written except through engrams write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("An engrams search runs before the first sync attempt", (min(searches + reads, default=10**6) < (first_index(calls, r"sync\.py") or 10**6)), f"engrams at {min(searches + reads, default=None)}, sync at {first_index(calls, r'sync\.py')}")
 
     elif eval_name == "suspect-page-same-turn":
-        read_page = any_index(calls, r"memory (read|pull).*dev-server-port|memory pull")
+        read_page = any_index(calls, r"engrams (read|pull).*dev-server-port|engrams pull")
         add("The agent reads dev-server-port.md", bool(read_page), f"steps {read_page}")
         script_write = next((i for i, c in enumerate(calls) if c["tool"] in ("Write", "Edit") and "healthcheck" in str(c["input"].get("file_path", ""))), None)
         if script_write is None:
@@ -159,24 +159,24 @@ def grade(run: Path, eval_name: str):
         pg = field.get("dev-server-port.md")
         fixed = pg is None or ("9090" in pg["fm"].get("title", "") + pg["fm"].get("summary", "") and "9090" in pg["body"])
         add("dev-server-port.md is rewritten to say 9090 or deleted", fixed, "deleted" if pg is None else pg["fm"].get("summary", ""))
-        verify_steps = [i for i, cmd in bash(calls) if re.search(r"memory verify.*dev-server-port", cmd)]
-        write_steps = [i for i, cmd in bash(calls) if re.search(r"memory (write|delete).*dev-server-port", cmd)]
+        verify_steps = [i for i, cmd in bash(calls) if re.search(r"engrams verify.*dev-server-port", cmd)]
+        write_steps = [i for i, cmd in bash(calls) if re.search(r"engrams (write|delete).*dev-server-port", cmd)]
         add("The stale page is not verified before it is rewritten", not verify_steps or (write_steps and min(write_steps) < min(verify_steps)), f"verify at {verify_steps}, write/delete at {write_steps}")
-        add("No page file is written except through memory write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through engrams write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
         if pg is not None:
             add("The rewritten page keeps a Sources section with a date", sources_dated(pg), "")
 
     elif eval_name == "remember-a-fact-a-file-holds":
-        first_write = first_index(calls, r"memory write")
+        first_write = first_index(calls, r"engrams write")
         consulted = searches + reads
-        add("Memory is consulted (search, read, or pull) before any write", consulted and (first_write is None or min(consulted) < first_write), f"consulted at {consulted}, write at {first_write}")
+        add("Engrams is consulted (search, read, or pull) before any write", consulted and (first_write is None or min(consulted) < first_write), f"consulted at {consulted}, write at {first_write}")
         add("No new page: the field still holds 4 pages", len(field) == 4, f"{len(field)} pages: {sorted(field)}")
         add("The reply names ledger-tests-need-make-db.md as already holding the fact", "ledger-tests-need-make-db" in answer, answer[:200])
         pg = field.get("ledger-tests-need-make-db.md", {})
         add("ledger-tests-need-make-db.md still has a Sources section with a date", pg and sources_dated(pg), "")
         thin = [n for n, p in field.items() if len(p["body"].strip()) < 120]
         add("No page's body is only a command and a path", not thin, f"thin pages: {thin}")
-        add("No page file is written except through memory write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
+        add("No page file is written except through engrams write", not wrote_memory_directly(calls), f"direct writes at steps {wrote_memory_directly(calls)}")
 
     tools = {}
     for c in calls:

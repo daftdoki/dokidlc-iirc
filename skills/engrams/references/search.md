@@ -20,10 +20,10 @@ nothing. Do this instead:
    mention. "Why does install fail on a mac" becomes
    `install pysqlite3 macos wheel`.
 2. Search them in one call; pages matching more terms rank first.
-3. Nothing? `memory read index.md` gives the topic list; search the
+3. Nothing? `engrams read index.md` gives the topic list; search the
    nearest topics. Try shorter stems (`instal`, `sqlite`) and synonyms.
-4. Read the top two or three pages with `memory pull` or `memory read`
+4. Read the top two or three pages with `engrams pull` or `engrams read`
    rather than stopping at the summaries.
 
 Tell the creator when a search came back empty in string mode, so they
-know the limit is the mode and not the memory.
+know the limit is the mode and not the engrams.

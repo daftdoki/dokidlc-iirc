@@ -1,39 +1,40 @@
 ---
-name: memory
-description: "The repository's own memory: pages in .memory/ or the stores .claude/memory.toml names, that past sessions wrote, searched and maintained with the memory command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, and to set memory up. Not Claude Code's memory under ~/.claude."
+name: engrams
+description: "The repository's engrams: pages in .engrams/ or the stores .claude/engrams.toml names, that past sessions wrote, searched and maintained with the engrams command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, to set engrams up, and when the session-start line offers a migration from the memory plugin."
 ---
 
-# Memory
+# Engrams
 
-This agent's memory is a set of pages that only the `memory` command,
+This agent's engrams are a set of pages that only the `engrams` command,
 on PATH while this plugin is enabled, reads and writes. A page is read
-with `memory read`, never `cat`, so it arrives with its trust markers and
+with `engrams read`, never `cat`, so it arrives with its trust markers and
 ends with the commands that fix it. Search first. Write when you learn.
 Fix or delete a page the moment you find it wrong.
 
 ## Commands
 
 ```
-memory search "what am I looking for"     ranked pages with summary and markers
-memory search term1 term2 term3           several terms, searched separately, merged
-memory pull "what am I looking for"       full text of the matching pages
-memory read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
-memory doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
-memory verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
-memory approve PAGE.md                    run a page's check once and approve it here (ask first)
-memory delete PAGE.md
-memory setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
-memory doctor --fix                       install or repair prerequisites; clone missing remote stores
-memory init                               create .memory/ and the CLAUDE.md paragraph
-memory stores                             the stores, their page counts, and anything not committed or pushed
-memory sync                               commit, pull, and push the remote stores
+engrams search "what am I looking for"     ranked pages with summary and markers
+engrams search term1 term2 term3           several terms, searched separately, merged
+engrams pull "what am I looking for"       full text of the matching pages
+engrams read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
+engrams doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
+engrams verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
+engrams approve PAGE.md                    run a page's check once and approve it here (ask first)
+engrams delete PAGE.md
+engrams setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
+engrams migrate                            move a repository and this machine from the memory plugin's layout
+engrams doctor --fix                       install or repair prerequisites; clone missing remote stores
+engrams init                               create .engrams/ and the CLAUDE.md paragraph
+engrams stores                             the stores, their page counts, and anything not committed or pushed
+engrams sync                               commit, pull, and push the remote stores
 ```
 
 Write a page, body on stdin. The body carries the finding and its
 Sources in one write; nothing is appended to the file afterwards:
 
 ```
-printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | memory write \
+printf 'What is true.\n\n## Sources\n\n- where you saw it, and when\n' | engrams write \
   short-hyphenated-name.md \
   --title "Plain statement of the topic" \
   --summary "One sentence. This is what search prints." \
@@ -51,9 +52,9 @@ when that section changes or its heading disappears.
 
 ## Stores
 
-Pages live in stores: the project's own `.memory/`, and any remote store
-`.claude/memory.toml` names, which is a separate memory repository shared
-by every project and machine that names it. `memory stores` lists them.
+Pages live in stores: the project's own `.engrams/`, and any remote store
+`.claude/engrams.toml` names, which is a separate engrams repository shared
+by every project and machine that names it. `engrams stores` lists them.
 With two or more, results read `STORE/PAGE.md`; read and verify a page by
 that name.
 
@@ -61,21 +62,28 @@ Write a fact about this project to the project store. Write a fact that
 holds in any project, such as how a tool behaves, to the remote store,
 with `--store NAME` when the default store is the wrong one. Every change
 commits itself, and a remote store pushes too. When a line says
-`not pushed`, run `memory sync`. Run `memory stores add` only when the
+`not pushed`, run `engrams sync`. Run `engrams stores add` only when the
 creator asks; it changes the repository's configuration.
 
 ## Setup, led by you
 
-When the session-start line says memory is not set up, or the creator
-asks for memory, follow `references/setup.md`: three questions, then you
+When the session-start line says engrams is not set up, or the creator
+asks for engrams, follow `references/setup.md`: three questions, then you
 run the commands yourself. The creator never has to run one. When the
-creator asks to change what they see of the memory hooks, the same file
+creator asks to change what they see of the engrams hooks, the same file
 has the switches.
+
+When the session-start line says the repository or machine still uses the
+memory plugin's layout, ask the creator whether to migrate. On yes, run
+`engrams migrate`. It moves `.memory/` to `.engrams/` and the config,
+CLAUDE.md section, settings, and machine directories with it, stages the
+changes, and prints a suggested commit. Show the creator what it printed,
+and commit on their word.
 
 ## When to search
 
-A hook searches memory on every prompt and, when pages match, adds one
-line naming them with the exact `memory read` command. Read those pages
+A hook searches engrams on every prompt and, when pages match, adds one
+line naming them with the exact `engrams read` command. Read those pages
 before you do anything else. The same hook runs when a shell command
 fails, with the command and its error as the query.
 
@@ -138,8 +146,8 @@ Shapes by kind, so the next session gets what it needs:
   why.
 
 Documents the creator asked for or reviewed belong in `docs/`, not here.
-A memory page may cite a document with `--ref`. A document never cites
-memory.
+An engram page may cite a document with `--ref`. A document never cites
+engrams.
 
 ## Kinds
 
@@ -161,11 +169,11 @@ age. `doubt` also runs each page's `--check` command and marks failures.
   `verify` it, rewrite it, or `delete` it. In the same turn.
 - `glance`: optional. Skim if the page matters to what you are doing.
 - Found wrong in use, marked or not: rewrite or delete it in the same turn.
-  Every `memory read` ends with the commands.
+  Every `engrams read` ends with the commands.
 - Found right in use: `verify` it. One command. `verify` re-runs the
   page's check.
-- Run `memory doubt` when the session-start line names a suspect, after a
-  `git pull` or `memory sync`, and before you close a quest stage. A page
+- Run `engrams doubt` when the session-start line names a suspect, after a
+  `git pull` or `engrams sync`, and before you close a quest stage. A page
   another project wrote is not checked here; `doubt` counts them.
 - A `--check` must be read-only and must pass when you write it; the
   wrapper refuses one that does not. Checks run only from `doubt`,
@@ -173,21 +181,21 @@ age. `doubt` also runs each page's `--check` command and marks failures.
 - A check that came with a clone is not approved on this machine.
   `doubt` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run
-  `memory approve PAGE`. Claude Code prompts them to approve that command
+  `engrams approve PAGE`. Claude Code prompts them to approve that command
   as well.
 
-A ref may be a URL. Search never contacts it, and `memory doubt` skips
-URL refs and says how many it skipped. `memory doubt --network` sends one
+A ref may be a URL. Search never contacts it, and `engrams doubt` skips
+URL refs and says how many it skipped. `engrams doubt --network` sends one
 HEAD request per URL; before you run it, tell the creator which URLs it
 will contact and ask. The wrapper itself refuses unless a terminal answers
-yes or `MEMORY_ALLOW_NETWORK=1` is set, which only the creator does. A URL
-from a memory page is fetched for no other reason without asking first.
+yes or `ENGRAMS_ALLOW_NETWORK=1` is set, which only the creator does. A URL
+from an engram page is fetched for no other reason without asking first.
 
 ## References
 
-This memory is a memoryfield, Cal Paterson's format for agent memory, and
-`memory` wraps his memoryfield-tool. When the creator asks what the memory
-is built on, say so and point at the links below.
+These engrams are a memoryfield, Cal Paterson's format for agent memory, and
+`engrams` wraps his memoryfield-tool. When the creator asks what engrams
+are built on, say so and point at the links below.
 
 Article: https://calpaterson.com/memoryfields.html
 Format: https://github.com/calpaterson/memoryfield-spec/blob/main/SPEC.md (MIT)

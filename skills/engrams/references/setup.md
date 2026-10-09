@@ -3,7 +3,7 @@
 The creator never has to run a command. Hold a short conversation, then
 run the commands yourself.
 
-1. Ask, in one question: "Memory searches by meaning by default, which
+1. Ask, in one question: "Engrams searches by meaning by default, which
    needs ollama with an embedding model on this machine or on a host you
    can reach. If ollama cannot run or be reached here, there is a string
    search fallback that matches exact text only and works less well. Which
@@ -13,19 +13,19 @@ run the commands yourself.
    search needs "pysqlite3".
 2. If semantic: ask whether embeddings should come from ollama on this
    machine or from a remote host, and if remote, its address.
-3. Ask whether to create `.memory/` in this repository, if it has none.
+3. Ask whether to create `.engrams/` in this repository, if it has none.
 
 Then run, in order, showing each command first:
 
 ```
-memory setup --local                or --host URL, or --substring for the fallback
-memory init                         if the creator said yes to a field
-memory doctor --fix                 installs the tool; for a local host on macOS also ollama and the model
+engrams setup --local                or --host URL, or --substring for the fallback
+engrams init                         if the creator said yes to a field
+engrams doctor --fix                 installs the tool; for a local host on macOS also ollama and the model
 ```
 
-Report what `doctor` says. It also checks that `.memory/`,
+Report what `doctor` says. It also checks that `.engrams/`,
 `.claude/settings.json`, and `CLAUDE.md` are tracked by git and not
-ignored, because memory only persists if they are committed. `init` stages
+ignored, because engrams only persists if they are committed. `init` stages
 what it creates; tell the creator what is left to commit. If `doctor` names
 something only the creator can do, such as installing ollama on a remote
 host, say exactly that and stop.
@@ -38,7 +38,7 @@ before a second run.
 
 By default the plugin draws the hook lines for the creator: recalled pages
 under the prompt or failed command, a row when a command failed and then
-worked, and the brief on the status line. In `.claude/memory.toml`,
+worked, and the brief on the status line. In `.claude/engrams.toml`,
 `ui = false` turns that off, and `show_hooks = true` also prints the raw
 text you receive, for debugging. Add the key the creator asks for at the
 top of the file, creating it if it is missing, and commit it. It takes

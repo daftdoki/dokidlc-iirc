@@ -1,6 +1,7 @@
 """Tests for scripts/engrams that need neither the tool nor ollama."""
 
 import json
+import re
 import socket
 import threading
 import importlib.util
@@ -1613,3 +1614,13 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     engrams.main(["migrate"])
     assert capsys.readouterr().out.strip() == "nothing to migrate"
     assert MIGRATION_LINE not in _brief(["doctor", "--brief"], monkeypatch, capsys)
+
+
+def test_docs_name_engrams():
+    """The skill and the docs a reader acts on name engrams; only lines about the migration keep the old names."""
+    docs = [ROOT / "skills" / "engrams" / "SKILL.md", *sorted((ROOT / "skills" / "engrams" / "references").glob("*.md")),
+            ROOT / "README.md", ROOT / "INSTALL.md", ROOT / "DEVELOPMENT.md"]
+    old = re.compile(r"`memory [a-z]|\.memory/|memory\.toml|bin/memory|memory@")
+    hits = [f"{d.relative_to(ROOT)}:{n}" for d in docs if d.is_file() for n, line in enumerate(d.read_text().splitlines(), 1)
+            if old.search(line) and "migrat" not in line]
+    assert (ROOT / "skills" / "engrams" / "SKILL.md").is_file() and hits == []

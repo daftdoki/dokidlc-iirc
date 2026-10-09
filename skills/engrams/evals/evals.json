@@ -1,22 +1,22 @@
 {
-  "skill_name": "memory",
+  "skill_name": "engrams",
   "evals": [
     {
       "id": 1,
       "name": "search-before-debug",
       "fixture": "ledger",
       "prompt": "The tests in this repo fail on my machine. Get them passing and tell me what was wrong.",
-      "expected_output": "The agent searches memory before it debugs, reads ledger-tests-need-make-db.md, runs make db, gets the tests green, verifies the page it relied on, and writes no duplicate page.",
+      "expected_output": "The agent searches engrams before it debugs, reads ledger-tests-need-make-db.md, runs make db, gets the tests green, verifies the page it relied on, and writes no duplicate page.",
       "files": [],
       "assertions": [
-        "Memory is consulted (search, read, or pull) before the fix is applied",
-        "Pages are read with memory read or pull, not cat",
+        "Engrams is consulted (search, read, or pull) before the fix is applied",
+        "Pages are read with engrams read or pull, not cat",
         "The agent reads ledger-tests-need-make-db.md before running make db",
         "The tests pass at the end of the run",
         "No new page: the field still holds 4 pages",
         "ledger-tests-need-make-db.md carries a verified stamp after the run",
         "The reply names make db and the missing database as the cause",
-        "No page file is written except through memory write"
+        "No page file is written except through engrams write"
       ]
     },
     {
@@ -35,8 +35,8 @@
         "The new pages say what they work around: the stale lock and the vpn route",
         "Every new page's summary is one sentence",
         "Every new page is under 8KB and is more than a command and a path",
-        "No page file is written except through memory write",
-        "A memory search runs before the first sync attempt"
+        "No page file is written except through engrams write",
+        "An engrams search runs before the first sync attempt"
       ]
     },
     {
@@ -44,7 +44,7 @@
       "name": "suspect-page-same-turn",
       "fixture": "devserver",
       "prompt": "Add scripts/healthcheck.sh that curls the dev server's health endpoint and exits non-zero when it is down. Use the real port.",
-      "expected_output": "Memory names dev-server-port.md as suspect because docs/config.md changed. The agent reads the page and the diff, writes the script against port 9090, and rewrites or deletes the page in the same run rather than verifying it.",
+      "expected_output": "Engrams names dev-server-port.md as suspect because docs/config.md changed. The agent reads the page and the diff, writes the script against port 9090, and rewrites or deletes the page in the same run rather than verifying it.",
       "files": [],
       "assertions": [
         "The agent reads dev-server-port.md",
@@ -53,7 +53,7 @@
         "healthcheck.sh exits non-zero when nothing listens",
         "dev-server-port.md is rewritten to say 9090 or deleted",
         "The stale page is not verified before it is rewritten",
-        "No page file is written except through memory write",
+        "No page file is written except through engrams write",
         "The rewritten page keeps a Sources section with a date"
       ]
     },
@@ -65,12 +65,12 @@
       "expected_output": "A page already covers this. The agent finds it by searching, says so, and does not write a second page; if it writes anything it replaces the existing page with something the Makefile does not say.",
       "files": [],
       "assertions": [
-        "Memory is consulted (search, read, or pull) before any write",
+        "Engrams is consulted (search, read, or pull) before any write",
         "No new page: the field still holds 4 pages",
         "The reply names ledger-tests-need-make-db.md as already holding the fact",
         "ledger-tests-need-make-db.md still has a Sources section with a date",
         "No page's body is only a command and a path",
-        "No page file is written except through memory write"
+        "No page file is written except through engrams write"
       ]
     },
     {
@@ -78,17 +78,17 @@
       "name": "search-when-hook-is-silent",
       "fixture": "ledger",
       "prompt": "make test is red. fix it",
-      "expected_output": "The prompt is under the recall hook's 40-character floor, so no hook names a page before the first action. The agent searches memory itself before it runs the tests, reads ledger-tests-need-make-db.md, runs make db, and verifies the page.",
+      "expected_output": "The prompt is under the recall hook's 40-character floor, so no hook names a page before the first action. The agent searches engrams itself before it runs the tests, reads ledger-tests-need-make-db.md, runs make db, and verifies the page.",
       "files": [],
       "assertions": [
-        "Memory is consulted (search, read, or pull) before the fix is applied",
-        "Pages are read with memory read or pull, not cat",
+        "Engrams is consulted (search, read, or pull) before the fix is applied",
+        "Pages are read with engrams read or pull, not cat",
         "The agent reads ledger-tests-need-make-db.md before running make db",
         "The tests pass at the end of the run",
         "No new page: the field still holds 4 pages",
         "ledger-tests-need-make-db.md carries a verified stamp after the run",
         "The reply names make db and the missing database as the cause",
-        "No page file is written except through memory write"
+        "No page file is written except through engrams write"
       ]
     }
   ]

@@ -1,18 +1,18 @@
-# Developing memory
+# Developing engrams
 
 ## Layout
 
 ```
 .claude-plugin/plugin.json   manifest; no version field, the commit is the version
-bin/memory                   the command; Python under uv run --script, PyYAML inline
-memory.pin                   memoryfield-tool commit and the embedding model
-skills/memory/SKILL.md       the agent's rules
+bin/engrams                   the command; Python under uv run --script, PyYAML inline
+engrams.pin                   memoryfield-tool commit and the embedding model
+skills/engrams/SKILL.md       the agent's rules
 hooks/hooks.json             SessionStart and SubagentStart: doctor --brief --hook; UserPromptSubmit and PostToolUse(Failure): recall; Stop: nudge; PreToolUse (Bash, Read): guard
 tests/                       pytest; nothing needs ollama or memoryfield-tool
 ```
 
-`bin/memory` is a thin layer over memoryfield-tool, used as published at the
-commit in `memory.pin`. It generates the tool's per-machine config from the
+`bin/engrams` is a thin layer over memoryfield-tool, used as published at the
+commit in `engrams.pin`. It generates the tool's per-machine config from the
 repository location, guards the embedding host with a two-second probe,
 reindexes synchronously after writes, filters `index.md` from results, and
 computes suspicion. It never reimplements storage, search, or indexing.
@@ -20,13 +20,13 @@ computes suspicion. It never reimplements storage, search, or indexing.
 ## Run it from a checkout
 
 ```
-claude --plugin-dir /path/to/dokidlc-skill-memory
+claude --plugin-dir /path/to/dokidlc-skill-engrams
 ```
 
 Outside a session:
 
 ```
-CLAUDE_PROJECT_DIR=/path/to/repo OLLAMA_HOST=127.0.0.1:11434 bin/memory search "query"
+CLAUDE_PROJECT_DIR=/path/to/repo OLLAMA_HOST=127.0.0.1:11434 bin/engrams search "query"
 ```
 
 ## Search
@@ -43,8 +43,8 @@ Semantic search is on unless `semantic = false` in the setup file.
 `OLLAMA_HOST` exported always means semantic. In string mode the wrapper points the tool at
 a closed port so its client fails at once and falls back, and it skips
 reindexing. The host, when semantic is on, is resolved in this order: `OLLAMA_HOST` in the environment, then
-`embedding_host` in `~/.config/dokidlc-memory/config.toml` (written by
-`memory setup`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
+`embedding_host` in `~/.config/dokidlc-engrams/config.toml` (written by
+`engrams setup`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
 `doctor` names the source. `doctor --fix` installs ollama only for a local
 host.
 
@@ -63,21 +63,27 @@ CI runs both on ubuntu and macos.
 memoryfield-tool is installed from a git commit because its PyPI release
 lags main, and with an overrides file that drops `pysqlite3-binary`, which
 ships only Linux x86_64 wheels while the tool falls back to stdlib sqlite3.
-`memory doctor --fix` does both. Every command that runs the tool checks its
+`engrams doctor --fix` does both. Every command that runs the tool checks its
 installed commit against the pin first and refuses a mismatch with the fix
 named. To bump: change `tool_rev` in
-`memory.pin`, run `memory doctor --fix`, run the tests, commit.
+`engrams.pin`, run `engrams doctor --fix`, run the tests, commit.
 
 ## Format and compatibility
 
-The generated half of `.memory/index.md` carries `memory format N` and the
-plugin commit. `FORMAT` in `bin/memory` is what the code understands. Older
+The generated half of `.engrams/index.md` carries `engrams format N` and the
+plugin commit. `FORMAT` in `bin/engrams` is what the code understands. Older
 data is migrated by regenerating the index; newer data is refused with
 exit 2. Bump `FORMAT` only with a migration.
 
+`engrams migrate` (`cmd_migrate`, `old_layout`) moves a repository and a
+machine from the memory plugin's names. `doctor --brief` prints
+`MIGRATION_LINE` while `old_layout()` finds anything, and `register.tsx`
+shows it as `◆ engrams: needs migration`. Remove both once no repository
+uses the old layout.
+
 ## Release
 
-Commit to main, let CI pass, then change the `sha` for `memory` in
+Commit to main, let CI pass, then change the `sha` for `engrams` in
 `dokidlc-plugins/.claude-plugin/marketplace.json`.
 
 ## Hook channels
@@ -95,23 +101,23 @@ minutes so a dead host costs one probe, not one per prompt.
 ## Approved checks
 
 `write` and `approve` record the sha256 of a page's check in
-`~/.local/state/dokidlc-memory/checks.json`. `doubt` runs only approved
+`~/.local/state/dokidlc-engrams/checks.json`. `doubt` runs only approved
 checks and lists the rest; `verify` refuses a page whose check is not
 approved or not read-only in form. Only `approve` and `write` grant
 approval, because those are the two places the creator was asked or the
 command came from this machine's own agent. The PreToolUse guard asks for
-`memory approve` and `memory doubt --network`, and the wrapper refuses
-`--network` off a terminal unless `MEMORY_ALLOW_NETWORK=1` is set. The
+`engrams approve` and `engrams doubt --network`, and the wrapper refuses
+`--network` off a terminal unless `ENGRAMS_ALLOW_NETWORK=1` is set. The
 same guard, registered for Bash and for Read, denies a raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, or `more` in a command
-or by the Read tool, and names `memory read` in the reason, because a page
+or by the Read tool, and names `engrams read` in the reason, because a page
 read raw arrives without its trust markers and the fix commands at its
 end. It denies rather than asks because the reason reaches the agent only
 on a deny; an ask the creator refuses shows the agent nothing, and a
 reviewer subagent on 2026-09-21 retried the cat and then used Read. The
-reason ends with the way out when `memory read` itself is broken:
-`memory doctor --fix`.
+reason ends with the way out when `engrams read` itself is broken:
+`engrams doctor --fix`.
 
 The wrapper never writes through a symlink: `regenerate_index` and `init`
-refuse one, so a cloned repository cannot point `.memory/index.md` or
+refuse one, so a cloned repository cannot point `.engrams/index.md` or
 `CLAUDE.md` at another file.
