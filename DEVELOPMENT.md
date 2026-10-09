@@ -105,8 +105,12 @@ session, from the log, the `eval-*.jsonl` candidate rows, the
 `prompts/SESSION.jsonl` excerpts, and the transcript when Claude Code
 still keeps it. A recall logged before `recall_id` existed joins its
 prompt by time, so its prompt can be the wrong one when prompts queue.
-`iirc tune judge` appends to `tune/judgments.jsonl`; the last line for a
-session, recall, and page wins. `iirc tune done` logs a `tuned` row whose
+`iirc tune judge` appends to `tune/judgments.jsonl`, one file for every
+repository, so each line carries its `repo`; the last line for a
+repository, session, recall, and page wins. Judge also logs a `tuning`
+row, and gather skips a session that has one, because its recalls were
+about tuning. `iirc read --for-tune` logs `tune_read`, not `read`, so
+judging does not count as the session's own use of a page. `iirc tune done` logs a `tuned` row whose
 `tuned` field names the session, so the row's own `session` stays the
 one that tuned. `gate()` is the one gate that both recall and `iirc tune
 sweep` call.

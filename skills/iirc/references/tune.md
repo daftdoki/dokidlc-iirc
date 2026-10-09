@@ -24,14 +24,15 @@ its conditions; each later line is one recall. A file can run to
 hundreds of kilobytes, so read twenty lines at a time with
 `sed -n '2,21p' FILE`, which never cuts a long line. Each recall holds
 the prompt (or, for `via: failure`, the failed command, its error, and
-the subagent that ran it), the suggested pages, the candidates worth
-judging with their distance and `verdict`, and the outcome:
+the subagent that ran it), the candidates to judge with their distance
+and `verdict`, and the outcome:
 `read_turns_later` per suggested page, `next_tools`, `searches`, and
 `read_unsuggested`.
 
 Judge every page in `candidates` and every page in `read_unsuggested`.
-Read each page with `iirc read` before you judge it. Label one pair at
-a time:
+Read each page with `iirc read --for-tune PAGE` before you judge it; a
+plain `iirc read` counts as this session's own use of the page. Label
+one pair at a time:
 
 - `relevant`: the page would have helped with that prompt. Decide from
   the prompt and from what the agent did next, not from the score.
@@ -51,10 +52,10 @@ printf '%s\n' \
   | iirc tune judge
 ```
 
-It records all lines or none, and names each bad line. A later judgment
-of the same session, recall, and page replaces the earlier one. Done
-when every marked candidate and every unsuggested read page in every
-file has a recorded label.
+It records all lines or none, and names each bad line, including a page
+the recall does not list. A later judgment of the same session, recall,
+and page replaces the earlier one. Done when every page in
+`candidates` and `read_unsuggested` in every file has a recorded label.
 
 ## 3. Sweep
 
@@ -73,8 +74,11 @@ prompt excerpt, the page, the distance, and what the agent did.
 
 Page fixes:
 
-- A page often suggested and judged noise: narrow its summary, split
-  it, merge it into the page it competes with, or delete it.
+- A page often suggested and judged noise: narrow the page. Semantic
+  search embeds the whole page file, frontmatter and body, so a summary
+  edit alone moves its distance little. Split off the part that matches
+  the unrelated prompts into its own page, cut it, merge the page into
+  the one it competes with, or delete it.
 - A relevant page that recall refused or never found: add the missing
   identifier to its summary.
 - A prompt where the agent investigated and recall found nothing: write

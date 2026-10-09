@@ -1944,8 +1944,10 @@ def _tune_fixture(tmp_path, monkeypatch):
     _jsonl(st / "eval-2026-10.jsonl", [
         {**cand, "rank": 0, "page": "a.md", "distance": 0.25, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": "meaning", "verdict": "passed"},
         {**cand, "rank": 1, "page": "b.md", "distance": 0.30, "paths": ["semantic", "v1.2"], "rare_terms": ["v1.2"], "head_terms": [], "rule": "meaning+term", "verdict": "passed"},
-        {**cand, "rank": 2, "page": "c.md", "distance": 0.38, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": None, "verdict": "too_far"},
+        {**cand, "rank": 2, "page": "c.md", "distance": 0.36, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": None, "verdict": "too_far"},
         {**cand, "rank": 3, "page": "d.md", "distance": 0.45, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": None, "verdict": "too_far"},
+        *({**cand, "rank": 4 + n, "page": f"near-{n}.md", "distance": dist, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": None,
+           "verdict": "too_far"} for n, dist in enumerate((0.365, 0.355, 0.37))),
     ])
 
     def user(ts, content, **kw):
@@ -1978,7 +1980,7 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
     iirc.main(["tune", "gather"])
     out = capsys.readouterr().out
-    assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 3 candidates to judge (transcript)" in out
+    assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 5 candidates to judge (transcript)" in out
     text = (st / "tune" / "s1.json").read_text()
     s1 = json.loads(text)
     assert len(text.splitlines()) == 2 + len(s1["recalls"])   # one recall per line
@@ -1987,8 +1989,9 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     assert r1["key"] == "r1" and r1["prompt"] == {"text": "why does the build fail on this machine after the upgrade", "from": "prompts file"}
     assert r1["suggested"] == [{"page": "a.md", "score": "75% match, meaning", "read_turns_later": 0},
                                {"page": "b.md", "score": "70% match, meaning+term", "read_turns_later": 1}]
-    assert [(c["page"], c["distance"], c["verdict"]) for c in r1["candidates"]] == [("a.md", 0.25, "passed"), ("b.md", 0.3, "passed"), ("c.md", 0.38, "too_far")]
-    assert r1["candidates_left_out"] == 1   # d.md, 0.45, beyond both + TUNE_NEAR
+    # the suggested pages, then the three refused pages nearest the larger knob (0.34) within 0.03, in rank order
+    assert [(c["page"], c["distance"]) for c in r1["candidates"]] == [("a.md", 0.25), ("b.md", 0.3), ("c.md", 0.36), ("near-0.md", 0.365), ("near-1.md", 0.355)]
+    assert r1["candidates_left_out"] == 2   # d.md, beyond the band, and near-2.md, the fourth nearest
     assert r1["next_tools"] == [{"tool": "Bash", "input": "iirc read a.md"}]
     assert r1["searches"] == [{"query": "build failure", "pages": ["c.md"]}] and r1["read_unsuggested"] == ["c.md"]
     assert r2["via"] == "failure" and r2["failed"]["command"] == "make build" and "boom" in r2["failed"]["error"]
@@ -2028,7 +2031,7 @@ def test_tune_judge_validates_and_later_lines_supersede(tmp_path, monkeypatch, c
     iirc.main(["tune", "judge"])
     assert "recorded 3 judgments" in capsys.readouterr().out
     latest = iirc.judgments()
-    assert len(latest) == 2 and latest[("s1", "r1", "a.md")]["label"] == "relevant"
+    assert len(latest) == 2 and latest[(str((tmp_path / "repo").resolve()), "s1", "r1", "a.md")]["label"] == "relevant"
     bad = [{"session": "s1", "recall_id": "r1", "page": "b.md", "label": "relevant"},
            {"session": "s1", "recall_id": "r9", "page": "b.md", "label": "maybe"}]
     monkeypatch.setattr("sys.stdin", io.StringIO("".join(json.dumps(x) + "\n" for x in bad)))
@@ -2046,15 +2049,17 @@ def _sweep_fixture(tmp_path, monkeypatch, pairs):
     rows = [{"session": "s5", "repo": r, "cmd": "candidate", "recall_id": "r5", "rank": i, "page": p, "distance": d,
              "paths": ["semantic"], "rare_terms": [], "head_terms": []} for i, (p, d, _) in enumerate(pairs)]
     _jsonl(st / "eval-2026-09.jsonl", rows)
-    _jsonl(st / "tune" / "judgments.jsonl", [{"session": "s5", "recall": "r5", "page": p, "label": label} for p, _, label in pairs]
-           + [{"session": "s0", "recall": "2026-10-01T09:00:05Z", "page": "a.md", "label": "relevant"}])
+    _jsonl(st / "tune" / "judgments.jsonl", [{"repo": r, "session": "s5", "recall": "r5", "page": p, "label": label} for p, _, label in pairs]
+           + [{"repo": r, "session": "s0", "recall": "2026-10-01T09:00:05Z", "page": "a.md", "label": "relevant"},
+              {"repo": "/other", "session": "s5", "recall": "r5", "page": "p1.md", "label": "noise"}])
 
 
 def test_tune_sweep_says_when_too_few_pairs_were_judged(tmp_path, monkeypatch, capsys):
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.3, "unsure")])
     iirc.main(["tune", "sweep"])
     out = capsys.readouterr().out
-    assert "judged pairs with a distance: 2 (1 relevant, 1 noise)" in out and "1 with no candidate distance" in out and "1 unsure" in out
+    assert "judged pairs with a distance: 2 (1 relevant, 1 noise)" in out
+    assert "1 unsure; 1 with no candidate row" in out and "0 with no distance" in out and "1 from other repositories" in out
     assert "relevant passed 1, noise passed 0, relevant refused 0" in out
     assert "too few judged pairs to propose a change: 2, and the floor is 30" in out and "best by F1" not in out
 
@@ -2102,3 +2107,92 @@ def test_tune_gather_finds_the_prompt_by_hash_once_the_prompts_file_is_gone(tmp_
     iirc.main(["tune", "gather", "--session", "s1"])
     r1 = json.loads((st / "tune" / "s1.json").read_text())["recalls"][0]
     assert r1["prompt"]["from"] == "transcript by hash" and r1["prompt"]["text"].startswith("why does the build fail")
+
+
+def test_read_transcript_keeps_a_prompt_typed_twice_and_merges_a_queued_one(tmp_path):
+    def user(ts, text):
+        return {"type": "user", "timestamp": ts, "message": {"content": text}}
+    queued = {"type": "attachment", "timestamp": "2026-10-08T10:10:00.000Z",
+              "attachment": {"type": "queued_command", "prompt": "while you work, check the log", "commandMode": "prompt"}}
+    path = tmp_path / "t.jsonl"
+    _jsonl(path, [user("2026-10-08T10:00:00.000Z", "yes"), user("2026-10-08T10:00:30.000Z", "yes"),
+                  queued, user("2026-10-08T10:10:01.000Z", "while you work, check the log")])
+    assert [p["text"] for p in iirc.read_transcript(path)["prompts"]] == ["yes", "yes", "while you work, check the log"]
+
+
+def test_tune_gather_joins_a_repeated_prompt_to_its_last_occurrence(tmp_path, monkeypatch, capsys):
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+    again = "run the full test suite again and tell me what failed"
+    _jsonl(st / "log.jsonl", [
+        {"ts": "2026-10-08T11:01:40Z", "session": "s2", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "q1", "prompt_hash": iirc.prompt_hash(again)},
+        {"ts": "2026-10-08T11:05:00Z", "session": "s2", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "q2", "prompt_hash": iirc.prompt_hash(again)},
+    ])
+    tx = tmp_path / "claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", r) / "s2.jsonl"
+
+    def user(ts, text):
+        return {"type": "user", "timestamp": ts, "message": {"content": text}}
+
+    def tool(ts, command):
+        return {"type": "assistant", "timestamp": ts, "message": {"content": [{"type": "tool_use", "id": command, "name": "Bash", "input": {"command": command}}]}}
+    _jsonl(tx, [user("2026-10-08T11:01:40.000Z", again), tool("2026-10-08T11:01:45.000Z", "first run"),
+                user("2026-10-08T11:05:00.000Z", again), tool("2026-10-08T11:05:05.000Z", "second run")])
+    iirc.main(["tune", "gather", "--session", "s2"])
+    q1, q2 = json.loads((st / "tune" / "s2.json").read_text())["recalls"]
+    assert q1["prompt"]["from"] == q2["prompt"]["from"] == "transcript by hash"
+    assert [t["input"] for t in q1["next_tools"]] == ["first run"] and [t["input"] for t in q2["next_tools"]] == ["second run"]
+
+
+def test_tune_judge_refuses_a_page_the_recall_never_listed(tmp_path, monkeypatch, capsys):
+    import io
+    st = _tune_fixture(tmp_path, monkeypatch)
+    iirc.main(["tune", "gather"]); capsys.readouterr()
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a-typo.md", "label": "noise"}) + "\n"))
+    with pytest.raises(SystemExit):
+        iirc.main(["tune", "judge"])
+    assert "line 1: recall r1 lists no page a-typo.md" in capsys.readouterr().err
+    assert not (st / "tune" / "judgments.jsonl").exists()
+
+
+def test_tune_gather_skips_a_session_that_judged(tmp_path, monkeypatch, capsys):
+    import io
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+    # the tuning session had recalls of its own; once it judges, they are about tuning
+    _jsonl(st / "log-2026-09.jsonl", [{"ts": "2026-10-08T12:00:00Z", "session": "tuner", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "t1"}])
+    _jsonl(st / "prompts" / "tuner.jsonl", [{"ts": "2026-10-08T12:00:00Z", "prompt_hash": "x", "excerpt": "tune recall", "recall_id": "t1"}])
+    iirc.main(["tune", "gather"])
+    assert "3 sessions" in capsys.readouterr().out
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a.md", "label": "noise"}) + "\n"))
+    iirc.main(["tune", "judge"]); capsys.readouterr()
+    assert iirc.read_log()[-1]["cmd"] == "tuning"
+    (st / "tune" / "tuner.json").unlink()
+    iirc.main(["tune", "gather"])
+    assert "2 sessions" in capsys.readouterr().out and not (st / "tune" / "tuner.json").exists()
+
+
+def test_tune_gather_skips_rows_that_are_not_objects(tmp_path, monkeypatch, capsys):
+    st = _tune_fixture(tmp_path, monkeypatch)
+    for f in (st / "log.jsonl", st / "eval-2026-10.jsonl", st / "prompts" / "s1.jsonl"):
+        f.write_text(f.read_text() + "42\n[1, 2]\n\"text\"\n")
+    iirc.main(["tune", "gather"])
+    assert "2 sessions, 4 recalls" in capsys.readouterr().out
+
+
+def test_read_for_tune_logs_apart_from_the_sessions_reads(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s11")
+    (tmp_path / ".iirc").mkdir(); (tmp_path / ".iirc" / "a.md").write_text("---\ntitle: A\n---\nx\n"); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "tool", lambda *a, **k: type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    iirc.main(["read", "--for-tune", "a.md"]); iirc.main(["read", "a.md"])
+    assert [r["cmd"] for r in iirc.read_log(session="s11")] == ["tune_read", "read"]
+    assert iirc.session_summary("s11")["read"] == ["a.md"]
+
+
+def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text("[ recall ]\nboth = 0.36\n")
+    iirc.main(["knobs", "set", "both", "0.38"])
+    assert toml.read_text() == "[ recall ]\nboth = 0.38\n"
+    toml.unlink(); iirc.set_root(tmp_path)
