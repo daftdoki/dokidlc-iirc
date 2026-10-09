@@ -30,6 +30,7 @@ iirc stores                             the stores, their page counts, and anyth
 iirc topics                             every topic with its page count
 iirc max-suggested [N]                  how many pages the hook suggests at most (default 3); N sets it on this machine
 iirc knobs                              the recall gate's distances, from [recall] in .claude/iirc.toml
+iirc tune gather|judge|sweep|done       judge what recall suggested, and propose fixes; see references/tune.md
 iirc sync                               commit, pull, and push the remote stores
 ```
 
@@ -110,6 +111,9 @@ per result. Rediscovery costs a session.
 How a result was found (`via semantic, install, pysqlite3`) and what to
 do when `doctor` says the mode is string, or every result says "string
 match": `references/search.md`.
+
+When the creator says tune, or runs `/iirc tune`, follow
+`references/tune.md`.
 
 ## When to write
 

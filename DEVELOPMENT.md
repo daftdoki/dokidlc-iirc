@@ -98,6 +98,19 @@ stdin, because a script that inherits an open pipe would otherwise wait
 for an EOF that never comes. Host probes are cached in the state dir for ten
 minutes so a dead host costs one probe, not one per prompt.
 
+## Tuning files
+
+`iirc tune gather` writes `tune/SESSION.json` in the state dir, one per
+session, from the log, the `eval-*.jsonl` candidate rows, the
+`prompts/SESSION.jsonl` excerpts, and the transcript when Claude Code
+still keeps it. A recall logged before `recall_id` existed joins its
+prompt by time, so its prompt can be the wrong one when prompts queue.
+`iirc tune judge` appends to `tune/judgments.jsonl`; the last line for a
+session, recall, and page wins. `iirc tune done` logs a `tuned` row whose
+`tuned` field names the session, so the row's own `session` stays the
+one that tuned. `gate()` is the one gate that both recall and `iirc tune
+sweep` call.
+
 ## Approved checks
 
 `write` and `approve` record the sha256 of a page's check in
