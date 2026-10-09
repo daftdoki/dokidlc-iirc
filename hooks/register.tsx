@@ -48,6 +48,9 @@ const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 const PAGE_INDENT = 9
 // red, amber, green: the hit-rate gauge, stepped by position along the bar
 const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
+// sample numbers for `/iirc demo`
+const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keyword', note: null }
+const DEMO_COUNTS: SessionCounts = { reads: 58, writes: 9, suggested: 42, used: 31 }
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -268,6 +271,8 @@ export const register: Register = on => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
     // bare, it is help; the skill loads by itself when a task needs it
     if (!e.args.trim()) return { text: await helpText($) }
+    // the card with sample numbers, for a screenshot that shows the design rather than one session
+    if (e.args.trim() === 'demo') return { text: 'iirc: the /iirc card with sample numbers' }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
     if (maxArgs) {
       // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config
@@ -291,7 +296,9 @@ export const register: Register = on => {
   // A plain /iirc draws its help as a panel in place of the text row.
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
-    if (!isIirc || e.props.args.trim() !== '' || e.props.isErrored) return next(e)
+    const args = e.props.args.trim()
+    if (!isIirc || (args !== '' && args !== 'demo') || e.props.isErrored) return next(e)
+    if (args === 'demo') return drawHelp($, e, DEMO_STATUS, DEMO_COUNTS, true, 3)
     return drawHelp($, e, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
   })
 

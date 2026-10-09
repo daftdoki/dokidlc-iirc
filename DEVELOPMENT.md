@@ -121,3 +121,7 @@ reason ends with the way out when `iirc read` itself is broken:
 The wrapper never writes through a symlink: `regenerate_index` and `init`
 refuse one, so a cloned repository cannot point `.iirc/index.md` or
 `CLAUDE.md` at another file.
+
+`/iirc demo` draws the `/iirc` card with sample numbers (142 pages, a 74%
+hit rate) and reads nothing. Use it for the README screenshot, so the image
+shows the design rather than one session's counts.
