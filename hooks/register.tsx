@@ -119,8 +119,8 @@ const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
-// the help card's command column: the longest command, /iirc status-line on|off, is 24, plus a gap
-const CMD_COL = 26
+// the help card's command column: the longest command, /iirc reader pane|transcript, is 28, plus a gap
+const CMD_COL = 30
 const KEEP = 200
 
 /**

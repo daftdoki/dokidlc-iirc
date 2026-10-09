@@ -142,3 +142,16 @@ refuse one, so a cloned repository cannot point `.iirc/index.md` or
 `/iirc demo` draws the `/iirc` card with sample numbers (142 pages, a 74%
 hit rate) and reads nothing. Use it for the README screenshot, so the image
 shows the design rather than one session's counts.
+
+## Screenshots
+
+`scripts/screenshots.sh [REPO]` captures every image in `docs/UI.md` and the
+README into `docs/images/`. It drives Claude Code in REPO (default: the current
+directory, which must run this plugin and have pages in `.iirc/`) with
+[vhs](https://github.com/charmbracelet/vhs), once in a wide terminal (the pane
+docked) and once under 110 columns (the pane above the prompt), and crops each
+card to its frame with `scripts/crop-card.py`. The cards and the pane use sample
+numbers (`/iirc demo`, `/iirc session demo`, `/iirc pane demo`); one real prompt
+is sent for the row under a prompt, then interrupted. Needs `brew install vhs`
+and uv; it runs as you, logged in. Run it after a change to what iirc draws, and
+commit the images with the change.

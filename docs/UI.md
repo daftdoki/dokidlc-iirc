@@ -9,6 +9,8 @@ tested on Claude Code 2.1.295.
 
 ## Under your prompt
 
+![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
+
 When recall finds pages for your prompt, a row appears under it:
 
 ```
@@ -90,7 +92,7 @@ status card, described below.
 
 ## A plain `/iirc`, `/iirc status`, and `/iirc help`
 
-![An earlier version of the iirc card, with sample numbers from /iirc demo](images/iirc-card.png)
+![The /iirc card with sample numbers from /iirc demo: ask in words, more commands, full status, the recall hit rate gauge at 74%, and the page count](images/iirc-card-home.png)
 
 A plain `/iirc` draws a short card in place of its output row:
 
@@ -107,6 +109,8 @@ A plain `/iirc` draws a short card in place of its output row:
 - STORE: the page count
 
 `/iirc status` draws every number:
+
+![The /iirc status card with sample numbers from /iirc demo status: status all good, trust, two stores, the counts, the hit rate, and three pages suggested but not read with their counts](images/iirc-card-status.png)
 
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it, in green, yellow, or red
@@ -129,6 +133,8 @@ draw the two cards with sample numbers.
 
 `/iirc help` draws the rest:
 
+![The /iirc help card: settings with their values, the maintenance commands, and the look-up commands](images/iirc-card-help.png)
+
 - SETTINGS: the line under the prompt and the number of suggested pages,
   each with its command and current value
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
@@ -142,12 +148,25 @@ draw the two cards with sample numbers.
   a question first: `stores add`, `setup`, `init`, `write`, `delete`, and
   `approve`
 
+![The /iirc doctor card: all 13 checks pass, each listed](images/iirc-card-doctor.png)
+
 Neither card costs tokens: the plugin answers, and the skill does not load.
 
 ## The pane
 
-`/iirc pane` opens a pane beside the transcript, or above the prompt on
-a terminal that is not in fullscreen. Drag the pane's edge to change its width;
+`/iirc pane` opens a pane beside the transcript when Claude Code runs in
+fullscreen on a terminal at least 110 columns wide, and above the prompt
+otherwise.
+
+![The pane docked beside the transcript: the session tab with its keys row and the suggested pages, the first under the cursor](images/iirc-pane-docked-session.png)
+
+![The pane's page tab, docked: a page's title, kind and trust chips, summary, topics, and body](images/iirc-pane-docked-page.png)
+
+![The pane above the prompt on a narrow terminal: the session tab](images/iirc-pane-inline-session.png)
+
+![The pane above the prompt on a narrow terminal: a page open in the page tab](images/iirc-pane-inline-page.png)
+
+ Drag the pane's edge to change its width;
 Claude Code keeps that width, up to a maximum it sets. A row at its top holds its own
 tabs: `session`, and, while a page is open, the page's name. Under it, a row of keys:
 
@@ -169,6 +188,8 @@ a click on the pane, or `ctrl+x` then Tab, gives it too. A `▶` and an orange c
 where `j` and `k` stand, and the pane opens with it on the first page
 name. Arrows, Page Up and Down, and the mouse wheel scroll as in any
 pane. Shift is not a separate key here, so the end is `e`, not `G`.
+
+![The pane without the keyboard: a gray mark, and keys off with how to get them back](images/iirc-pane-docked-keys-off.png)
 
 The tab row and the keys stay at the top; the wheel, the arrows, and the
 page keys scroll the content under them, and `↑ N above` says how much
@@ -213,6 +234,13 @@ tab does, as a card. `/iirc reader transcript` makes a click on any page
 name run `/iirc show` for that page, so the page appears as a card below;
 `/iirc reader pane`, the default, opens it in the pane. Like the pane,
 `/iirc show` is your read, not the agent's.
+
+![The /iirc session card with sample numbers from /iirc session demo: the session tiles and gauge, the suggested pages with read marks and counts, and the pages written](images/iirc-card-session.png)
+
+![A page as a card from /iirc show: title, chips, summary, topics, body, and path](images/iirc-card-page.png)
+
+`scripts/screenshots.sh` makes every image on this page; see
+[DEVELOPMENT.md](../DEVELOPMENT.md).
 
 ## Toasts
 

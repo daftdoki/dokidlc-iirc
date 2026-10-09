@@ -121,7 +121,9 @@ pysqlite3-install-override.md: Why memoryfield-tool needs a uv overrides file on
 makes the agent write a page. A plain `/iirc` draws a short card,
 `/iirc status` every number, and `/iirc help` the settings and commands.
 
-![An earlier version of the /iirc card, with sample numbers: status all good, counts of pages, used, reads, and writes, a recall hit rate bar at 74%, the two settings, and examples of asking in words](docs/images/iirc-card.png)
+![The /iirc card with sample numbers: ask in words, more commands, full status, the recall hit rate gauge at 74%, and the page count](docs/images/iirc-card-home.png)
+
+![The iirc pane docked beside the transcript, reading a page: its title, kind and trust chips, summary, topics, and body](docs/images/iirc-pane-docked-page.png)
 
 [docs/USAGE.md](docs/USAGE.md) covers every task, command, and setting;
 [docs/UI.md](docs/UI.md) explains every part of what is drawn.
