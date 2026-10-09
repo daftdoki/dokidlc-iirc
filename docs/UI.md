@@ -175,7 +175,8 @@ has scrolled away. Esc hands the keys back to the prompt and leaves the
 pane open; `q`, Claude Code's `ctrl+x x`, or the frame's close mark
 closes it.
 
-The session tab lists this session's pages:
+The session tab lists this session's pages; the counts are on `/iirc status`
+and `/iirc session`, so the pane's few rows go to the list:
 
 - SUGGESTED: every page recall suggested, read ones first with `✓ read`,
   then the rest with `· not read` and how many times recall suggested it

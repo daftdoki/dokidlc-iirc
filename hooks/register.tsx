@@ -678,7 +678,7 @@ export const register: Register = on => {
       items = [drawReaderNote($, e, r)]
       top = 0
     } else {
-      const session = sessionItems($, e, await read($, sessionPages), await read($, counts), await read($, health), c.session)
+      const session = sessionItems($, e, await read($, sessionPages), await read($, counts), await read($, health), c.session, false)
       sessionRowStops = session.map(x => x.stop)
       items = session.map(x => x.el)
       top = Math.min(c.sessionTop, Math.max(0, items.length - paneRows))
@@ -1278,7 +1278,7 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
 }
 
 /** The Session tab as rows of one line each, so the pane can start the list at any row: each with the page link it holds. */
-function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null, at = 0) {
+function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: SessionCounts, checkup: IircHealth | null, at = 0, hasCounts = true) {
   const { Box, Text } = $.ui.resolve(e)
   const times = new Map(c.missed)
   const used = new Set(sp.used)
@@ -1305,7 +1305,9 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
     })
   }
   const blank = (key: string) => line(key, <Text> </Text>)
-  // THIS SESSION as the status card draws it: tiles of big numbers, then the hit rate as a gradient gauge
+  // THIS SESSION as the status card draws it: tiles of big numbers, then the hit rate as a gradient gauge.
+  // The pane leaves them out: its few rows go to the list, and /iirc status and /iirc session have the counts
+  if (hasCounts) {
   out.push({ stop: null, el: sectionTitle($, e, 'THIS SESSION') })
   const tiles: [string, string][] = [[`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
   line('tiles-n', tiles.map(([n, label]) => <Box key={label} width={12} flexShrink={0}><Text bold color="claude">{n}</Text></Box>))
@@ -1322,6 +1324,7 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
     ])
   }
   blank('b1')
+  }
   out.push({ stop: null, el: sectionTitle($, e, 'SUGGESTED') })
   line('legend', [
     <Text key="a" color={LEVEL_COLOR.ok}>{'  ✓ '}</Text>, <Text key="b" color="subtle">{'read   '}</Text>,
