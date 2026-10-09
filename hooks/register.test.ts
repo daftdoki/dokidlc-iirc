@@ -261,6 +261,17 @@ test('/iirc status off hides the hint-row line, on shows it, and other /iirc arg
   expect((await $.command.run({ command: 'iirc', args: 'search hooks' })).text).toBe('the skill ran')
 })
 
+test('a plain /iirc prints help with the session line, and does not load the skill', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'recall suggests up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  await hookRow($, 'SessionStart', BRIEF, 'h8')
+  const text = (await $.command.run({ command: 'iirc:iirc', args: '  ' })).text
+  expect(text).toContain(LINE + ' · status on · max-suggested 4')
+  expect(text).toContain('/iirc max-suggested N')
+  expect(text).not.toContain('the skill ran')
+})
+
 test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {
   engine(on)
   const argv: string[][] = []

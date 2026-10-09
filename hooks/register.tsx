@@ -148,6 +148,24 @@ async function showBrief($: EngineInterface, text: string) {
   }
 }
 
+/** What a plain /iirc prints: the session's line, the two settings, and the forms /iirc takes. */
+async function helpText($: EngineInterface): Promise<string> {
+  const s = await read($, status)
+  let max = '?'
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'max-suggested'], { cwd: await $.session.root(), timeoutMs: 15000 })
+    max = /up to (\d+)/.exec(ran.stdout)?.[1] ?? '?'
+  } catch {}
+  const head = s === null ? 'iirc: no session brief yet' : statusText(s, await read($, counts))
+  const shown = (await read($, isStatusShown)) ? 'on' : 'off'
+  return [
+    `${head} · status ${shown} · max-suggested ${max}`,
+    '/iirc status on|off       show or hide the line under the prompt',
+    '/iirc max-suggested N     pages recall suggests at most (1-10)',
+    "/iirc <request>           ask iirc in words: search, remember, what's out of date",
+  ].join('\n')
+}
+
 /** Ask iirc how many distinct pages this session has read and written, from its log. */
 function refreshCounts($: EngineInterface) {
   $.clock.after(0, () => {
@@ -238,10 +256,12 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
-  // `/iirc status on|off` turns the hint-row line on or off, and `/iirc max-suggested N` sets how many
-  // pages recall suggests; every other /iirc goes to the skill.
+  // A plain `/iirc` prints help, `/iirc status on|off` turns the hint-row line on or off, and
+  // `/iirc max-suggested N` sets how many pages recall suggests; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
+    // bare, it is help; the skill loads by itself when a task needs it
+    if (!e.args.trim()) return { text: await helpText($) }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
     if (maxArgs) {
       // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config

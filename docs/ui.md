@@ -84,7 +84,10 @@ The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 line cannot carry color, so the line sits in the hint row.
 
 `/iirc status off` hides it and `/iirc status on` brings it back;
-`/iirc status` says which. The choice is kept in the plugin's own store, so
+`/iirc status` says which. A plain `/iirc` prints the line with both
+settings and the forms `/iirc` takes; `/iirc` followed by a request in
+words, such as `/iirc what do we know about ollama hangs?`, goes to the
+skill. The choice is kept in the plugin's own store, so
 it holds on that machine.
 
 ## Toasts
