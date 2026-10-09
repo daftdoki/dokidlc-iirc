@@ -503,7 +503,15 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
-      <Box flexDirection="row">{head}</Box>
+      <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="row">{head}</Box>
+        {view === 'home' && (
+          <Box flexDirection="row" flexShrink={0}>
+            <Text bold color="suggestion">{'? '}</Text>
+            <Text bold color="suggestion">/iirc help</Text>
+          </Box>
+        )}
+      </Box>
       <Box flexDirection="row" paddingLeft={9}>
         <Text color="subtle" italic>what past sessions learned, found by meaning</Text>
       </Box>
@@ -546,14 +554,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
           <Text color="subtle">{' of '}</Text>
           <Text bold color="claude">{String(c.suggested)}</Text>
           <Text color="subtle">{' suggested pages were read'}</Text>
-        </Box>
-      )}
-      {view === 'home' && <Text> </Text>}
-      {view === 'home' && (
-        <Box flexDirection="row">
-          <Box width={10} flexShrink={0}><Text bold color="subtle">MORE</Text></Box>
-          <Text bold color="#0d1117" backgroundColor="suggestion">{' /iirc help '}</Text>
-          <Text color="subtle">{'  settings and every command'}</Text>
         </Box>
       )}
     </Box>
