@@ -653,6 +653,14 @@ def test_recall_line_names_read_commands_and_is_bounded(tmp_path, monkeypatch):
     assert iirc.recall_line([]) == ""
 
 
+def test_clip_cuts_at_a_word_boundary():
+    summary = "Hook lines arrive as session.append hook-context rows; a Bash call in a collapsed ToolGroup draws no ToolUse row"
+    assert iirc.clip(summary, 90) == "Hook lines arrive as session.append hook-context rows; a Bash call in a collapsed…"
+    assert len(iirc.clip(summary, 90)) <= 90
+    assert iirc.clip("short", 90) == "short"
+    assert iirc.clip("x" * 120, 90) == "x" * 89 + "…"   # one long word is cut where it must be
+
+
 def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)

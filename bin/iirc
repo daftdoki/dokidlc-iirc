@@ -849,6 +849,16 @@ def clean(text: str, limit: int = 160) -> str:
     return re.sub(r"[\x00-\x1f\x7f]+", " ", str(text)).strip()[:limit]
 
 
+def clip(text: str, limit: int) -> str:
+    """At most `limit` characters, cut at a word boundary and marked with an ellipsis when cut."""
+    text = clean(text, len(str(text)))
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit // 2 else cut).rstrip(" ,;:") + "…"
+
+
 def recall_line(rows: list[dict]) -> str:
     """One line, at most RECALL_MAX_BYTES, naming the read command for each page."""
     if not rows:
@@ -860,7 +870,7 @@ def recall_line(rows: list[dict]) -> str:
         tail = ""
         if signals:
             tail = " (" + marker(signals).strip() + f"; if it holds, `iirc verify {name}`)"
-        parts.append(f"`iirc read {name}` ({clean(r.get('summary', ''), 90)}){tail}")
+        parts.append(f"`iirc read {name}` ({clip(r.get('summary', ''), 90)}){tail}")
 
     def render(ps: list[str]) -> str:
         return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read before you investigate: " + " · ".join(ps)
