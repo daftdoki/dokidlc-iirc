@@ -4,7 +4,7 @@
   {"query": "remember that the NAS keeps its live firmware version in /etc/default_config, not /etc/config. the vendor docs are wrong about this", "should_trigger": true},
   {"query": "about to add an ollama service to docker-compose.yml for this project. anything from earlier sessions I should know before I start?", "should_trigger": true},
   {"query": "ok that took four tries but SYNC_PROFILE=local finally made scripts/sync.py run through. write that down somewhere so next time isn't a slog", "should_trigger": true},
-  {"query": "set up memory in this repo. ollama is already running on this mac with nomic-embed-text pulled", "should_trigger": true},
+  {"query": "set up engrams in this repo. ollama is already running on this mac with nomic-embed-text pulled", "should_trigger": true},
   {"query": "the page about the dev server port says 8080 but server/settings.py says 9090 now. sort that out before you write the healthcheck script", "should_trigger": true},
   {"query": "before you plan the pytest migration, check what we decided about test runners in this project last month. I think there was a reason we stayed on unittest", "should_trigger": true},
   {"query": "session start said 3 pages are suspect. deal with them first, then we'll get on with the guard change", "should_trigger": true},
