@@ -361,50 +361,43 @@ export const register: Register = on => {
 
 function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
   const { Box, Text } = $.ui.resolve(e)
-  const stat = (n: number | string, label: string) => (
-    <>
-      <Text bold color="claude">{String(n)}</Text>
-      <Text color="subtle">{` ${label}`}</Text>
-    </>
-  )
-  const dot = <Text color="subtle">{'  ·  '}</Text>
+  const LABEL = 19
+  const VALUE = 12
+  // flat Text items in one row: a fragment inside a row lays out as a column
+  const head: unknown[] = [
+    <Text color={s ? LEVEL_COLOR[s.level] : 'subtle'}>● </Text>,
+    <Text bold color="claude">iirc</Text>,
+    <Text>{'   '}</Text>,
+  ]
+  if (s && s.pages !== null) {
+    const stats: [string, string][] = [
+      [String(s.pages), s.pages === 1 ? 'page' : 'pages'],
+      [`${c.used}/${c.suggested}`, 'used'],
+      [String(c.reads), 'reads'],
+      [String(c.writes), 'writes'],
+    ]
+    stats.forEach(([n, label], k) => {
+      if (k > 0) head.push(<Text color="subtle">{'  ·  '}</Text>)
+      head.push(<Text bold color="claude">{n}</Text>, <Text color="subtle">{` ${label}`}</Text>)
+    })
+    if (s.mode !== 'semantic+keyword') head.push(<Text color="subtle">{'  ·  '}</Text>, <Text color="warning">{`${s.mode} mode`}</Text>)
+  } else {
+    head.push(<Text color="subtle">{s ? s.note : 'no session brief yet'}</Text>)
+  }
   const row = (label: string, value: string, command: string) => (
     <Box flexDirection="row">
-      <Box width={16} flexShrink={0}><Text color="subtle">{label}</Text></Box>
-      <Box width={12} flexShrink={0}><Text bold>{value}</Text></Box>
+      <Box width={LABEL} flexShrink={0}><Text color="subtle">{label}</Text></Box>
+      <Box width={VALUE} flexShrink={0}><Text bold color="claude">{value}</Text></Box>
       <Text color="suggestion">{command}</Text>
     </Box>
   )
   return (
     <Box flexDirection="column" paddingLeft={2}>
-      <Box flexDirection="row">
-        <Text color={s ? LEVEL_COLOR[s.level] : 'subtle'}>● </Text>
-        <Text bold color="claude">iirc</Text>
-        <Text>{'   '}</Text>
-        {s && s.pages !== null ? (
-          <>
-            {stat(s.pages, s.pages === 1 ? 'page' : 'pages')}
-            {dot}
-            {stat(`${c.used}/${c.suggested}`, 'used')}
-            {dot}
-            {stat(c.reads, 'reads')}
-            {dot}
-            {stat(c.writes, 'writes')}
-            {s.mode !== 'semantic+keyword' && (
-              <>
-                {dot}
-                <Text color="warning">{`${s.mode} mode`}</Text>
-              </>
-            )}
-          </>
-        ) : (
-          <Text color="subtle">{s ? s.note : 'no session brief yet'}</Text>
-        )}
-      </Box>
+      <Box flexDirection="row">{head}</Box>
       {s && s.level !== 'ok' && s.fix && (
         <Box flexDirection="row" paddingLeft={2}>
           <Text color={LEVEL_COLOR[s.level]}>{'fix  '}</Text>
-          <Text bold>{`run ${s.fix}`}</Text>
+          <Text bold color="claude">{`run ${s.fix}`}</Text>
         </Box>
       )}
       <Text> </Text>
@@ -412,10 +405,10 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
       {row('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
       <Text> </Text>
       <Box flexDirection="row">
-        <Box width={16} flexShrink={0}><Text color="subtle">ask in words</Text></Box>
+        <Box width={LABEL} flexShrink={0}><Text color="subtle">ask in words</Text></Box>
         <Text color="suggestion">/iirc &lt;request&gt;</Text>
       </Box>
-      <Box flexDirection="row" paddingLeft={16}>
+      <Box flexDirection="row" paddingLeft={LABEL}>
         <Text dimColor italic>what do we know about ollama hangs? · remember that… · what's out of date?</Text>
       </Box>
     </Box>
