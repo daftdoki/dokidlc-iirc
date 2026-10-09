@@ -522,7 +522,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       {view === 'home' && <Text> </Text>}
       {view === 'home' && (
         <Box flexDirection="row">
-          <Box width={16} flexShrink={0}>{heading('COMMANDS')}</Box>
+          <Box width={16} flexShrink={0}>{heading('MORE COMMANDS')}</Box>
           <Text color="suggestion">/iirc help</Text>
         </Box>
       )}
