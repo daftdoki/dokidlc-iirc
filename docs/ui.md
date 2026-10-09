@@ -5,6 +5,8 @@ plugin's hooks module, `hooks/register.tsx`, catches each of those lines as
 Claude Code stores it and draws it for you. It is on by default. It is
 tested on Claude Code 2.1.295.
 
+![The suggested-pages list under a prompt, and the iirc line under the prompt](images/iirc-ui.png)
+
 ## Under your prompt
 
 When recall finds pages for your prompt, a row appears under it:
@@ -31,7 +33,8 @@ Click anywhere on the row to open the list:
 That list came from the prompt "how do I install a plugin from its source
 checkout for development?" in the agent-builder repository.
 
-The diamond is green, or yellow on a page iirc suspects is stale. The
+The diamond is in your theme's success color, green by default, or yellow
+on a page iirc suspects is stale. The
 bracket after the name says how the page matched:
 
 | Label | Means |
@@ -68,13 +71,13 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 
 | Part | Means |
 |---|---|
-| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates; red when iirc needs setup, an init, or a migration |
+| `●` | the theme's success color, green by default, when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates; red when iirc needs setup, an init, or a migration |
 | `[76] pages` | the pages in every store |
 | `[2/5] used` | of the pages recall suggested this session, how many were then read |
 | `[12] reads` | different pages this session read with `iirc read` or `iirc pull` |
 | `[4] writes` | different pages this session wrote |
 | `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
-| `· run iirc doubt` | shown when the circle is not green: the command that clears it |
+| `· run iirc doubt` | shown when the circle is yellow or red: the command that clears it |
 
 The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 `migrate`, `setup`, `init`, and `doctor`, and after each recall. A status

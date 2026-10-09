@@ -28,10 +28,7 @@ Nothing in the pages needs your approval, and nothing you asked for goes
 there. The pages are what the agent learned by itself; documents you review
 stay in `docs/`.
 
-<!-- TODO screenshot: an expanded "iirc: [3] pages suggested" list under a
-prompt, and the colored "● iirc:" line under the prompt. Store it as
-docs/images/iirc-ui.png and replace this comment with:
-![A prompt with three suggested pages listed under it, each with its match score, and the green iirc line under the prompt](docs/images/iirc-ui.png) -->
+![A prompt with three suggested pages listed under it, each with its match score, and the iirc line under the prompt with its page, used, read, and write counts](docs/images/iirc-ui.png)
 
 ## Why another memory system?
 
@@ -116,9 +113,9 @@ list the pages:
 ```
 
 The second line sits under the prompt for the whole session. Its circle is
-green when all is well; yellow or red, it ends with the command that fixes
-it, such as `· run iirc doubt`. [docs/ui.md](docs/ui.md) explains every
-part.
+your theme's success color, green by default, when all is well; yellow or
+red, it ends with the command that fixes it, such as `· run iirc doubt`.
+[docs/ui.md](docs/ui.md) explains every part.
 
 Ask a question and the agent searches. "Do you remember anything about
 installing this on a mac?" runs:
