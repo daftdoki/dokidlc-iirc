@@ -153,6 +153,15 @@ def test_fill_ref_from_git(tmp_path):
         iirc.fill_ref("docs/a.md@nothex", tmp_path)
 
 
+def test_doctor_ends_with_the_fix_hint_when_a_check_fails(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    (tmp_path / "CLAUDE.md").write_text("no paragraph here\n")
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "FAIL" in out and out.rstrip().endswith(iirc.FIX_HINT)
+
+
 def test_stamp_index_keeps_the_head_and_drops_the_old_list(tmp_path):
     field = tmp_path / ".iirc"; field.mkdir()
     old = "---\ntitle: IIRC\n---\n\nHand-written intro.\n\n<!-- generated below -->\n<!-- iirc format 1, written by iirc abc1234 on 2026-10-01 -->\n\nTopics across 2 pages:\n\n- install (2)\n"

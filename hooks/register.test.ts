@@ -319,7 +319,7 @@ test('/iirc doctor, search, and read run the CLI directly', async ($: Engine, on
   expect(argv.map(a => a.slice(1))).toContainEqual(['read', 'a.md', 'b.md'])
 })
 
-const DOCTOR = 'iirc doctor exited 1:\nok  uv on PATH\nFAIL memoryfield-tool at 3e447e1  (iirc doctor --fix)\nnote near-duplicate pages (distance 0.060): a.md | b.md\n     index cache: /x (derived)'
+const DOCTOR = 'iirc doctor exited 1:\nok  uv on PATH\nFAIL memoryfield-tool at 3e447e1  (iirc doctor --fix)\nnote near-duplicate pages (distance 0.060): a.md | b.md\n     index cache: /x (derived)\nRun `iirc doctor --fix` to repair what it can.'
 
 test('parses doctor lines into checks, failures, notes, and info', () => {
   expect(parseDoctor(DOCTOR)).toEqual({

@@ -549,6 +549,7 @@ export function parseDoctor(text: string): DoctorReport | null {
   for (const raw of text.split('\n')) {
     const line = raw.replace(/^iirc: /, '')
     if (/^iirc .* exited \d+:$/.test(line.trim())) continue
+    if (/^Run `iirc doctor --fix`/.test(line.trim())) continue   // the card says this itself
     let m
     if ((m = /^ok\s+(.*)$/.exec(line))) r.ok.push(m[1].trim())
     else if ((m = /^FAIL\s+(.*?)(?:\s{2}\((.*)\))?$/.exec(line))) r.failed.push({ label: m[1].trim(), fix: (m[2] ?? '').trim() })

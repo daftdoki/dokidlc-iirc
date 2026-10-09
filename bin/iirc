@@ -197,6 +197,7 @@ NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PAGE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
+FIX_HINT = "Run `iirc doctor --fix` to repair what it can."
 PAGE_LIMIT = 8192
 # kind -> days after which an unverified page earns a "glance" hint. None: never.
 KINDS: dict[str, int | None] = {"environment": 30, "procedure": 90, "finding": 180, "decision": None}
@@ -2688,6 +2689,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             reindex()
     idx = cache_dir() / "memoryfield-tool" / "indexes"
     print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc index`)")
+    if not ok and not args.fix:
+        print(FIX_HINT)
 
     sys.exit(0 if ok else 1)
 
