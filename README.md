@@ -42,8 +42,11 @@ This plugin is for what the agent learns about the project: a quirk of a
 tool, a procedure that worked, a finding about the domain, a decision and
 its reason. That knowledge belongs with the code, in git, so it reaches
 every clone and can be diffed, reviewed, and rolled back like anything
-else in the repository. It is found by search rather than loaded whole, so
-it stays cheap as it grows. And it cites files at a commit, which is what
+else in the repository. Claude Code loads its memory index, the first 200
+lines or 25KB of `MEMORY.md`, into every session, so that memory has to
+stay small. iirc pages are found by search rather than loaded whole, so
+the store can grow to hundreds of pages and a session pays only for the
+pages that match. And it cites files at a commit, which is what
 lets a page be marked suspect when the thing it describes changes. Age
 alone is only a hint.
 
@@ -54,7 +57,8 @@ alone is only a hint.
 | `docs/` | anything you asked for or reviewed: designs, research, decisions with their reasoning |
 
 A page may cite a document in `docs/`. A document never cites
-a page.
+a page. [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md#iirc-and-claude-codes-own-memory)
+compares the two in full, with what each costs in context.
 
 ## Status
 
@@ -89,39 +93,23 @@ commit and, for a local model on macOS, ollama and the model. You commit
 what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
 run yourself, for a bootstrap script or a container.
 
-A repository that used the memory plugin needs one more step. At session
-start the agent offers the migration, and on your yes it runs it:
-`iirc migrate` moves `.memory/`, `.claude/memory.toml`, the CLAUDE.md section, the `memory@dokidlc` setting, and this machine's `dokidlc-memory` directories to their iirc names.
-It stages the changes and prints a suggested commit; it never commits.
+A repository that used the earlier memory plugin is offered a migration
+at session start; [docs/USAGE.md](docs/USAGE.md#migrate-from-the-memory-plugin)
+says what it moves.
 
 ## Usage
 
-Mostly you do nothing. Each session starts with one line for the agent:
-
-```
-iirc: 76 pages, semantic via 127.0.0.1:11434. Topics: claude-code 26, questlog 20, decisions 16, plugin 16.
-```
-
-Send a prompt and, when pages match, a row appears under it. Click it to
-list the pages:
+Mostly you do nothing. Send a prompt and, when pages match, a row appears
+under it; click it to list the pages. A second line sits under the prompt
+for the whole session, green when all is well, and naming the fixing
+command when not:
 
 ```
 [+] iirc: [3] pages suggested
 ● iirc: [76] pages · [2/5] used · [12] reads · [4] writes
 ```
 
-The second line sits under the prompt for the whole session. Its circle is
-green when all is well; yellow or red, it ends with the command that
-fixes it, such as `· run iirc doubt`.
-A plain `/iirc` draws a card with the status, the counts, and the hit
-rate; `/iirc help` lists the settings and commands. `/iirc doctor`,
-`/iirc doubt`, `/iirc search QUERY`, and the rest of its maintenance and
-look-up commands run directly and print their output.
-
-![The iirc card: status all good, counts of pages, used, reads, and writes, a recall hit rate bar at 74%, the two settings with their commands, and examples of asking in words](docs/images/iirc-card.png)
-[docs/ui.md](docs/ui.md) explains every part.
-
-Ask a question and the agent searches. "Do you remember anything about
+Ask in words and the agent searches. "Do you remember anything about
 installing this on a mac?" runs:
 
 ```
@@ -130,30 +118,36 @@ pysqlite3-install-override.md: Why memoryfield-tool needs a uv overrides file on
 ```
 
 "Remember that the NAS keeps its live firmware in /etc/default_config"
-makes the agent write a page with a title, a one-line summary, topics, a
-kind, and a Sources section. "What in iirc might be out of date?" runs
-`iirc doubt`. The full command list is in `iirc --help`; the rules the
-agent follows are in [skills/iirc/SKILL.md](skills/iirc/SKILL.md).
+makes the agent write a page. A plain `/iirc` draws a short card,
+`/iirc status` every number, and `/iirc help` the settings and commands.
+
+![An earlier version of the /iirc card, with sample numbers: status all good, counts of pages, used, reads, and writes, a recall hit rate bar at 74%, the two settings, and examples of asking in words](docs/images/iirc-card.png)
+
+[docs/USAGE.md](docs/USAGE.md) covers every task, command, and setting;
+[docs/UI.md](docs/UI.md) explains every part of what is drawn.
 
 ## Caveats
 
-- The hooks fail open. A dead embedding host is skipped after a two-second
-  probe, and a search that cannot run prints nothing.
+- The hooks fail open, then say so. A dead embedding host is skipped
+  after a two-second probe. A bad `.claude/iirc.toml` turns every hook
+  off, and the session-start line and the line under the prompt say so.
+  A recall that runs past the hook's 5-second limit is logged and counted.
+- iirc records what recall did on this machine, in
+  `~/.local/state/dokidlc-iirc/`, for 90 days: each recall and its
+  candidates, each session's numbers, and the first 300 characters of each
+  prompt. Nothing there is committed or pushed. See
+  [what iirc records](docs/HOW-IT-WORKS.md#what-iirc-records).
 - Every change the agent makes to the pages is committed at once, the
   store's directory and nothing else, so your own staged work stays out.
 - The semantic index lives in the machine's cache directory, not the
   repository. A fresh clone rebuilds it on first use.
-- A check command that arrived with a clone runs only after the agent asks
-  you and runs `iirc approve`. Until then `doubt` lists it and `verify`
-  refuses the page.
-- URLs in a page's refs are contacted only by `iirc doubt --network`,
-  which asks you first.
-- A remote store's clone sits on the agent's own machine. The guard
-  refuses a raw read of its pages by pattern, which is a convention, not
-  a boundary.
-- Two pages that read as duplicates make search name the wrong one.
-  `iirc doctor` names each pair; merge them, or link one to the other with
-  `[[name]]` when they hold different kinds of finding.
+- Nothing from a page runs or goes out without you. A check command that
+  came with a clone runs only after you approve it, and a page's URLs are
+  contacted only by `iirc doubt --network`, which asks first.
+- The guard refuses a raw read of a page by pattern, which is a
+  convention, not a boundary.
+- Two near-duplicate pages make search name the wrong one; `iirc doctor`
+  names each pair.
 - The plugin has to be installed once per machine. `.claude/settings.json`
   can enable it for every clone, but cannot install it.
 
@@ -163,24 +157,20 @@ agent follows are in [skills/iirc/SKILL.md](skills/iirc/SKILL.md).
 |---|---|---|
 | search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc setup` again |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
-| the line under the prompt | the plugin's store, per machine | `/iirc status-line on` or `off` |
-| the drawn rows; the raw hook text | `.claude/iirc.toml`, `ui` and `show_hooks` | editing the file |
-| how close a page must be for recall to suggest it | `.claude/iirc.toml`, `[recall]`, see [the recall gate](docs/how-it-works.md#the-recall-gate) | editing the file; `iirc knobs` prints them |
-| the stores | `.claude/iirc.toml` | `iirc stores add`, see [how-it-works.md](docs/how-it-works.md#adding-a-remote-store) |
+| how close a page must be for recall to suggest it | `.claude/iirc.toml`, `[recall]` | editing the file; `/iirc knobs` prints them |
 
-An `OLLAMA_HOST` exported in the shell turns semantic search on and
-overrides the host. To enable the plugin for everyone who clones the
-repository, add the marketplace and the plugin to `.claude/settings.json`
-by hand; [INSTALL.md](INSTALL.md) shows the two keys.
+[docs/USAGE.md](docs/USAGE.md#every-setting) lists every setting, with
+its default, its range, and when to turn it.
 
 ## Other docs
 
+- [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md): why iirc works the way it does, how it compares with Claude Code's own memory, what each hook adds to the agent's context, where the code is, and what iirc records and why.
+- [docs/USAGE.md](docs/USAGE.md): every task, every `/iirc` command, every setting, and how to get good results over time.
+- [docs/UI.md](docs/UI.md): what the plugin draws under your prompt and commands, and every part of the line under the prompt and the cards.
 - [INSTALL.md](INSTALL.md): every install step as a command, with the trap each one hides.
-- [docs/ui.md](docs/ui.md): what the plugin draws under your prompt and commands, and every part of the line under the prompt.
-- [docs/how-it-works.md](docs/how-it-works.md): the hooks, the stores and how to add a remote one, the page format and its keys, and how search ranks.
 - [skills/iirc/SKILL.md](skills/iirc/SKILL.md): the rules the agent follows for searching, writing, and doubt.
 - [skills/iirc/evals/](skills/iirc/evals/): the harness that measured the skill, and the numbers.
-- [docs/review-pass-recommendations.md](docs/review-pass-recommendations.md): a review of two fields after two weeks of use, with recommendations.
+- [docs/REVIEW-PASS-RECOMMENDATIONS.md](docs/REVIEW-PASS-RECOMMENDATIONS.md): a review of two fields after two weeks of use, dated 2026-09-19, from before the plugin was named iirc.
 - [DEVELOPMENT.md](DEVELOPMENT.md): working on the plugin itself.
 
 ## Support
