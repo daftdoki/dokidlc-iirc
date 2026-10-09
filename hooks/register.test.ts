@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseBrief, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import { parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 
 const RECALL =
   'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -317,6 +317,34 @@ test('/iirc doctor, search, and read run the CLI directly', async ($: Engine, on
   expect(argv.map(a => a.slice(1))).toContainEqual(['doctor'])
   expect(argv.map(a => a.slice(1))).toContainEqual(['search', 'plugin hooks'])
   expect(argv.map(a => a.slice(1))).toContainEqual(['read', 'a.md', 'b.md'])
+})
+
+const DOCTOR = 'iirc doctor exited 1:\nok  uv on PATH\nFAIL memoryfield-tool at 3e447e1  (iirc doctor --fix)\nnote near-duplicate pages (distance 0.060): a.md | b.md\n     index cache: /x (derived)'
+
+test('parses doctor lines into checks, failures, notes, and info', () => {
+  expect(parseDoctor(DOCTOR)).toEqual({
+    ok: ['uv on PATH'],
+    failed: [{ label: 'memoryfield-tool at 3e447e1', fix: 'iirc doctor --fix' }],
+    notes: ['near-duplicate pages (distance 0.060): a.md | b.md'],
+    info: ['index cache: /x (derived)'],
+  })
+  expect(parseDoctor('something else')).toBeNull()
+})
+
+test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: Engine, on: On) => {
+  engine(on)
+  const doctor = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'doc',
+    props: { command: 'iirc', args: 'doctor', text: DOCTOR, isErrored: false },
+  })
+  expect(await doctor.find({ text: ' ✖ 1 of 2 failed ' })).toBeDefined()
+  expect(await doctor.find({ text: 'iirc doctor --fix' })).toBeDefined()
+  expect(await doctor.find({ text: 'uv on PATH' })).toBeDefined()
+  const help = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'help',
+    props: { command: 'iirc', args: 'help', text: 'x', isErrored: false },
+  })
+  expect(await help.find({ text: '/iirc max-suggested N' })).toBeDefined()
 })
 
 test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {

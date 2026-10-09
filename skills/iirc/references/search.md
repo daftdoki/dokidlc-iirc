@@ -20,8 +20,8 @@ nothing. Do this instead:
    mention. "Why does install fail on a mac" becomes
    `install pysqlite3 macos wheel`.
 2. Search them in one call; pages matching more terms rank first.
-3. Nothing? `iirc read index.md` gives the topic list; search the
-   nearest topics. Try shorter stems (`instal`, `sqlite`) and synonyms.
+3. Nothing? `iirc topics` lists every topic with its page count; search
+   the nearest topics. Try shorter stems (`instal`, `sqlite`) and synonyms.
 4. Read the top two or three pages with `iirc pull` or `iirc read`
    rather than stopping at the summaries.
 

@@ -92,7 +92,7 @@ goes silent, because the client has no timeout.
 |---|---|
 | `title` | What the page is about. |
 | `summary` | One sentence, 160 characters or fewer. Search shows this line. |
-| `topics` | One or two tags. They make the topic list in `index.md`. |
+| `topics` | One or two tags. `iirc topics` lists them with their page counts. |
 | `kind` | `environment`, `procedure`, `finding`, or `decision`. Says how fast the page can go stale. |
 | `refs` | Files this page cites, each at a commit, or URLs. The page becomes suspect when the cited text differs from the file now; a move alone is no change, and `verify` rewrites the ref to the new path. `PATH#Heading@SHA` cites one markdown section, up to the next heading of its level or higher, so edits elsewhere in the file do not count; with two headings of the same text, the first counts. URLs are checked only when you allow it. |
 | `check` | A read-only command. If it fails, the page becomes suspect. A check runs on a machine only after that machine approved it. |
@@ -120,8 +120,11 @@ date, look before you rely on it". The note is only a nudge. A page
 becomes suspect only when a file it cites changed, its check command
 failed, or the agent found it to be wrong.
 
-`index.md` is the one page the agent does not write: its top half is
-yours, its bottom half is a generated topic list.
+`index.md` is the one page the agent does not write. It introduces the
+store, and memoryfield-tool shows its title when it lists fields; the
+text is yours. iirc ends it with one line, `<!-- iirc format 1 -->`, and
+changes that line only when the format does, so the file stays out of
+merge conflicts.
 
 ## How search ranks
 

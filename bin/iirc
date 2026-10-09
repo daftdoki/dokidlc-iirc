@@ -20,6 +20,7 @@ Usage:
   iirc doubt [--all]         pages with evidence they may be wrong
   iirc approve PAGE          run a page's check once and approve it on this machine
   iirc index                 full reindex and index.md regeneration
+  iirc topics                every topic with its page count
   iirc cost                  bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
   iirc stats [--days N]      how the pages are being used
@@ -61,7 +62,8 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PIN_FILE = PLUGIN_ROOT / "iirc.pin"
 ROOT: Path = Path.cwd()        # set_root() replaces these before any command runs
 FORMAT = 1
-FORMAT_RE = re.compile(r"<!-- iirc format (\d+), written by iirc (\S+) on (\S+) -->")
+# the short stamp, or the long one older versions wrote with a commit and a date
+FORMAT_RE = re.compile(r"<!-- iirc format (\d+)(?:, written by iirc \S+ on \S+)? -->")
 CLAUDE_MD_MARK = "<!-- iirc -->"
 CLAUDE_MD_PARAGRAPH = f"""
 ## IIRC {CLAUDE_MD_MARK}
@@ -195,7 +197,6 @@ NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PAGE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
-GENERATED_MARK = "<!-- generated below -->"
 PAGE_LIMIT = 8192
 # kind -> days after which an unverified page earns a "glance" hint. None: never.
 KINDS: dict[str, int | None] = {"environment": 30, "procedure": 90, "finding": 180, "decision": None}
@@ -1270,22 +1271,42 @@ def refuse_symlink(path: Path) -> Path:
     return path
 
 
-def regenerate_index(field: Path | None = None) -> None:
-    """Rewrite the generated half of index.md: one line per topic with its page count."""
+def stamp_index(field: Path | None = None) -> None:
+    """Keep index.md to its hand-written introduction and the format stamp.
+
+    It once carried a generated topic list, a commit, and a date, rewritten on
+    every write: in agent-builder 96 of 149 store commits touched it, and two
+    writers conflicted on it every time. Topics now come from `iirc topics`.
+    The file is written only when this changes it.
+    """
     field = field or project_dir()
     index_md = refuse_symlink(field / "index.md")
     text = index_md.read_text() if index_md.is_file() else INDEX_TEMPLATE
-    head = text.split(GENERATED_MARK, 1)[0].rstrip("\n")
+    head = re.split(r"\n*<!-- (?:generated below|iirc format \d+[^>]*) -->", text, maxsplit=1)[0].rstrip("\n")
+    stamped = f"{head}\n\n<!-- iirc format {FORMAT} -->\n"
+    if stamped != text:
+        index_md.write_text(stamped)
+
+
+def topic_counts() -> list[tuple[str, int]]:
+    """Every topic across the live stores with its page count, most used first."""
     counts: dict[str, int] = {}
-    for page in list_pages(field):
-        fm, _ = parse_page(page.read_text())
-        for topic in fm.get("topics") or []:
-            counts[str(topic)] = counts.get(str(topic), 0) + 1
-    lines = [f"- {t} ({n})" for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-    body = "\n".join(lines) if lines else "(no pages yet)"
-    n = len(list_pages(field))
-    stamp = f"<!-- iirc format {FORMAT}, written by iirc {plugin_commit()} on {datetime.now(UTC):%Y-%m-%d} -->"
-    index_md.write_text(f"{head}\n\n{GENERATED_MARK}\n{stamp}\n\nTopics across {n} page{'' if n == 1 else 's'}:\n\n{body}\n")
+    for store in live_stores():
+        for page in list_pages(store.dir):
+            fm, _ = parse_page(page.read_text())
+            for topic in fm.get("topics") or []:
+                counts[str(topic)] = counts.get(str(topic), 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def cmd_topics(args: argparse.Namespace) -> None:
+    require_stores()
+    rows = topic_counts()
+    if not rows:
+        print("no pages yet")
+        return
+    for topic, n in rows:
+        print(f"{topic} ({n})")
 
 
 # --- suspicion --------------------------------------------------------------
@@ -1657,7 +1678,7 @@ def cmd_write(args: argparse.Namespace) -> None:
         die(proc.stderr.strip() or "write failed")
     print(proc.stdout.strip())
     log_event("write", page=page_label(store.name, args.page), kind=args.kind)
-    regenerate_index(store.dir)
+    stamp_index(store.dir)
     reindex()
     save(store, f"iirc: write {args.page}")
 
@@ -1732,7 +1753,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
         die(proc.stderr.strip() or "delete failed")
     print(proc.stdout.strip())
     log_event("delete", page=page_label(store.name, name))
-    regenerate_index(store.dir)
+    stamp_index(store.dir)
     reindex()
     save(store, f"iirc: delete {name}")
 
@@ -1740,7 +1761,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
 def cmd_index(args: argparse.Namespace) -> None:
     require_stores()
     for store in live_stores():
-        regenerate_index(store.dir)
+        stamp_index(store.dir)
     reindex()
     for store in live_stores():
         save(store, "iirc: index")
@@ -1790,7 +1811,7 @@ def check_format() -> None:
         if found > FORMAT:
             die(f"store {store.name} was last written by a newer iirc plugin (format {found}, this is {FORMAT}); update the plugin", 2)
         if found < FORMAT:
-            regenerate_index(store.dir)
+            stamp_index(store.dir)
             print(f"iirc: migrated store {store.name} from format {found} to {FORMAT}", file=sys.stderr)
 
 
@@ -1807,7 +1828,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             write_config()
             tool("write", "--force", "index.md", stdin=INDEX_TEMPLATE, check=False, field=store.field)
         made.append(rel + "/")
-    regenerate_index(store.dir)
+    stamp_index(store.dir)
     claude_md = refuse_symlink(ROOT / "CLAUDE.md")
     text = claude_md.read_text() if claude_md.is_file() else ""
     if CLAUDE_MD_MARK not in text:
@@ -1894,7 +1915,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         if rewritten:
             done.append(f"rewrote the memory commands in {rewritten} page{'' if rewritten == 1 else 's'}")
         if done:
-            regenerate_index(store.dir)
+            stamp_index(store.dir)
             try:
                 reindex()
             except SystemExit:
@@ -2227,7 +2248,7 @@ def create_index(store: Store) -> str | None:
     if (store.dir / "index.md").is_file():
         return None
     (store.dir / "index.md").write_text(INDEX_TEMPLATE)
-    regenerate_index(store.dir)
+    stamp_index(store.dir)
     with store_lock(store.field):
         reason = commit_store(store, f"iirc: create store {store.name}")
         return reason or push_store(store)
@@ -2484,8 +2505,6 @@ summary: What this agent has learned on its own, searched before investigating.
 Pages here are what this agent learned on its own. Search with
 `iirc search QUERY` before investigating anything. Documents the
 creator asked for or reviewed live in `docs/`, not here.
-
-<!-- generated below -->
 """
 
 
@@ -2806,6 +2825,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine (implies --semantic)")
     p.add_argument("--host", help="embeddings from a remote ollama host (implies --semantic)")
     p.set_defaults(func=cmd_setup)
+
+    p = sub.add_parser("topics", help="every topic with its page count, computed from the pages")
+    p.set_defaults(func=cmd_topics)
 
     p = sub.add_parser("max-suggested", help="how many pages a recall line suggests at most, on this machine")
     p.add_argument("n", nargs="?", type=int, metavar="N", help="1 to 10; without N, print the current number")

@@ -44,7 +44,7 @@ const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
-const DIRECT_RE = /^(doctor(?:\s+--fix)?|doubt(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|cost|search\s+\S.*|read(?:\s+\S+)+)$/s
+const DIRECT_RE = /^(doctor(?:\s+--fix)?|doubt(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|cost|topics|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
@@ -63,6 +63,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
   ['index', 'rebuild the search index and index.md', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
+  ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
 ]
 const KEEP = 200
@@ -310,8 +311,8 @@ export const register: Register = on => {
   // `/iirc max-suggested N` sets how many pages recall suggests; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
-    // bare, it is help; the skill loads by itself when a task needs it
-    if (!e.args.trim()) return { text: await helpText($) }
+    // bare or `help`, it is help; the skill loads by itself when a task needs it
+    if (!e.args.trim() || e.args.trim() === 'help') return { text: await helpText($) }
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (e.args.trim() === 'demo') return { text: 'the /iirc card with sample numbers' }
     const direct = DIRECT_RE.exec(e.args.trim())
@@ -340,7 +341,11 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
     const args = e.props.args.trim()
-    if (!isIirc || (args !== '' && args !== 'demo') || e.props.isErrored) return next(e)
+    if (isIirc && !e.props.isErrored && (args === 'doctor' || args === 'doctor --fix')) {
+      const report = parseDoctor(e.props.text)
+      return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
+    }
+    if (!isIirc || (args !== '' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
     if (args === 'demo') return drawHelp($, e, DEMO_STATUS, DEMO_COUNTS, true, 3)
     return drawHelp($, e, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
   })
@@ -532,6 +537,88 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
           <Text dimColor italic>{example}</Text>
         </Box>
       ))}
+    </Box>
+  )
+}
+
+export type DoctorReport = { ok: string[]; failed: { label: string; fix: string }[]; notes: string[]; info: string[] }
+
+/** Doctor's lines, `ok  label`, `FAIL label  (fix)`, `note text`, and indented info; null when none parse. */
+export function parseDoctor(text: string): DoctorReport | null {
+  const r: DoctorReport = { ok: [], failed: [], notes: [], info: [] }
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/^iirc: /, '')
+    if (/^iirc .* exited \d+:$/.test(line.trim())) continue
+    let m
+    if ((m = /^ok\s+(.*)$/.exec(line))) r.ok.push(m[1].trim())
+    else if ((m = /^FAIL\s+(.*?)(?:\s{2}\((.*)\))?$/.exec(line))) r.failed.push({ label: m[1].trim(), fix: (m[2] ?? '').trim() })
+    else if ((m = /^note\s+(.*)$/.exec(line))) r.notes.push(m[1].trim())
+    else if (line.trim()) r.info.push(line.trim())
+  }
+  return r.ok.length + r.failed.length + r.notes.length > 0 ? r : null
+}
+
+function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix: boolean) {
+  const { Box, Text } = $.ui.resolve(e)
+  const level = r.failed.length > 0 ? 'error' : r.notes.length > 0 ? 'warn' : 'ok'
+  const tone = LEVEL_COLOR[level]
+  const width = Math.max(48, Math.min(96, (e.viewport?.columns ?? 80) - 4))
+  const total = r.ok.length + r.failed.length
+  const chip = level === 'error'
+    ? `✖ ${r.failed.length} of ${total} failed`
+    : level === 'warn'
+      ? `▲ ${r.ok.length} pass, ${r.notes.length} ${r.notes.length === 1 ? 'note' : 'notes'}`
+      : `✔ all ${total} checks pass`
+  const heading = (text: string) => <Text bold color="subtle">{text}</Text>
+  const row = (key: string, mark: string, color: string, text: string, dim = false) => (
+    <Box key={key} flexDirection="row" paddingLeft={2}>
+      <Box width={3} flexShrink={0}><Text color={color}>{mark}</Text></Box>
+      <Text color={dim ? 'subtle' : undefined}>{text}</Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1} width={width}>
+      <Box flexDirection="row">
+        <Text color={tone}>● </Text>
+        <Text bold color="claude">iirc</Text>
+        <Text color="subtle">{isFix ? '   doctor --fix' : '   doctor'}</Text>
+      </Box>
+      <Text> </Text>
+      <Box flexDirection="row">
+        <Box width={10} flexShrink={0}><Text bold color="subtle">RESULT</Text></Box>
+        <Text bold color="#0d1117" backgroundColor={tone}>{` ${chip} `}</Text>
+      </Box>
+      {r.failed.length > 0 && <Text> </Text>}
+      {r.failed.length > 0 && heading('FAILED')}
+      {r.failed.map((f, k) => (
+        <Box key={`f${k}`} flexDirection="column">
+          {row(`fl${k}`, '✖', LEVEL_COLOR.error, f.label)}
+          {f.fix && (
+            <Box flexDirection="row" paddingLeft={5}>
+              <Text color="subtle">{'fix: '}</Text>
+              <Text color="claude">{f.fix}</Text>
+            </Box>
+          )}
+        </Box>
+      ))}
+      {r.notes.length > 0 && <Text> </Text>}
+      {r.notes.length > 0 && heading('NOTES')}
+      {r.notes.map((n, k) => row(`n${k}`, '▲', LEVEL_COLOR.warn, n))}
+      {r.ok.length > 0 && <Text> </Text>}
+      {r.ok.length > 0 && heading('PASSED')}
+      {r.ok.map((o, k) => row(`o${k}`, '✔', LEVEL_COLOR.ok, o, true))}
+      {r.info.length > 0 && <Text> </Text>}
+      {r.info.map((i, k) => (
+        <Box key={`i${k}`} paddingLeft={2}><Text dimColor italic>{i}</Text></Box>
+      ))}
+      {r.failed.length > 0 && !isFix && <Text> </Text>}
+      {r.failed.length > 0 && !isFix && (
+        <Box flexDirection="row">
+          <Text color="subtle">{'run '}</Text>
+          <Text color="suggestion">/iirc doctor --fix</Text>
+          <Text color="subtle">{' to repair what it can'}</Text>
+        </Box>
+      )}
     </Box>
   )
 }

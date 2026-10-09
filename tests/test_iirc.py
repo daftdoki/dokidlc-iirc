@@ -153,26 +153,31 @@ def test_fill_ref_from_git(tmp_path):
         iirc.fill_ref("docs/a.md@nothex", tmp_path)
 
 
-def test_regenerate_index_counts_topics_and_keeps_head(tmp_path):
+def test_stamp_index_keeps_the_head_and_drops_the_old_list(tmp_path):
     field = tmp_path / ".iirc"; field.mkdir()
-    (field / "index.md").write_text("---\ntitle: IIRC\n---\n\nHand-written intro.\n\n<!-- generated below -->\n\nold stuff\n")
-    (field / "a.md").write_text("---\ntopics:\n- install\n- ollama\n---\nx\n")
-    (field / "b.md").write_text("---\ntopics:\n- install\n---\ny\n")
-    iirc.regenerate_index(field)
-    text = (field / "index.md").read_text()
-    assert "Hand-written intro." in text
-    assert "old stuff" not in text
-    assert "Topics across 2 pages:" in text
-    assert text.index("- install (2)") < text.index("- ollama (1)")
+    old = "---\ntitle: IIRC\n---\n\nHand-written intro.\n\n<!-- generated below -->\n<!-- iirc format 1, written by iirc abc1234 on 2026-10-01 -->\n\nTopics across 2 pages:\n\n- install (2)\n"
+    (field / "index.md").write_text(old)
+    iirc.stamp_index(field)
+    assert (field / "index.md").read_text() == "---\ntitle: IIRC\n---\n\nHand-written intro.\n\n<!-- iirc format 1 -->\n"
 
 
-def test_regenerate_index_without_marker_appends_one(tmp_path):
+def test_stamp_index_leaves_a_stamped_file_untouched(tmp_path):
     field = tmp_path / ".iirc"; field.mkdir()
     (field / "index.md").write_text("intro only\n")
-    iirc.regenerate_index(field)
-    text = (field / "index.md").read_text()
-    assert text.startswith("intro only\n\n<!-- generated below -->")
-    assert "(no pages yet)" in text
+    iirc.stamp_index(field)
+    assert (field / "index.md").read_text() == "intro only\n\n<!-- iirc format 1 -->\n"
+    before = (field / "index.md").stat().st_mtime_ns
+    (field / "a.md").write_text("---\ntopics:\n- install\n---\nx\n")
+    iirc.stamp_index(field)
+    assert (field / "index.md").stat().st_mtime_ns == before   # a new page no longer rewrites it
+
+
+def test_topics_counts_every_topic(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    (tmp_path / ".iirc" / "a.md").write_text("---\ntopics:\n- install\n- ollama\n---\nx\n")
+    (tmp_path / ".iirc" / "b.md").write_text("---\ntopics:\n- install\n---\ny\n")
+    iirc.main(["topics"])
+    assert capsys.readouterr().out.splitlines() == ["install (2)", "ollama (1)"]
 
 
 def _repo(tmp_path):
@@ -258,9 +263,9 @@ def test_index_carries_format_line_and_check(tmp_path, capsys):
     field = tmp_path / ".iirc"; field.mkdir()
     (field / "index.md").write_text("intro\n")
     iirc.set_root(tmp_path)
-    iirc.regenerate_index()
+    iirc.stamp_index()
     text = (field / "index.md").read_text()
-    assert "<!-- iirc format 1, written by iirc" in text
+    assert text.endswith("<!-- iirc format 1 -->\n")
     assert iirc.read_format() == 1
     (field / "index.md").write_text(text.replace("format 1", "format 2"))
     with pytest.raises(SystemExit) as e:

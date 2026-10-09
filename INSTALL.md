@@ -92,8 +92,8 @@ iirc init
 This creates `.iirc/index.md` from the template, appends the
 `## IIRC <!-- iirc -->` section to `CLAUDE.md`, and runs `git add` on
 both. Do not edit inside that marked section. `cmd_init` rewrites it
-whenever the plugin's text moves on. The top half of `index.md` is yours.
-The half below `<!-- generated below -->` is regenerated after every write.
+whenever the plugin's text moves on. `index.md` is yours to edit; iirc
+keeps only its last line, `<!-- iirc format 1 -->`.
 
 ### 7. Declare the plugin in project settings
 

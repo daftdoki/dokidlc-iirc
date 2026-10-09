@@ -88,7 +88,7 @@ line cannot carry color, so the line sits in the hint row.
 
 ## A plain `/iirc`
 
-A plain `/iirc` draws a card in place of its output row:
+A plain `/iirc`, or `/iirc help`, draws a card in place of its output row:
 
 ![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
 
@@ -104,7 +104,9 @@ A plain `/iirc` draws a card in place of its output row:
   each with its value and the command that changes it
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `index`, `search QUERY`, and `read PAGE`. A page you
+  `sync`, `stores`, `stats`, `index`, `search QUERY`, `topics`, and `read PAGE`.
+  `/iirc doctor` draws its checks as a card too: a result chip, the
+  failures with their fixes first, then notes, then the checks that passed. A page you
   read this way does not count toward the session's reads, which are the
   agent's.
 - ASK IN WORDS: `/iirc` followed by a request, such as
