@@ -2519,7 +2519,20 @@ def install_tool(pin: dict[str, str]) -> bool:
     return subprocess.run(cmd).returncode == 0
 
 
+def suspect_pages(pages: list[Path]) -> list[str]:
+    """Pages a cited file changed under since they cited it. Git only; never runs a page's check."""
+    return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
+    if args.health:
+        # for the /iirc card: trust and store state as JSON, no host probe and no pull
+        stores = [(s, list_pages(s.dir)) for s in live_stores()]
+        print(json.dumps({
+            "suspect": suspect_pages([p for _, ps in stores for p in ps]),
+            "stores": [{"name": s.name, "kind": s.kind, "pages": len(ps), "uncommitted": uncommitted(s), "unpushed": unpushed(s)} for s, ps in stores],
+        }))
+        return
     if args.brief:
         # stdin holds a hook payload only when hooks.json passed --hook; a person or a script
         # running the same command may have stdin on a pipe that never closes, and json.load waits for EOF
@@ -2555,7 +2568,6 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         else:
             mode = "string search"
         counts: dict[str, int] = {}
-        suspects = []
         cited = 0
         scan_start = time.monotonic()
         for page in pages:
@@ -2564,8 +2576,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 counts[str(t)] = counts.get(str(t), 0) + 1
             if same_project(fm):
                 cited += sum(1 for ref in fm.get("refs") or [] if not is_url(str(ref)))
-            if any(sig == "ref" for sig, _ in suspicion(fm)):   # git only; never check commands here
-                suspects.append(page.name)
+        suspects = suspect_pages(pages)
         scan = time.monotonic() - scan_start
         top = ", ".join(f"{t} {c}" for t, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
         parts = [f"iirc: {n} page{'' if n == 1 else 's'}, {mode}."] + pulled_notes
@@ -2728,7 +2739,14 @@ def cmd_stats(args: argparse.Namespace) -> None:
         # a suggested page counts as used once the session read or pulled it; names compare without a store prefix
         suggested = sorted({p for r in rows if r["cmd"] == "recall" for p in r.get("pages") or []})
         used = sorted(set(suggested) & {p.split("/")[-1] for p in read})
-        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used}))
+        # suggested and never read: recall's noise this session, most often suggested first
+        times: dict[str, int] = {}
+        for r in rows:
+            if r["cmd"] == "recall":
+                for p in r.get("pages") or []:
+                    times[p] = times.get(p, 0) + 1
+        missed = sorted(([p, n] for p, n in times.items() if p not in used), key=lambda pn: (-pn[1], pn[0]))
+        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}
@@ -2820,6 +2838,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fix", action="store_true")
     p.add_argument("--brief", action="store_true", help="one line, no host probe; nothing if no field")
     p.add_argument("--hook", action="store_true", help="with --brief: read the hook payload on stdin and frame the line for its event")
+    p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("setup", help="substring or semantic search, and the embedding host; prompts if no flags")

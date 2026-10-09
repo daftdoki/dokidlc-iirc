@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, ResolveInput } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { IircStatus, RecalledPage, SessionCounts, ToolNote } from '../types'
+import type { IircHealth, IircStatus, RecalledPage, SessionCounts, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -18,7 +18,8 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0 })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [] })
+const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
@@ -52,7 +53,16 @@ const PAGE_INDENT = 9
 const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
 // sample numbers for `/iirc demo`
 const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keyword', note: null }
-const DEMO_COUNTS: SessionCounts = { reads: 58, writes: 9, suggested: 42, used: 31 }
+const DEMO_COUNTS: SessionCounts = {
+  reads: 58, writes: 9, suggested: 42, used: 31,
+  missed: [['ollama-keep-alive-for-the-embed-model.md', 4], ['plugin-cache-keeps-old-versions.md', 3], ['gh-auth-on-a-new-machine.md', 2]],
+}
+const DEMO_HEALTH: IircHealth = {
+  suspect: [],
+  stores: [{ name: 'project', kind: 'project', pages: 97, uncommitted: 0, unpushed: 0 }, { name: 'shared', kind: 'remote', pages: 45, uncommitted: 0, unpushed: 0 }],
+}
+// pages the card names under SUGGESTED, NOT READ, and under TRUST
+const LIST_MAX = 3
 // the commands /iirc runs directly, as the card and the text help list them
 const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
@@ -222,7 +232,10 @@ async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<stri
   // the engine puts the plugin's name in front of a command's text
   const head = s === null ? 'no session brief yet' : statusText(s, await read($, counts)).replace(/^iirc: /, '')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
-  if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands`
+  if (view === 'home') {
+    await refreshHealth($)
+    return [head, ...healthLines(await read($, health), await read($, counts)), '/iirc <request> asks iirc in words; /iirc help lists the settings and commands'].join('\n')
+  }
   return [
     `status-line ${shown} · max-suggested ${max}`,
     '/iirc status-line on|off  show or hide the line under the prompt',
@@ -230,6 +243,23 @@ async function helpText($: EngineInterface, view: 'home' | 'help'): Promise<stri
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
   ].join('\n')
+}
+
+/** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
+export function healthLines(checkup: IircHealth | null, c: SessionCounts): string[] {
+  const lines: string[] = []
+  if (checkup) {
+    lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with iirc doubt`)
+    lines.push('stores: ' + checkup.stores.map(storeText).join('; ') + (checkup.stores.some(x => x.unpushed > 0) ? '; fix with iirc sync' : ''))
+  }
+  if (c.missed.length > 0) lines.push('suggested, not read: ' + c.missed.slice(0, LIST_MAX).map(([p, n]) => `${p} ×${n}`).join(', '))
+  return lines
+}
+
+/** One store as the card says it: its pages, then clean or what it holds back. */
+export function storeText(x: IircHealth['stores'][number]): string {
+  const held = [x.uncommitted > 0 ? `${x.uncommitted} not committed` : '', x.unpushed > 0 ? `${x.unpushed} not pushed` : ''].filter(Boolean)
+  return `${x.name} ${x.pages} ${x.pages === 1 ? 'page' : 'pages'}, ${held.length > 0 ? held.join(', ') : 'clean'}`
 }
 
 /** Ask iirc how many distinct pages this session has read and written, from its log. */
@@ -244,9 +274,18 @@ function refreshCounts($: EngineInterface) {
       if (ran.exitCode !== 0) return
       const got = JSON.parse(ran.stdout) as Record<string, unknown>
       const n = (key: string) => (Array.isArray(got[key]) ? (got[key] as unknown[]).length : 0)
-      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used') }))
+      const missed = Array.isArray(got.missed) ? (got.missed as [string, number][]) : []
+      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed }))
     })().catch(() => {})
   })
+}
+
+/** Ask iirc which pages are suspect and what each store holds back, for the card. */
+async function refreshHealth($: EngineInterface) {
+  try {
+    const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'doctor', '--health'], { cwd: await $.session.root(), timeoutMs: 15000 })
+    if (ran.exitCode === 0) await update($, health, () => JSON.parse(ran.stdout) as IircHealth)
+  } catch {}   // the card leaves TRUST and STORES out
 }
 
 /** Ask iirc for the brief and show it. Without --hook, doctor --brief reads no stdin and pulls nothing. */
@@ -272,6 +311,7 @@ export const register: Register = on => {
     $.ui.status(undefined)   // earlier versions drew the brief on the status line
     refreshBrief($)
     refreshCounts($)
+    $.clock.after(0, () => void refreshHealth($))
     try {
       if ((await $.store.get('isStatusShown')) === false) await update($, isStatusShown, () => false)
     } catch {}   // the line stays on, the default
@@ -364,8 +404,8 @@ export const register: Register = on => {
     }
     if (!isIirc || (args !== '' && args !== 'status' && args !== 'help' && args !== 'demo') || e.props.isErrored) return next(e)
     const view = args === 'help' ? 'help' : 'home'
-    if (args === 'demo') return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3)
-    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
+    if (args === 'demo') return drawHelp($, e, view, DEMO_STATUS, DEMO_COUNTS, true, 3, DEMO_HEALTH)
+    return drawHelp($, e, view, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested), await read($, health))
   })
 
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
@@ -450,8 +490,12 @@ function mix(a: string, b: string, t: number): string {
 
 /** A plain /iirc draws the home card: status and counts. /iirc help draws the settings and every command. */
 // The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
-function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
+function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
   const { Box, Text } = $.ui.resolve(e)
+  const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
+  // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
+  const isHealthWarn = !!checkup && (checkup.suspect.length > 0 || isUnpushed)
+  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: checkup!.suspect.length > 0 ? 'iirc doubt' : 'iirc sync' }
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
   // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
@@ -510,6 +554,46 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       <Text color="subtle">{what}</Text>
     </Box>
   )
+  // TRUST and STORES: a mark, the fact, and the command that clears it, under a 12-column label like STATUS
+  const fact = (key: string, label: string, isOk: boolean, pieces: RenderChildren[], fix?: string) => (
+    <Box key={key} flexDirection="row">
+      <Box width={12} flexShrink={0}>{label ? heading(label) : <Text> </Text>}</Box>
+      <Text color={isOk ? LEVEL_COLOR.ok : LEVEL_COLOR.warn}>{isOk ? '✔ ' : '▲ '}</Text>
+      {pieces}
+      {fix && <Text color="subtle">{'   fix with '}</Text>}
+      {fix && <Text bold color="claude">{fix}</Text>}
+    </Box>
+  )
+  const trustRows: RenderChildren[] = []
+  const storeRows: RenderChildren[] = []
+  const widthOf = (text: string, fix?: string) => 12 + 2 + text.length + (fix ? '   fix with '.length + fix.length : 0)
+  const factWidths: number[] = []
+  if (checkup) {
+    const n = checkup.suspect.length
+    const text = n === 0 ? 'no suspect pages' : `${n} suspect ${n === 1 ? 'page' : 'pages'}: a cited file changed`
+    trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? 'iirc doubt' : undefined))
+    factWidths.push(widthOf(text, n > 0 ? 'iirc doubt' : undefined))
+    for (const name of checkup.suspect.slice(0, LIST_MAX)) {
+      trustRows.push(
+        <Box key={`s${name}`} flexDirection="row" paddingLeft={14}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor>{name}</Text>
+        </Box>,
+      )
+      factWidths.push(14 + 2 + name.length)
+    }
+    checkup.stores.forEach((x, k) => {
+      const isOk = x.uncommitted === 0 && x.unpushed === 0
+      const rest = storeText(x).slice(x.name.length)
+      const fix = x.unpushed > 0 ? 'iirc sync' : undefined
+      storeRows.push(fact(`st${k}`, k === 0 ? 'STORES' : '', isOk, [
+        <Text key="n" bold color="claude">{x.name}</Text>,
+        <Text key="r" color="subtle">{rest}</Text>,
+      ], fix))
+      factWidths.push(widthOf(x.name + rest, fix))
+    })
+  }
+  const missed = c.missed.slice(0, LIST_MAX)
   const helpBody = (
     <Box flexDirection="column">
       <Text> </Text>
@@ -540,6 +624,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       widths.push(15 + 2 + 'THIS SESSION'.length, 2 + 13 * (tiles.length - 1) + Math.max(n.length, label.length))
     }
     if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length)
+    widths.push(...factWidths)
+    if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name, n]) => 4 + name.length + ` ×${n}`.length))
   } else {
     widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
@@ -588,6 +674,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
       )}
       {view === 'home' && <Text> </Text>}
       {view === 'home' && <Box flexDirection="row">{statusRow}</Box>}
+      {view === 'home' && trustRows}
+      {view === 'home' && storeRows}
       {view === 'home' && tiles.length > 0 && <Text> </Text>}
       {/* pages counts the store; the other tiles and the hit rate count this session */}
       {view === 'home' && tiles.length > 0 && (
@@ -623,6 +711,16 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: 'home' | 'help', s:
           <Text color="subtle">{' suggested pages were read'}</Text>
         </Box>
       )}
+      {/* recall's noise: pages it kept suggesting that nobody read, most often first */}
+      {view === 'home' && missed.length > 0 && <Text> </Text>}
+      {view === 'home' && missed.length > 0 && heading('SUGGESTED, NOT READ')}
+      {view === 'home' && missed.map(([name, n]) => (
+        <Box key={`m${name}`} flexDirection="row" paddingLeft={2}>
+          <Text color="claude">{'› '}</Text>
+          <Text dimColor>{name}</Text>
+          <Text color={LEVEL_COLOR.warn}>{` ×${n}`}</Text>
+        </Box>
+      ))}
     </Box>
   )
 }

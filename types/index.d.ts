@@ -5,8 +5,14 @@ export type RecalledPage = { name: string; summary: string; isSuspect: boolean; 
 /** What the hint row shows of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears it. */
 export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string }
 
-/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read. */
-export type SessionCounts = { reads: number; writes: number; suggested: number; used: number }
+/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `missed` is each page suggested and never read, with how often, most first. */
+export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][] }
+
+/** One store's state for the card, from `iirc doctor --health`. */
+export type StoreHealth = { name: string; kind: string; pages: number; uncommitted: number; unpushed: number }
+
+/** Trust and store state for the card: pages whose cited file changed, and each store. */
+export type IircHealth = { suspect: string[]; stores: StoreHealth[] }
 
 export type ToolNote = { pages: RecalledPage[]; recovered: { command: string; failures: number }[] }
 
@@ -25,6 +31,8 @@ declare module 'claude-code' {
       counts: SessionCounts
       /** Whether the hint row shows the brief; `/iirc status on|off`, kept in $.store. */
       isStatusShown: boolean
+      /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
+      health: IircHealth | null
       /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
     }

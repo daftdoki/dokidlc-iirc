@@ -321,6 +321,19 @@ def test_doctor_brief_guides_setup(tmp_path, monkeypatch, capsys):
     assert "memoryfield-tool is not at the pin" in out and "iirc doctor --fix" in out
 
 
+def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
+    iirc.main(["setup", "--substring"]); iirc.main(["init"]); capsys.readouterr()
+    monkeypatch.setattr(iirc, "suspicion", lambda fm, *a, **k: [("ref", "x")])
+    (tmp_path / ".iirc" / "old.md").write_text("---\ntitle: t\n---\nbody\n")
+    iirc.main(["doctor", "--health"])
+    out = json.loads(capsys.readouterr().out)
+    assert "old.md" in out["suspect"]
+    assert [(s["name"], s["kind"], s["unpushed"]) for s in out["stores"]] == [("project", "project", 0)]
+
+
 def test_git_checks_and_init_staging(tmp_path, monkeypatch):
     import subprocess
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
@@ -676,6 +689,17 @@ def test_stats_session_counts_suggested_pages_used(tmp_path, monkeypatch, capsys
     iirc.main(["stats", "--session", "s6"])
     out = json.loads(capsys.readouterr().out)
     assert out["suggested"] == ["a.md", "b.md", "c.md"] and out["used"] == ["b.md"]
+    assert out["missed"] == [["a.md", 1], ["c.md", 1]]
+
+
+def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s7"); iirc.set_root(tmp_path)
+    for pages in (["a.md", "b.md"], ["b.md"], ["b.md", "c.md"]):
+        iirc.log_event("recall", hits=len(pages), pages=pages, via="prompt")
+    iirc.log_event("read", pages=["c.md"])
+    iirc.main(["stats", "--session", "s7"])
+    assert json.loads(capsys.readouterr().out)["missed"] == [["b.md", 3], ["a.md", 1]]
 
 
 def test_a_term_match_needs_an_identifier():
@@ -870,7 +894,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": []}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": []}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

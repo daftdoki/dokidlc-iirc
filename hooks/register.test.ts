@@ -93,17 +93,17 @@ test('parses the recovery nudge and the brief', () => {
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc setup` with their answer.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0 })).toBe('iirc: needs setup · run iirc setup')
+  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [] })).toBe('iirc: needs setup · run iirc setup')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc setup` to fix). Topics: x 5.')!
   expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc setup' })
   expect(down.warnings).toEqual([])
-  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0 })).toBe('iirc: needs init · run iirc init')
+  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [] })).toBe('iirc: needs init · run iirc init')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc doubt')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
-  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2 })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
-  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0 })).toBe('iirc: needs migration · run iirc migrate')
+  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2, missed: [] })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
+  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [] })).toBe('iirc: needs migration · run iirc migrate')
 })
 
 test('wraps page lines by word and keeps each part styled', () => {
@@ -405,4 +405,38 @@ test('leaves a prompt with no recall alone', async ($: Engine, on: On) => {
     props: { text: 'x', origin: { kind: 'composer' }, isExpanded: false },
   })
   expect(await ui.find({ text: 'suggested' })).toBeUndefined()
+})
+
+test('a plain /iirc shows suspect pages, store state, and pages suggested but not read', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('session.id', () => ({ value: 's1' }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    if (e.argv.includes('--health')) {
+      return ran(JSON.stringify({ suspect: ['old-fact.md'], stores: [{ name: 'shared', kind: 'remote', pages: 5, uncommitted: 0, unpushed: 2 }] }))
+    }
+    if (e.argv.includes('stats')) {
+      return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'noisy.md'], used: ['a.md'], missed: [['noisy.md', 4]] }))
+    }
+    return ran(BRIEF)
+  })
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 't9' })
+  await clock.settle()
+  await hookRow($, 'SessionStart', BRIEF, 'h9')
+  const text = (await $.command.run({ command: 'iirc', args: '' })).text
+  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc doubt')
+  expect(text).toContain('stores: shared 5 pages, 2 not pushed; fix with iirc sync')
+  expect(text).toContain('suggested, not read: noisy.md ×4')
+  const card = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'health',
+    props: { command: 'iirc', args: '', text, isErrored: false },
+  })
+  expect(await card.find({ text: '1 suspect page: a cited file changed' })).toBeDefined()
+  expect(await card.find({ text: 'old-fact.md' })).toBeDefined()
+  expect(await card.find({ text: ' 5 pages, 2 not pushed' })).toBeDefined()
+  expect(await card.find({ text: 'iirc sync' })).toBeDefined()
+  expect(await card.find({ text: 'noisy.md' })).toBeDefined()
+  expect(await card.find({ text: ' ×4' })).toBeDefined()
 })
