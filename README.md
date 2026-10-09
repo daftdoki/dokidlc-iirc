@@ -151,7 +151,7 @@ cannot. The plugin never pushes the project repository itself.
 The hooks tell the agent things you do not see. A hooks module in the same
 plugin draws them for you:
 
-- Under your prompt, `+ [2] pages retrieved`. Click the `+` to list
+- Under your prompt, `+ iirc: [2] pages retrieved`. Click the `+` to list
   the pages, with a yellow diamond on a page iirc suspects is stale.
 - Under a failed command, the pages its error recalled, in the same form.
 - Under a command that failed and then worked, a row saying the agent was
@@ -159,10 +159,9 @@ plugin draws them for you:
 - Under the prompt, beside Claude Code's own hint, one line with the page
   count, how many pages this session has read and written, and the search
   mode: `● iirc: [73] pages · [3] reads · [1] writes · [semantic+keyword] mode`.
-  The circle is
-  green when all is well, yellow when the session-start check has a
-  warning such as a suspect page, and red when iirc needs setup or
-  migration. The mode is `keyword` without an embedding host. A `write`,
+  The circle is green when all is well, yellow when the session-start
+  check has a warning such as a suspect page, and red when iirc needs
+  setup or migration. The mode is `keyword` without an embedding host. A `write`,
   `delete`, or `sync` updates the page count, a `read` or `pull` the
   reads, and a `write` the writes. `/iirc status off` hides the line and
   `/iirc status on` brings it back; it is on by default, and the choice

@@ -109,6 +109,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       props: { text: 'a prompt', origin: { kind: 'composer' }, isExpanded: false },
     })
     expect(await ui.find({ text: 'pages retrieved' })).toBeDefined()
+    expect(await ui.find({ text: 'iirc: ' })).toBeDefined()
     expect(await ui.find({ text: 'alpha-page' })).toBeUndefined()
     await ui.press({ key: 'toggle-p1' })
     expect(await ui.find({ text: 'alpha-page' })).toBeDefined()

@@ -310,6 +310,7 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
       <Box flexDirection="row">
         <Button key={`toggle-${id}`} plain label={isOpen ? '−' : '+'} onPress={toggle} />
         <Text> </Text>
+        <Text bold color="claude">iirc: </Text>
         <Text color="subtle">[</Text>
         <Text bold color="claude">{String(pages.length)}</Text>
         <Text color="subtle">] </Text>
