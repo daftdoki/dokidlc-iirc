@@ -1,8 +1,9 @@
 # How iirc works
 
-The hooks the plugin registers, the shape of a page, and how search ranks.
-The README says what the plugin does and how to get it running; this is
-the reference behind it.
+The hooks the plugin registers, the stores, the shape of a page, and how
+search ranks. The README says what the plugin does and how to get it
+running; this is the reference behind it. What the hooks module draws for
+you is in [ui.md](ui.md).
 
 ## Hooks
 
@@ -11,8 +12,8 @@ page's check command.
 
 | When | What the agent sees |
 |---|---|
-| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, iirc changes not committed or not pushed, the count of near-duplicate pairs that `iirc doctor` names, and the scan time when it passed 5 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
-| Every prompt you send | If pages match, one line naming up to three with the `iirc read` command for each. Short prompts, one-word answers, and slash commands are skipped. At most 400 bytes. |
+| Session start, and each subagent start | One line: page count, search mode, top topics, any page whose cited file changed, iirc changes not committed or not pushed, the count of near-duplicate pairs (0.07 apart or closer, not counting a pair of different kinds that links one to the other with `[[name]]`), and the scan time when it passed 5 seconds. At session start only, each remote store is fast-forwarded within five seconds, and a background reindex starts when pages arrived. After a compaction, a reminder to write if the session has written nothing. |
+| Every prompt you send | If pages match, one line naming up to three (`iirc max-suggested N` changes it) with the `iirc read` command for each and how it matched, such as `[69% match, meaning+term]`. Short prompts, one-word answers, and slash commands are skipped. The byte limit grows with the number, so no page is dropped for length. |
 | A shell command fails | The same line, searched with the error text. Silent when the error says nothing but an exit code. |
 | A shell command works after failing twice | A reminder to write the fix as a procedure page, once per command. |
 | The agent is about to stop | Once per session, only when a command failed twice then worked and nothing was written: write it, or say there is nothing worth a page. |
@@ -40,6 +41,29 @@ local commit for `iirc sync`. A page written to a remote store gets
 `host/owner/repo`, and its file refs read `PROJECT:path@sha`. Suspicion,
 checks, and `verify` act only on pages of the current project. Search
 ranks the current project's pages first and hides nothing.
+
+### Adding a remote store
+
+A remote store is a separate git repository that several projects or
+machines share. Create the repository, then ask the agent to add it; it
+runs `iirc stores add agent URL --default`, which writes
+`.claude/iirc.toml`, clones the repository, and commits the config:
+
+```toml
+write = "agent"          # the store `iirc write` uses without --store
+
+[stores.project]
+kind = "project"
+path = ".iirc"
+
+[stores.agent]
+kind = "remote"
+url = "git@github.com:you/agent-iirc.git"
+```
+
+Search reads every store, and with two or more each result names its
+store, as in `agent/ollama-host.md`. No commit is made during a merge or
+rebase, and the plugin never pushes the project repository itself.
 
 ## IIRC pages
 
