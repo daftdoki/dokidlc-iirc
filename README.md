@@ -165,6 +165,7 @@ agent follows are in [skills/iirc/SKILL.md](skills/iirc/SKILL.md).
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
 | the line under the prompt | the plugin's store, per machine | `/iirc status-line on` or `off` |
 | the drawn rows; the raw hook text | `.claude/iirc.toml`, `ui` and `show_hooks` | editing the file |
+| how close a page must be for recall to suggest it | `.claude/iirc.toml`, `[recall]`, see [the recall gate](docs/how-it-works.md#the-recall-gate) | editing the file; `iirc knobs` prints them |
 | the stores | `.claude/iirc.toml` | `iirc stores add`, see [how-it-works.md](docs/how-it-works.md#adding-a-remote-store) |
 
 An `OLLAMA_HOST` exported in the shell turns semantic search on and

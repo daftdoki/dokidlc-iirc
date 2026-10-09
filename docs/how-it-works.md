@@ -17,6 +17,7 @@ page's check command.
 | A shell command fails | The same line, searched with the error text. Silent when the error says nothing but an exit code. |
 | A shell command works after failing twice | A reminder to write the fix as a procedure page, once per command. |
 | The agent is about to stop | Once per session, only when a command failed twice then worked and nothing was written: write it, or say there is nothing worth a page. |
+| Compaction, and the session's end (`/clear`, exit, logout) | Nothing. iirc logs the session's numbers for tuning recall; see [What iirc records](#what-iirc-records). |
 | The agent runs `iirc doubt --network` or `iirc approve` | Claude Code asks you to approve it. |
 | The agent opens a page file raw, with `cat`, `head`, `sed`, `tail`, `less`, or `more`, or with the Read tool | The call is refused and the agent is told to use `iirc read`, which prints the page with its trust markers and the commands that fix it, and to run `iirc doctor --fix` if that command itself fails. |
 
@@ -155,6 +156,31 @@ pysqlite3-install-override.md: Why memoryfield-tool needs a uv overrides file ..
 Semantic search answers questions. String search finds identifiers. A
 page that both searches found is the page to trust.
 
+### The recall gate
+
+Search ranks the pages; the gate decides which ones the line under a
+prompt names. A page passes on one of three rules:
+
+| Rule | Passes when |
+|---|---|
+| meaning+term | semantic search found it within `both`, and string search matched an identifier (a word with a digit, dot, hyphen, or underscore) or a rare word of five letters or more that names the page |
+| meaning | semantic search found it within `semantic_only` |
+| term | only string search found it, on an identifier |
+
+The two distances are knobs, set per repository in `.claude/iirc.toml`,
+because the right distance depends on the pages in the field:
+
+```toml
+[recall]
+semantic_only = 0.28   # 0.10 to 0.60
+both = 0.34            # 0.10 to 0.60, and at least semantic_only
+```
+
+`iirc knobs` prints the values in force and their ranges. A value out of
+range is a configuration error: commands stop and say so, and the hooks
+stay silent until it is fixed. The match a line shows, `69% match`, is
+100% less the distance.
+
 ### Without ollama
 
 Some machines cannot run or reach ollama. On such a machine, tell the
@@ -170,3 +196,21 @@ in the repository. The wrapper updates the index after each write. On a
 fresh clone, the wrapper builds the index again. You can delete the index
 at any time and lose nothing. The pages in `.iirc/` are the only source
 of truth.
+
+## What iirc records
+
+iirc keeps a record of what recall did, on this machine only, in
+`~/.local/state/dokidlc-iirc/`. Nothing here is committed or pushed.
+`iirc stats`, and the `/iirc` cards read it, and it is the evidence for tuning recall.
+
+| File | One row per | Holds |
+|---|---|---|
+| `log.jsonl` | command and hook | reads, writes, searches, verifies; each recall's pages and scores, its time in milliseconds, the transcript path, and a hash of the prompt; each prompt recall skipped and why; at session start, the conditions recall ran under (plugin commit, knobs, `max_suggested`, mode, memoryfield-tool commit, page count); at compaction and the session's end, the session in numbers |
+| `eval-YYYY-MM.jsonl` | candidate page | the 25 best candidates of each recall, passed or not: rank, distance, which searches found it, its rare and head terms, the rule that passed it, or why not (`too_far`, `needs_term`, `plain_word`, `common_term`, `over_max`, `line_cut`) |
+| `prompts/SESSION.jsonl` | prompt | the first 300 characters of each prompt, with its hash and the recall it started |
+
+The prompt text never goes into `log.jsonl`; the hash finds the prompt in
+the session's transcript. The excerpts exist because Claude Code deletes
+transcripts after 30 days by default, and tuning recall needs the prompt to
+judge a suggestion. `log.jsonl` moves to `log-YYYY-MM.jsonl` when a new
+month starts, and any of these files untouched for 90 days is deleted.

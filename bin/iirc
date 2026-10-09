@@ -51,6 +51,7 @@ import tempfile
 import time
 import tomllib
 import urllib.error
+import uuid
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,14 +87,16 @@ def project_root() -> Path:
 
 def set_root(root: Path) -> None:
     """Set the project root and load its stores. A bad store config is kept as CONFIG_ERROR; commands die on it, hooks stay quiet."""
-    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS
+    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL
     ROOT = Path(root).resolve()
     try:
         STORES, WRITE_DEFAULT = load_stores(ROOT)
         SHOW_HOOKS = read_store_config(ROOT).get("show_hooks", False)
+        RECALL = load_knobs(read_store_config(ROOT))
         CONFIG_ERROR = None
     except ConfigError as e:
         STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
+        RECALL = {k: v[0] for k, v in KNOBS.items()}
 
 
 def plugin_commit() -> str:
@@ -223,6 +226,33 @@ STORES: list[Store] = []
 WRITE_DEFAULT: str | None = None
 CONFIG_ERROR: str | None = None
 SHOW_HOOKS = False   # show_hooks in .claude/iirc.toml: the user also sees what the hooks tell the model
+
+# The recall gate's knobs, [recall] in .claude/iirc.toml: per repository, because the right
+# distance depends on the pages in the field. name: (default, low, high, what it sets)
+KNOBS: dict[str, tuple[float, float, float, str]] = {
+    "semantic_only": (0.28, 0.10, 0.60, "how close, as cosine distance, a semantic hit must be with no strong term"),
+    "both": (0.34, 0.10, 0.60, "how close a semantic hit backed by an identifier or a rare page word must be"),
+}
+RECALL: dict[str, float] = {k: v[0] for k, v in KNOBS.items()}
+
+
+def load_knobs(cfg: dict) -> dict[str, float]:
+    """The [recall] table, each knob checked against its range; a missing knob takes its default."""
+    sec = cfg.get("recall", {})
+    if not isinstance(sec, dict):
+        raise ConfigError(f"{STORE_CONFIG}: [recall] must be a table")
+    unknown = sorted(set(sec) - set(KNOBS))
+    if unknown:
+        raise ConfigError(f"{STORE_CONFIG}: [recall] has no knob {unknown[0]!r}; the knobs are {', '.join(KNOBS)}")
+    out: dict[str, float] = {}
+    for name, (default, low, high, _) in KNOBS.items():
+        v = sec.get(name, default)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not low <= v <= high:
+            raise ConfigError(f"{STORE_CONFIG}: [recall] {name} must be a number from {low} to {high}")
+        out[name] = float(v)
+    if out["both"] < out["semantic_only"]:
+        raise ConfigError(f"{STORE_CONFIG}: [recall] both must be at least semantic_only; a term backs the looser gate")
+    return out
 
 
 def strip_ansi(text: str) -> str:
@@ -486,15 +516,66 @@ def log_event(cmd: str, **fields) -> None:
         pass
 
 
+RETAIN_DAYS = 90   # rotated logs, eval rows, and prompt excerpts older than this are deleted
+
+
+def eval_event(rows: list[dict]) -> None:
+    """Rows for tuning recall, in this month's eval file, beside the log. Never raises."""
+    try:
+        state_dir().mkdir(parents=True, exist_ok=True)
+        base = {"ts": now_iso(), "session": session_id(), "repo": str(ROOT)}
+        with (state_dir() / f"eval-{datetime.now(UTC):%Y-%m}.jsonl").open("a") as f:
+            for row in rows:
+                f.write(json.dumps({**base, **row}, default=str) + "\n")
+    except OSError:
+        pass
+
+
+def keep_prompt(prompt: str, **fields) -> None:
+    """The first 300 characters of a prompt, in this session's own file, for tuning recall, to read
+    after the transcript is gone. Kept RETAIN_DAYS on this machine; never in the log or in git."""
+    try:
+        d = state_dir() / "prompts"
+        d.mkdir(parents=True, exist_ok=True)
+        row = {"ts": now_iso(), "prompt_hash": prompt_hash(prompt), "excerpt": clean(prompt, 300), **fields}
+        with (d / f"{re.sub(r'[^A-Za-z0-9-]', '_', session_id())}.jsonl").open("a") as f:
+            f.write(json.dumps(row, default=str) + "\n")
+    except OSError:
+        pass
+
+
+def prompt_hash(text: str) -> str:
+    """Joins a log row to its prompt in the transcript without the text: sha256, first 16 hex."""
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def rotate_logs() -> None:
+    """Move log.jsonl aside once its first row is from an earlier month, and delete what is past RETAIN_DAYS."""
+    d = state_dir()
+    log = d / "log.jsonl"
+    try:
+        if log.is_file():
+            with log.open() as f:
+                first = json.loads(f.readline() or "{}").get("ts", "")
+            month = first[:7]
+            if re.fullmatch(r"\d{4}-\d{2}", month) and month < f"{datetime.now(UTC):%Y-%m}" and not (d / f"log-{month}.jsonl").exists():
+                log.rename(d / f"log-{month}.jsonl")
+        cutoff = time.time() - RETAIN_DAYS * 86400
+        for old in [*d.glob("log-*.jsonl"), *d.glob("eval-*.jsonl"), *(d / "prompts").glob("*.jsonl")]:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+    except (OSError, ValueError):
+        pass
+
+
 def read_log(days: int | None = None, session: str | None = None) -> list[dict]:
-    path = state_dir() / "log.jsonl"
-    if not path.is_file():
-        return []
+    """Rows from the log and its rotated months, oldest file first."""
     rows = []
     cutoff = None
     if days is not None:
         cutoff = datetime.now(UTC).timestamp() - days * 86400
-    for line in path.read_text().splitlines():
+    lines = [line for path in sorted(state_dir().glob("log*.jsonl")) for line in path.read_text().splitlines()]
+    for line in lines:
         try:
             row = json.loads(line)
         except json.JSONDecodeError:
@@ -808,8 +889,6 @@ def row_current(r: dict) -> bool:
 
 
 RECALL_MIN_PROMPT = 40
-RECALL_SEMANTIC_ONLY = 0.28      # a semantic hit alone must be this close
-RECALL_BOTH = 0.34               # a semantic hit backed by a strong term must be this close
 MAX_SUGGESTED = 3            # pages a recall line suggests at most; `iirc max-suggested N` changes it per machine
 IDENTIFIER_RE = re.compile(r"[0-9._-]")
 ANSWER_RE = re.compile(r"^(yes|yeah|no|nope|ok|okay|agreed?|go( ahead)?|sure|done|thanks?|correct)\b", re.I)
@@ -826,6 +905,14 @@ def recall_max_bytes() -> int:
     return 120 + 200 * max_suggested()
 
 
+def cmd_knobs(args: argparse.Namespace) -> None:
+    """The recall gate's knobs: each value, its default and range, and what it sets."""
+    print(f"[recall] in {STORE_CONFIG}; a knob left out takes its default")
+    for name, (default, low, high, what) in KNOBS.items():
+        mark = "" if RECALL[name] == default else f"  (default {default})"
+        print(f"{name} = {RECALL[name]:g}{mark}  {low:g} to {high:g}: {what}")
+
+
 def cmd_max_suggested(args: argparse.Namespace) -> None:
     if args.n is None:
         n = max_suggested()
@@ -839,12 +926,32 @@ def cmd_max_suggested(args: argparse.Namespace) -> None:
 
 def recall_worthy(prompt: str) -> bool:
     """Skip short answers, one-word replies, interview replies, and slash commands."""
+    return skip_reason(prompt) is None
+
+
+def skip_reason(prompt: str) -> str | None:
+    """Why recall passes a prompt by, or None when it searches."""
     p = prompt.strip()
-    return len(p) >= RECALL_MIN_PROMPT and not re.match(r"^\d+\s*[>.)]", p) and not p.startswith("/") and not (len(p) < 80 and ANSWER_RE.match(p))
+    if p.startswith("/"):
+        return "slash_command"
+    if len(p) < RECALL_MIN_PROMPT:
+        return "short"
+    if re.match(r"^\d+\s*[>.)]", p):
+        return "numbered_answer"
+    if len(p) < 80 and ANSWER_RE.match(p):
+        return "answer"
+    return None
 
 
 def recall_filter(rows: list[dict]) -> list[dict]:
-    """Keep a page only on evidence that survives a busy field.
+    """The pages recall suggests, at most max_suggested(), each with the rule that let it through."""
+    return [r for r in recall_verdicts(rows) if r["verdict"] == "passed"]
+
+
+def recall_verdicts(rows: list[dict]) -> list[dict]:
+    """Every candidate, with its verdict: passed, over_max, or why the gate refused it.
+
+    Keep a page only on evidence that survives a busy field.
 
     Semantic and a rare term, close enough; or semantic alone, very close; or a
     string hit on an identifier (digits or punctuation) with no semantic hit.
@@ -852,8 +959,9 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     none of the 29 plain-word term matches was relevant. Common terms, ones in
     over a third of pages, count for nothing.
     """
-    keep = []
-    for r in rows:
+    out = []
+    kept = 0
+    for rank, r in enumerate(rows):
         via = r.get("via") or []
         sem = "semantic" in via and isinstance(r.get("distance"), (int, float))   # the tool's own fallback rows carry no distance
         rare = r.get("rare_terms") or []
@@ -861,13 +969,24 @@ def recall_filter(rows: list[dict]) -> list[dict]:
         d = r.get("distance") if isinstance(r.get("distance"), (int, float)) else None
         # an identifier, or a rare word of five letters or more that names the page itself
         strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 for t in head)
-        if sem and strong_term and d is not None and d <= RECALL_BOTH:
-            keep.append({**r, "rule": "meaning+term"})
-        elif sem and d is not None and d <= RECALL_SEMANTIC_ONLY:
-            keep.append({**r, "rule": "meaning"})
+        rule = reason = None
+        if sem and strong_term and d is not None and d <= RECALL["both"]:
+            rule = "meaning+term"
+        elif sem and d is not None and d <= RECALL["semantic_only"]:
+            rule = "meaning"
         elif not sem and any(IDENTIFIER_RE.search(t) for t in rare):
-            keep.append({**r, "rule": "term"})
-    return keep[:max_suggested()]
+            rule = "term"
+        elif sem and d is not None and d <= RECALL["both"]:
+            reason = "needs_term"     # close enough had a strong term backed it
+        elif sem:
+            reason = "too_far"
+        else:
+            reason = "plain_word" if rare else "common_term"
+        if rule is not None:
+            reason = "passed" if kept < max_suggested() else "over_max"
+            kept += reason == "passed"
+        out.append({**r, "rank": rank, "rule": rule, "verdict": reason})
+    return out
 
 
 def clean(text: str, limit: int = 160) -> str:
@@ -973,6 +1092,37 @@ def recovered_commands(rows: list[dict] | None = None) -> list[tuple[str, int]]:
     return out
 
 
+EVAL_CANDIDATES = 25   # candidates logged per recall, best ranked first
+
+
+def run_recall(query: str, via: str, event: dict, **keys) -> list[dict]:
+    """Search, gate, and log one recall: the pages its line names, in order.
+
+    The log row says what the line suggested; the eval rows say what every candidate
+    scored and why each one the line left out was left out, for tuning recall.
+    """
+    start = time.monotonic()
+    verdicts = recall_verdicts(hybrid_search(query))
+    passed = [r for r in verdicts if r["verdict"] == "passed"]
+    named = recall_line(passed).count("`iirc read ")
+    for r in passed[named:]:
+        r["verdict"] = "line_cut"   # dropped to keep the line under recall_max_bytes()
+    rows = passed[:named]
+    recall_id = uuid.uuid4().hex[:12]
+    ms = round((time.monotonic() - start) * 1000)
+    log_event("recall", hits=len(passed), pages=[r["filename"] for r in rows], scores=[match_text(r) for r in rows], via=via,
+              chars=len(query), recall_id=recall_id, transcript=event.get("transcript_path"), ms=ms, **keys)
+    if via == "prompt":
+        keep_prompt(str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or ""), recall_id=recall_id)
+    eval_event([{
+        "cmd": "candidate", "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
+        "distance": r.get("distance") if isinstance(r.get("distance"), (int, float)) else None,
+        "paths": r.get("via") or [], "rare_terms": r.get("rare_terms") or [], "head_terms": r.get("head_terms") or [],
+        "rule": r["rule"], "verdict": r["verdict"], "kind": (r.get("fm") or {}).get("kind"),
+    } for r in verdicts[:EVAL_CANDIDATES]])
+    return rows
+
+
 def cmd_recall(args: argparse.Namespace) -> None:
     """Hook entry. Reads the hook JSON on stdin, prints at most one line. Never fails the hook."""
     event = read_event()
@@ -1000,21 +1150,22 @@ def cmd_recall(args: argparse.Namespace) -> None:
             if not terms:
                 return
             query = " ".join([first] + terms).strip()
-            passed = recall_filter(hybrid_search(query))
-            line = recall_line(passed)
-            rows = passed[: line.count("`iirc read ")]   # hits counts what passed; pages, what the line kept
-            log_event("recall", hits=len(passed), pages=[r["filename"] for r in rows], scores=[match_text(r) for r in rows], via="failure", chars=len(query))
+            rows = run_recall(query, "failure", event, query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
+            line = recall_line(rows)
             if line:
                 print(hook_output("PostToolUseFailure", line))
             return
         prompt = str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or "")
-        if not recall_worthy(prompt):
+        if not prompt.strip():
             return
-        passed = recall_filter(hybrid_search(prompt))
-        line = recall_line(passed)
-        rows = passed[: line.count("`iirc read ")]   # hits counts what passed; pages, what the line kept
-        # the prompt text itself is not logged; it may hold secrets
-        log_event("recall", hits=len(passed), pages=[r["filename"] for r in rows], scores=[match_text(r) for r in rows], via="prompt", chars=len(prompt))
+        reason = skip_reason(prompt)
+        # the prompt text itself is not logged, it may hold secrets; its hash finds it in the transcript
+        if reason:
+            log_event("skipped", reason=reason, chars=len(prompt), prompt_hash=prompt_hash(prompt), transcript=event.get("transcript_path"))
+            keep_prompt(prompt, skipped=reason)
+            return
+        rows = run_recall(prompt, "prompt", event, prompt_hash=prompt_hash(prompt))
+        line = recall_line(rows)
         if line:
             print(hook_output("UserPromptSubmit", line))
     except SystemExit:
@@ -2519,6 +2670,12 @@ def install_tool(pin: dict[str, str]) -> bool:
     return subprocess.run(cmd).returncode == 0
 
 
+def conditions(mode: str, pages: int) -> dict:
+    """What recall ran with: the plugin, the gate's knobs, the line's size, the search mode, the engine, the field's size."""
+    return {"commit": plugin_commit(), "knobs": dict(RECALL), "max_suggested": max_suggested(), "mode": mode,
+            "tool_rev": (read_pin() or {}).get("tool_rev"), "pages": pages}
+
+
 def suspect_pages(pages: list[Path]) -> list[str]:
     """Pages a cited file changed under since they cited it. Git only; never runs a page's check."""
     return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
@@ -2563,7 +2720,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         pages = [p for _, ps in per_store for p in ps]
         n = len(pages)
         if semantic_enabled():
-            url, source, answers = resolve_host()
+            url, _, answers = resolve_host()   # not `source`: that is the hook's, and the compact nudge reads it
             mode = f"semantic via {url.replace('http://', '')}" if answers else f"string only ({url.replace('http://', '')} does not answer; `iirc setup` to fix)"
         else:
             mode = "string search"
@@ -2608,6 +2765,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             close = 0
         if close:
             parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.")
+        if hook == "SessionStart":
+            # the conditions this session's recall ran under, so an analysis compares like with like
+            log_event("start", source=source, transcript=event.get("transcript_path"), **conditions(mode, n))
         parts.append("A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.")
         if source == "compact" and session_writes() == 0:
             parts.append("Context was just compacted and this session wrote no iirc. If the summary above names a fix that took more than one attempt, write it now.")
@@ -2730,34 +2890,61 @@ def cmd_nudge(args: argparse.Namespace) -> None:
         print(hook_output("Stop", f"iirc: before you stop, note that {names} failed and then worked this session, and nothing was written to iirc. If the fix was not obvious from a file in the repository, write one page per finding with `iirc write`. If there is nothing worth a page, say so and stop. This appears once per session."))
 
 
+def session_summary(session: str) -> dict:
+    """One session in numbers: distinct pages read or pulled, written, suggested by recall, suggested then read,
+    suggested and never read, the average match, and what tuning recall looks at first."""
+    rows = [r for r in read_log(session=session) if r.get("repo") == str(ROOT)]
+    read = sorted({p for r in rows if r["cmd"] in ("read", "pull") for p in r.get("pages") or []})
+    written = sorted({r["page"] for r in rows if r["cmd"] == "write" and r.get("page")})
+    # a suggested page counts as used once the session read or pulled it; names compare without a store prefix
+    suggested = sorted({p for r in rows if r["cmd"] == "recall" for p in r.get("pages") or []})
+    used = sorted(set(suggested) & {p.split("/")[-1] for p in read})
+    # suggested and never read: recall's noise this session, most often suggested first
+    times: dict[str, int] = {}
+    for r in rows:
+        if r["cmd"] == "recall":
+            for p in r.get("pages") or []:
+                times[p] = times.get(p, 0) + 1
+    missed = sorted(([p, n] for p, n in times.items() if p not in used), key=lambda pn: (-pn[1], pn[0]))
+    # the average match percentage of every suggestion this session, and of the read and unread ones apart;
+    # a term-only match has no percentage and stays out
+    pcts: dict[str, list[int]] = {"all": [], "read": [], "unread": []}
+    for r in rows:
+        if r["cmd"] == "recall":
+            for p, score in zip(r.get("pages") or [], r.get("scores") or []):
+                m = re.match(r"(\d+)% match", str(score))
+                if m:
+                    pcts["all"].append(int(m[1]))
+                    pcts["read" if p in used else "unread"].append(int(m[1]))
+    match = {k: round(sum(v) / len(v)) if v else None for k, v in pcts.items()}
+    # a page read that recall never suggested may be a page recall missed
+    unsuggested = sorted({p.split("/")[-1] for p in read} - set(suggested))
+    # suggested pages the session also verified, rewrote, or deleted: a sign the page was right, or wrong
+
+    def touched(cmd: str) -> list[str]:
+        return sorted({r["page"] for r in rows if r["cmd"] == cmd and r.get("page") in suggested})
+    return {"session": session, "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed, "match": match,
+            "read_unsuggested": unsuggested, "searches": sum(1 for r in rows if r["cmd"] == "search"),
+            "recalls": sum(1 for r in rows if r["cmd"] == "recall"), "recalls_with_pages": sum(1 for r in rows if r["cmd"] == "recall" and r.get("pages")),
+            "skipped": sum(1 for r in rows if r["cmd"] == "skipped"),
+            "suggested_verified": touched("verify"), "suggested_rewritten": touched("write"), "suggested_deleted": touched("delete")}
+
+
 def cmd_stats(args: argparse.Namespace) -> None:
+    if args.snapshot:
+        # SessionEnd and PreCompact: the session in one row, with the conditions it ran under; the last row per session wins
+        event = read_event() if args.hook else {}
+        pages = sum(len(list_pages(st.dir)) for st in live_stores())
+        summary = session_summary(session_id())
+        log_event("session", trigger=str(event.get("hook_event_name") or "manual"), reason=event.get("reason") or event.get("trigger"),
+                  transcript=event.get("transcript_path"), **conditions("semantic" if semantic_enabled() else "string", pages),
+                  **{k: v for k, v in summary.items() if k != "session"})
+        rotate_logs()
+        return
     if args.session is not None:
-        # one session, for the line under the prompt: the distinct pages it read or pulled, and wrote
-        rows = [r for r in read_log(session=args.session or session_id()) if r.get("repo") == str(ROOT)]
-        read = sorted({p for r in rows if r["cmd"] in ("read", "pull") for p in r.get("pages") or []})
-        written = sorted({r["page"] for r in rows if r["cmd"] == "write" and r.get("page")})
-        # a suggested page counts as used once the session read or pulled it; names compare without a store prefix
-        suggested = sorted({p for r in rows if r["cmd"] == "recall" for p in r.get("pages") or []})
-        used = sorted(set(suggested) & {p.split("/")[-1] for p in read})
-        # suggested and never read: recall's noise this session, most often suggested first
-        times: dict[str, int] = {}
-        for r in rows:
-            if r["cmd"] == "recall":
-                for p in r.get("pages") or []:
-                    times[p] = times.get(p, 0) + 1
-        missed = sorted(([p, n] for p, n in times.items() if p not in used), key=lambda pn: (-pn[1], pn[0]))
-        # the average match percentage of every suggestion this session, and of the read and unread ones apart;
-        # a term-only match has no percentage and stays out
-        pcts: dict[str, list[int]] = {"all": [], "read": [], "unread": []}
-        for r in rows:
-            if r["cmd"] == "recall":
-                for p, score in zip(r.get("pages") or [], r.get("scores") or []):
-                    m = re.match(r"(\d+)% match", str(score))
-                    if m:
-                        pcts["all"].append(int(m[1]))
-                        pcts["read" if p in used else "unread"].append(int(m[1]))
-        match = {k: round(sum(v) / len(v)) if v else None for k, v in pcts.items()}
-        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed, "match": match}))
+        # one session, for the line under the prompt
+        summary = session_summary(args.session or session_id())
+        print(json.dumps({k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match")}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}
@@ -2845,6 +3032,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--query", default="how to install and configure tools")
     p.set_defaults(func=cmd_cost)
 
+    p = sub.add_parser("knobs", help="the recall gate's knobs in .claude/iirc.toml, with their ranges")
+    p.set_defaults(func=cmd_knobs)
+
     p = sub.add_parser("doctor", help="check prerequisites; --fix installs them")
     p.add_argument("--fix", action="store_true")
     p.add_argument("--brief", action="store_true", help="one line, no host probe; nothing if no field")
@@ -2893,6 +3083,8 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("stats", help="how the pages are being used, from the local log")
     p.add_argument("--days", type=int, default=7)
+    p.add_argument("--snapshot", action="store_true", help="log this session's numbers and conditions as one row, for tuning recall; then rotate the logs")
+    p.add_argument("--hook", action="store_true", help="with --snapshot: read the hook payload on stdin")
     p.add_argument("--session", nargs="?", const="", metavar="ID", help="JSON: the pages one session read or pulled, and wrote; this session without ID")
     p.set_defaults(func=cmd_stats)
 

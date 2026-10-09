@@ -132,7 +132,7 @@ draw the two cards with sample numbers.
   each with its command and current value
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `index`, `search QUERY`, `topics`, and
+  `sync`, `stores`, `stats`, `index`, `knobs`, `search QUERY`, `topics`, and
   `read PAGE`. A page you read this way does not count toward the
   session's reads, which are the agent's. `/iirc doctor` draws its checks
   as a card too: a result chip, the failures with their fixes first, then

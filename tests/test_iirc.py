@@ -1,6 +1,7 @@
 """Tests for scripts/iirc that need neither the tool nor ollama."""
 
 import json
+import time
 import re
 import socket
 import threading
@@ -773,8 +774,20 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     iirc.main(["recall", "--failure"])
     assert capsys.readouterr().out == ""          # nothing but the exit code: stay silent
     rows = iirc.read_log()
-    assert [r["cmd"] for r in rows] == ["recall", "failure", "recall", "failure"]
+    assert [r["cmd"] for r in rows] == ["recall", "skipped", "failure", "recall", "failure"]
     assert "query" not in rows[0]                 # prompt text is not logged
+    assert rows[1]["reason"] == "short" and len(rows[1]["prompt_hash"]) == 16
+    first = rows[0]
+    assert first["prompt_hash"] == iirc.prompt_hash("why does uv tool install memoryfield-tool fail with pysqlite3-binary")
+    # every candidate is in the eval file, keyed to its recall
+    evals = [json.loads(line) for f in sorted((tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl")) for line in f.read_text().splitlines()]
+    mine = [e for e in evals if e["recall_id"] == first["recall_id"]]
+    assert mine and mine[0]["page"] == "pysqlite3-install-override.md" and mine[0]["verdict"] == "passed" and mine[0]["rule"] == "term"
+    assert {e["via"] for e in evals} == {"prompt", "failure"}
+    # the prompt's excerpt, in the session's own file, never in the log
+    kept = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc" / "prompts").glob("*.jsonl") for line in f.read_text().splitlines()]
+    assert [k.get("skipped") for k in kept] == [None, "short"] and kept[0]["recall_id"] == first["recall_id"]
+    assert kept[0]["excerpt"].startswith("why does uv tool install")
 
 
 def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, capsys):
@@ -885,6 +898,32 @@ def test_brief_channels(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup", "session_id": "s3"})))
     iirc.main(["doctor", "--brief", "--hook"])
     assert "just compacted" not in capsys.readouterr().out
+    starts = [r for r in iirc.read_log(session="s3") if r["cmd"] == "start"]
+    assert [r["source"] for r in starts] == ["compact", "startup"]   # SubagentStart logs no start
+    assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.34} and starts[0]["max_suggested"] == 3 and starts[0]["pages"] == 0
+    # semantic mode probes the host, and the host's source must not replace the hook's
+    iirc.write_config_file({"semantic": True})
+    monkeypatch.setattr(iirc, "resolve_host", lambda: ("http://127.0.0.1:11434", "config", True))
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "compact", "session_id": "s3"})))
+    iirc.main(["doctor", "--brief", "--hook"])
+    assert "just compacted" in capsys.readouterr().out
+
+
+def test_snapshot_logs_the_session_with_its_conditions(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); iirc.set_root(tmp_path)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s9")
+    iirc.log_event("recall", hits=2, pages=["a.md", "b.md"], scores=["70% match, meaning", "66% match, meaning"], via="prompt")
+    iirc.log_event("read", pages=["a.md", "z.md"]); iirc.log_event("verify", page="a.md"); iirc.log_event("skipped", reason="short")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionEnd", "reason": "clear", "session_id": "s9", "transcript_path": "/t/s9.jsonl"})))
+    iirc.main(["stats", "--snapshot", "--hook"])
+    assert capsys.readouterr().out == ""
+    row = [r for r in iirc.read_log(session="s9") if r["cmd"] == "session"][-1]
+    assert (row["trigger"], row["reason"], row["transcript"]) == ("SessionEnd", "clear", "/t/s9.jsonl")
+    assert row["used"] == ["a.md"] and row["missed"] == [["b.md", 1]] and row["read_unsuggested"] == ["z.md"]
+    assert row["suggested_verified"] == ["a.md"] and row["skipped"] == 1 and row["recalls_with_pages"] == 1
+    assert row["knobs"] == {"semantic_only": 0.28, "both": 0.34} and "commit" in row and row["mode"] in ("semantic", "string")
 
 
 def test_stats(tmp_path, monkeypatch, capsys):
@@ -1764,3 +1803,50 @@ def test_migrate_never_stages_machine_dirs(tmp_path, monkeypatch, capsys):
     iirc.main(["migrate"]); capsys.readouterr()
     assert (repo / ".local" / "share" / "dokidlc-iirc").is_dir()
     assert "dokidlc" not in _git(repo, "diff", "--cached", "--name-only")
+
+
+def test_recall_verdicts_say_why_each_candidate_was_left_out(monkeypatch):
+    monkeypatch.setattr(iirc, "max_suggested", lambda: 1)
+    rows = [
+        {"filename": "a.md", "via": ["semantic"], "distance": 0.2},
+        {"filename": "b.md", "via": ["semantic"], "distance": 0.25},
+        {"filename": "c.md", "via": ["semantic"], "distance": 0.31},
+        {"filename": "d.md", "via": ["semantic"], "distance": 0.5},
+        {"filename": "e.md", "via": ["plain"], "rare_terms": ["plain"]},
+        {"filename": "f.md", "via": ["word"], "rare_terms": []},
+    ]
+    v = iirc.recall_verdicts(rows)
+    assert [r["verdict"] for r in v] == ["passed", "over_max", "needs_term", "too_far", "plain_word", "common_term"]
+    assert [r["rank"] for r in v] == [0, 1, 2, 3, 4, 5]
+    assert [r["filename"] for r in iirc.recall_filter(rows)] == ["a.md"]
+
+
+def test_recall_knobs_come_from_iirc_toml(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    toml = tmp_path / ".claude" / "iirc.toml"
+    toml.write_text("[recall]\nsemantic_only = 0.3\n")
+    iirc.set_root(tmp_path)
+    assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.34} and iirc.CONFIG_ERROR is None
+    near = [{"filename": "a.md", "via": ["semantic"], "distance": 0.29}]
+    assert [r["rule"] for r in iirc.recall_filter(near)] == ["meaning"]
+    for bad, says in (("semantic_only = 0.9", "from 0.1 to 0.6"), ("semantic_only = 0.4", "at least semantic_only"), ("loose = 0.3", "no knob 'loose'")):
+        toml.write_text(f"[recall]\n{bad}\n")
+        iirc.set_root(tmp_path)
+        assert says in iirc.CONFIG_ERROR and iirc.RECALL == {"semantic_only": 0.28, "both": 0.34}
+    toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_rotate_logs_moves_last_month_aside_and_reads_both(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s")
+    d = tmp_path / "st" / "dokidlc-iirc"; d.mkdir(parents=True)
+    (d / "log.jsonl").write_text(json.dumps({"ts": "2020-01-31T23:00:00Z", "session": "s", "cmd": "read", "pages": ["a.md"]}) + "\n")
+    iirc.rotate_logs()
+    assert (d / "log-2020-01.jsonl").is_file() and not (d / "log.jsonl").exists()
+    iirc.log_event("read", pages=["b.md"])
+    assert [r["pages"] for r in iirc.read_log(session="s")] == [["a.md"], ["b.md"]]
+    # past RETAIN_DAYS by its last write, a rotated file goes
+    old = time.time() - (iirc.RETAIN_DAYS + 1) * 86400
+    os.utime(d / "log-2020-01.jsonl", (old, old))
+    iirc.rotate_logs()
+    assert not (d / "log-2020-01.jsonl").exists() and (d / "log.jsonl").is_file()
