@@ -45,6 +45,8 @@ const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
+// red, amber, green: the hit-rate gauge, stepped by position along the bar
+const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
 const KEEP = 200
 
 export function textOf(content: unknown): string {
@@ -359,6 +361,14 @@ export const register: Register = on => {
 
 }
 
+/** The gauge color at position t, 0 to 1: red to amber to green. */
+function gaugeColor(t: number): string {
+  const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+  const [a, b, u] = t < 0.5 ? [GAUGE[0], GAUGE[1], t * 2] : [GAUGE[1], GAUGE[2], (t - 0.5) * 2]
+  const [x, y] = [hex(a), hex(b)]
+  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * u).toString(16).padStart(2, '0')).join('')
+}
+
 function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
   const { Box, Text } = $.ui.resolve(e)
   const level = s ? s.level : 'warn'
@@ -378,8 +388,14 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
     ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
     : []
   const share = c.suggested > 0 ? c.used / c.suggested : 0
-  const BAR = 24
+  const BAR = 36
   const filled = Math.round(share * BAR)
+  const pct = Math.round(share * 100)
+  const band = pct >= 50 ? GAUGE[2] : pct >= 25 ? GAUGE[1] : GAUGE[0]
+  // each cell takes the gradient color of its position, so a fuller bar runs from red into green
+  const cells = Array.from({ length: BAR }, (_, k) =>
+    k < filled ? <Text key={k} color={gaugeColor(k / (BAR - 1))}>█</Text> : <Text key={k} color="inactive">░</Text>,
+  )
   const setting = (label: string, value: string, command: string) => (
     <Box key={label} flexDirection="row" paddingLeft={2}>
       <Box width={20} flexShrink={0}><Text color="subtle">{label}</Text></Box>
@@ -408,11 +424,20 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
           ))}
         </Box>
       )}
+      {c.suggested > 0 && <Text> </Text>}
+      {c.suggested > 0 && (
+        <Box flexDirection="row" width={BAR + 2}>
+          <Box flexGrow={1}>{heading('RECALL HIT RATE')}</Box>
+          <Text bold color={band}>{`${pct}%`}</Text>
+        </Box>
+      )}
+      {c.suggested > 0 && <Box flexDirection="row" paddingLeft={2}>{cells}</Box>}
       {c.suggested > 0 && (
         <Box flexDirection="row" paddingLeft={2}>
-          <Text color="success">{'━'.repeat(filled)}</Text>
-          <Text color="inactive">{'━'.repeat(BAR - filled)}</Text>
-          <Text color="subtle">{`  ${Math.round(share * 100)}% of suggested pages read`}</Text>
+          <Text bold color="claude">{String(c.used)}</Text>
+          <Text color="subtle">{' of '}</Text>
+          <Text bold color="claude">{String(c.suggested)}</Text>
+          <Text color="subtle">{' suggested pages were read'}</Text>
         </Box>
       )}
       <Text> </Text>
