@@ -2,8 +2,8 @@
 export type RecalledPage = { name: string; summary: string; isSuspect: boolean; match?: string }
 
 /** What iirc said about one tool call: pages its error recalled, and commands it asked to have written up. */
-/** What the hint row shows of the brief: green, yellow for a warning, red when iirc needs setup or migration. */
-export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null }
+/** What the hint row shows of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears it. */
+export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string }
 
 /** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read. */
 export type SessionCounts = { reads: number; writes: number; suggested: number; used: number }

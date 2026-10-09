@@ -25,7 +25,15 @@ const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
 const STOP_RE = /iirc: before you stop, note that (.*?) failed and then worked/
 const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plugin's layout/
-const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S+|string only|string search)[^.]*\.\s*(.*)/s
+const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S*[^\s.]|string only \([^)]*\)|string search)[^.]*\.\s*(.*)/s
+// the command that clears each kind of warning, in the order the line under the prompt names one
+const WARNING_FIX: [RegExp, string][] = [
+  [/memoryfield-tool is not at the pin/, 'iirc doctor --fix'],
+  [/suspect:/, 'iirc doubt'],
+  [/not pushed/, 'iirc sync'],
+  [/Persistence:/, 'iirc doctor --fix'],
+  [/near-duplicate/, 'iirc doctor'],
+]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages
@@ -73,22 +81,40 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
   if (at < 0) return null
   const line = text.slice(at)
   const m = BRIEF_RE.exec(line)
-  const needs = (note: string) => ({ level: 'error' as const, pages: null, mode: null, note })
-  if (!m && MIGRATE_RE.test(line)) return { status: needs('needs migration'), warnings: [] }
-  if (!m) return { status: needs('needs setup'), warnings: [line.split('. ')[0].replace(/^iirc: /, '')] }
+  if (!m) {
+    // each of these lines names the command that fixes it, in backticks
+    const fix = /`(iirc [^`]+)`/.exec(line)?.[1] ?? (/newer iirc plugin/.test(line) ? 'update the plugin' : undefined)
+    const note = MIGRATE_RE.test(line)
+      ? 'needs migration'
+      : /not set up/.test(line)
+        ? 'needs setup'
+        : /no \.iirc\//.test(line)
+          ? 'needs init'
+          : /no store/.test(line)
+            ? 'needs a store'
+            : /newer iirc plugin/.test(line)
+              ? 'needs a plugin update'
+              : 'needs setup'
+    const warnings = MIGRATE_RE.test(line) ? [] : [line.split('. ')[0].replace(/^iirc: /, '')]
+    return { status: { level: 'error', pages: null, mode: null, note, ...(fix ? { fix } : {}) }, warnings }
+  }
   // semantic search also matches terms; without an embedding host it matches terms alone
+  const isHostDown = m[2].startsWith('string only')
   const mode = m[2].startsWith('semantic') ? 'semantic+keyword' : 'keyword'
   const warnings = m[3]
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  return { status: { level: warnings.length > 0 ? 'warn' : 'ok', pages: Number(m[1]), mode, note: null }, warnings }
+  const fix = isHostDown ? 'iirc setup' : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
+  const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
+  return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}) }, warnings }
 }
 
 /** The hint row's text after the circle. */
 export function statusText(s: IircStatus, c: SessionCounts): string {
-  if (s.pages === null) return `iirc: ${s.note}`
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode`
+  const fix = s.level !== 'ok' && s.fix ? ` · run ${s.fix}` : ''
+  if (s.pages === null) return `iirc: ${s.note}${fix}`
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode${fix}`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
