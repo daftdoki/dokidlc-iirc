@@ -640,7 +640,8 @@ def test_recall_gates_and_filter():
         {"filename": "word.md", "summary": "W", "distance": None, "via": ["section"], "rare_terms": ["section"], "head_terms": []},
     ]
     assert [r["filename"] for r in iirc.recall_filter(rows)] == ["both-rare.md", "close.md", "ident.md"]
-    assert [r["filename"] for r in iirc.recall_filter(rows[4:])] == ["close.md", "ident.md", "titled.md"]
+    # a page that semantic search did not return passes on an identifier, never on a word in its title
+    assert [r["filename"] for r in iirc.recall_filter(rows[4:])] == ["close.md", "ident.md"]
 
 
 def test_recall_line_names_read_commands_and_is_bounded(tmp_path, monkeypatch):
@@ -661,6 +662,12 @@ def test_stats_session_counts_suggested_pages_used(tmp_path, monkeypatch, capsys
     iirc.main(["stats", "--session", "s6"])
     out = json.loads(capsys.readouterr().out)
     assert out["suggested"] == ["a.md", "b.md", "c.md"] and out["used"] == ["b.md"]
+
+
+def test_a_term_match_needs_an_identifier():
+    word = {"filename": "a.md", "summary": "s", "via": ["plain"], "rare_terms": ["without"], "head_terms": ["without"]}
+    ident = {"filename": "b.md", "summary": "s", "via": ["2.1.290"], "rare_terms": ["2.1.290"], "head_terms": []}
+    assert [r["filename"] for r in iirc.recall_filter([word, ident])] == ["b.md"]
 
 
 def test_recall_line_shows_the_match_and_its_rule():

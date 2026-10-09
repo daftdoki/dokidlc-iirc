@@ -41,7 +41,7 @@ bracket after the name says how the page matched:
 |---|---|
 | `[N% match, meaning+term]` | at least 66% close in meaning, and it shares a rare term with your prompt |
 | `[N% match, meaning]` | at least 72% close in meaning, with no shared rare term |
-| `[term match]` | found by a rare term alone; every page reads this way in keyword mode |
+| `[term match]` | found by an identifier alone, a rare term with digits or punctuation such as `2.1.290` or `session.append`; every page reads this way in keyword mode |
 
 N is 100 less the semantic distance as a percentage. A rare term has
 digits or punctuation in it, or is a word of five letters or more from the

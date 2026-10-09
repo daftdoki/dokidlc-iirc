@@ -845,9 +845,10 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     """Keep a page only on evidence that survives a busy field.
 
     Semantic and a rare term, close enough; or semantic alone, very close; or a
-    string hit on an identifier (digits or punctuation) or in the page's own
-    name, title, or summary. Common terms, ones in over a third of pages, count
-    for nothing.
+    string hit on an identifier (digits or punctuation) with no semantic hit.
+    A plain word alone is not enough: replayed over 68 prompts on 2026-10-08,
+    none of the 29 plain-word term matches was relevant. Common terms, ones in
+    over a third of pages, count for nothing.
     """
     keep = []
     for r in rows:
@@ -862,7 +863,7 @@ def recall_filter(rows: list[dict]) -> list[dict]:
             keep.append({**r, "rule": "meaning+term"})
         elif sem and d is not None and d <= RECALL_SEMANTIC_ONLY:
             keep.append({**r, "rule": "meaning"})
-        elif not sem and strong_term:
+        elif not sem and any(IDENTIFIER_RE.search(t) for t in rare):
             keep.append({**r, "rule": "term"})
     return keep[:max_suggested()]
 

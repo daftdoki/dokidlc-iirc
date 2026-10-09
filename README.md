@@ -90,11 +90,9 @@ what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
 run yourself, for a bootstrap script or a container.
 
 A repository that used the memory plugin needs one more step. At session
-start the agent offers the migration, and on your yes it runs
-`iirc migrate`. That moves `.memory/`, `.claude/memory.toml`, the CLAUDE.md
-section, the `memory@dokidlc` setting, and this machine's `dokidlc-memory`
-directories to their iirc names. It stages the changes and prints a
-suggested commit; it never commits.
+start the agent offers the migration, and on your yes it runs it:
+`iirc migrate` moves `.memory/`, `.claude/memory.toml`, the CLAUDE.md section, the `memory@dokidlc` setting, and this machine's `dokidlc-memory` directories to their iirc names.
+It stages the changes and prints a suggested commit; it never commits.
 
 ## Usage
 

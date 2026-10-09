@@ -86,7 +86,7 @@ and commit on their word.
 A hook searches iirc on every prompt and, when pages match, adds one
 line naming them with the exact `iirc read` command. Each page ends with
 how it matched: `[69% match, meaning+term]`, higher is closer, or
-`[term match]`, a shared word and no closeness of meaning. Read the
+`[term match]`, a shared identifier and no closeness of meaning. Read the
 percentage pages before you do anything else; read a term-match page
 when its summary fits the task. The same hook runs when a shell command
 fails, with the command and its error as the query.
