@@ -520,9 +520,7 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
   expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
   await view.press({ key: 'tab-page' })
   expect(await view.find({ text: 'Title of a.md' })).toBeDefined()
-  await view.press({ key: 'tab-close' })
-  expect(await view.find({ key: 'tab-page' })).toBeUndefined()
-  expect(await view.find({ key: 'open-s-n.md' })).toBeDefined()
+
 })
 
 test('a page name in the suggested-pages tree opens the reader', async ($: Engine, on: On) => {

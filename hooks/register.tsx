@@ -1265,11 +1265,6 @@ function drawTabs($: EngineInterface, e: ResolveInput, r: Reader, columns: numbe
           {name && <Text>{' '}</Text>}
           {/* the page's tab takes the room the session tab, the close marks, and the iirc mark leave */}
           {name && tab('tab-page', '2', tabTitle(name, Math.max(8, columns - 36)), isPage, () => void update($, reader, x => ({ ...x, tab: 'page' as const })))}
-          {name && (
-            <Button key="tab-close" plain hotkey="x" onPress={() => void update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))}>
-              <Text color="subtle">{' ✕ '}</Text>
-            </Button>
-          )}
         </Box>
         <Text>{' '}</Text>
         {/* the mark is green while the pane holds the keys, gray while they are the prompt's */}
@@ -1451,8 +1446,8 @@ function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, c
         {chip($, e, 'kind', kind, KIND_COLOR[kind] ?? HEADING)}
         <Text>{' '}</Text>
         {trust}
-        <Text color="subtle">{`  ${meta}`}</Text>
       </Box>
+      <Text color="subtle">{meta}</Text>
       {r.error && <Text color="error">{r.error}</Text>}
       {page.signals.map(sig => (
         <Text key={`sig-${sig.signal}`} color={sig.level === 'suspect' ? LEVEL_COLOR.warn : 'subtle'}>{`${sig.level === 'suspect' ? '▲' : '·'} ${sig.level}: ${sig.reason}`}</Text>
@@ -1470,7 +1465,7 @@ function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, c
       <Box marginTop={1}>{gradientRule($, e, Math.min(columns, 48), 'head-rule')}</Box>
     </Box>,
   )
-  heights.push((r.history.length > 0 ? 2 : 0) + rowsAt(str(fm.title), columns) + 1 + rowsAt(`${kind} ✔ trusted  ${meta}`, columns) + (r.error ? 1 : 0)
+  heights.push((r.history.length > 0 ? 2 : 0) + rowsAt(str(fm.title), columns) + 1 + 1 + rowsAt(meta, columns) + (r.error ? 1 : 0)
     + page.signals.length + 1 + rowsAt(str(fm.summary), columns - 2) + (topics ? 2 : 0) + 2 + 1)
   // one block per paragraph, so j and k have places to stop
   paragraphs(page.body).forEach((text, i) => {

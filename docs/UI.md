@@ -149,8 +149,7 @@ Neither card costs tokens: the plugin answers, and the skill does not load.
 `/iirc pane` opens a pane beside the transcript, or above the prompt on
 a terminal that is not in fullscreen. Drag the pane's edge to change its width;
 Claude Code keeps that width, up to a maximum it sets. A row at its top holds its own
-tabs: `session`, and, while a page is open, the page's name and a `✕`
-that closes it. Under it, a row of keys:
+tabs: `session`, and, while a page is open, the page's name. Under it, a row of keys:
 
 | Key | Session tab | Page tab |
 |---|---|---|
@@ -158,7 +157,7 @@ that closes it. Under it, a row of keys:
 | Enter | open the page under the cursor | open the linked page under the cursor |
 | `g`, `e` | the top, the end | the top, the end |
 | `h`, `l` | the session tab, the page tab | the same |
-| `1`, `2`, `x`, `b` | the session tab, the page tab, close the page | the same, and `b` goes back |
+| `1`, `2`, `b` | the session tab, the page tab | the same, and `b` goes back |
 | `q` | close the pane | close the pane |
 
 The keys work while the pane has the keyboard. Without it, the `●` beside
