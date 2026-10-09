@@ -444,12 +444,12 @@ def state_dir() -> Path:
 MIGRATION_LINE = "engrams: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `engrams migrate`."
 
 
-def old_layout(root: Path | None = None) -> list[tuple[Path, Path]]:
-    """(old, new) for each path the memory plugin left and the migration moves: the repository's store and config, and this machine's directories."""
+def old_layout(root: Path | None = None) -> list[tuple[Path, Path, bool]]:
+    """(old, new, in_repo) for each path the memory plugin left and the migration moves: the repository's store and config, and this machine's directories."""
     root = root or ROOT
-    pairs = [(root / ".memory", root / ".engrams"), (root / ".claude" / "memory.toml", root / ".claude" / "engrams.toml")]
-    pairs += [(d.parent / "dokidlc-memory", d) for d in (config_file().parent, data_dir(), state_dir())]
-    return [(old, new) for old, new in pairs if old.exists() and not new.exists()]
+    pairs = [(root / ".memory", root / ".engrams", True), (root / ".claude" / "memory.toml", root / ".claude" / "engrams.toml", True)]
+    pairs += [(d.parent / "dokidlc-memory", d, False) for d in (config_file().parent, data_dir(), state_dir())]
+    return [(old, new, in_repo) for old, new, in_repo in pairs if old.exists() and not new.exists()]
 
 
 def read_state_json(name: str) -> dict:
@@ -1805,9 +1805,11 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         die("both .memory/ and .engrams/ exist; merge them by hand, then run engrams migrate again")
     done: list[str] = []
     staged: list[str] = []
-    for old, new in old_layout():
-        move(old, new)
-        here = old.is_relative_to(ROOT)
+    for old, new, here in old_layout():
+        if here:
+            move(old, new)
+        else:
+            shutil.move(str(old), str(new))
         done.append(f"moved {old.relative_to(ROOT) if here else old} to {new.relative_to(ROOT) if here else new}")
         if here:
             staged.append(str(new.relative_to(ROOT)))

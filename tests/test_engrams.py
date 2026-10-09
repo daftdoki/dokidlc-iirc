@@ -1624,3 +1624,17 @@ def test_docs_name_engrams():
     hits = [f"{d.relative_to(ROOT)}:{n}" for d in docs if d.is_file() for n, line in enumerate(d.read_text().splitlines(), 1)
             if old.search(line) and "migrat" not in line]
     assert (ROOT / "skills" / "engrams" / "SKILL.md").is_file() and hits == []
+
+
+def test_migrate_never_stages_machine_dirs(tmp_path, monkeypatch, capsys):
+    """When the machine directories sit inside the repository (a home directory under git), they move but are never staged."""
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    repo = tmp_path / "home"; repo.mkdir(); _repo(repo); _old_layout(repo)
+    _git(repo, "add", "."); _git(repo, "commit", "-qm", "old layout")
+    for var, sub in (("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state")):
+        monkeypatch.setenv(var, str(repo / sub)); (repo / sub / "dokidlc-memory").mkdir(parents=True); (repo / sub / "dokidlc-memory" / "f.txt").write_text("x\n")
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
+    monkeypatch.setattr(engrams, "reindex", lambda: None)
+    engrams.main(["migrate"]); capsys.readouterr()
+    assert (repo / ".local" / "share" / "dokidlc-engrams").is_dir()
+    assert "dokidlc" not in _git(repo, "diff", "--cached", "--name-only")
