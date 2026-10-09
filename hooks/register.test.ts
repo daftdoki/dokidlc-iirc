@@ -444,7 +444,7 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   expect(await card.find({ text: 'iirc sync' })).toBeDefined()
   expect(await card.find({ key: 'card-m-noisy.md' })).toBeDefined()           // a link to the reader
   expect(await card.find({ key: 'card-s-old-fact.md' })).toBeDefined()
-  expect(await card.find({ text: ' ×4' })).toBeDefined()
+  expect(await card.find({ text: '×4' })).toBeDefined()
   expect(await card.find({ text: '62%' })).toBeDefined()
   expect(await card.find({ text: ' · not read ' })).toBeDefined()
 })

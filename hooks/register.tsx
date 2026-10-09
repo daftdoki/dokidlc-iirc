@@ -890,8 +890,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     for (const name of checkup.suspect.slice(0, LIST_MAX)) {
       trustRows.push(
         <Box key={`s${name}`} flexDirection="row" paddingLeft={14}>
-          <Text color="claude">{'› '}</Text>
-          {pageLink($, e, `card-s-${name}`, name, { color: 'claude' })}
+          {/* the bullet in a column that will not shrink, so a long name wraps and nothing else moves */}
+          <Box width={2} flexShrink={0}><Text color="claude">›</Text></Box>
+          <Box flexShrink={1}>{pageLink($, e, `card-s-${name}`, name, { color: 'claude' })}</Box>
         </Box>,
       )
       factWidths.push(14 + 2 + name.replace(/\.md$/, '').length)   // a link draws the name without .md
@@ -999,7 +1000,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     }
     if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
     widths.push(...factWidths)
-    if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name, n]) => 4 + name.replace(/\.md$/, '').length + ` ×${n}`.length))
+    if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name]) => 2 + 5 + name.replace(/\.md$/, '').length))
   } else {
     widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
@@ -1056,9 +1057,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {missed.length > 0 && heading('SUGGESTED, NOT READ')}
       {missed.map(([name, n]) => (
         <Box key={`m${name}`} flexDirection="row" paddingLeft={2}>
-          <Text color="claude">{'› '}</Text>
-          {pageLink($, e, `card-m-${name}`, name, { color: 'claude' })}
-          <Text color={LEVEL_COLOR.warn}>{` ×${n}`}</Text>
+          {/* the count first, in a column that will not shrink: a row too wide for the card wraps only the name */}
+          <Box width={5} flexShrink={0}><Text bold color={LEVEL_COLOR.warn}>{`×${n}`}</Text></Box>
+          <Box flexShrink={1}>{pageLink($, e, `card-m-${name}`, name, { color: 'claude' })}</Box>
         </Box>
       ))}
     </Box>
