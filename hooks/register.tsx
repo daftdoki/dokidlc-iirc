@@ -379,8 +379,15 @@ function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: 
   const head: unknown[] = [
     <Text key="dot" color={tone}>● </Text>,
     <Text key="name" bold color="claude">iirc</Text>,
-    <Text key="desc" color="subtle" italic>{'   what past sessions learned, found by meaning'}</Text>,
+    <Text key="gap">{'   '}</Text>,
   ]
+  // "If I Recall Correctly", each initial lit, then what the plugin does
+  // spaces lead each word: a Text's trailing space is not drawn
+  for (const [k, word] of ['If', 'I', 'Recall', 'Correctly'].entries()) {
+    head.push(<Text key={`i${k}`} bold color="claude">{(k > 0 ? ' ' : '') + word[0]}</Text>)
+    if (word.length > 1) head.push(<Text key={`w${k}`} color="subtle">{word.slice(1)}</Text>)
+  }
+  head.push(<Text key="desc" color="subtle" italic>{'  ·  what past sessions learned, found by meaning'}</Text>)
   const chipText = level === 'ok' ? '✔ all good' : level === 'warn' ? '▲ needs a look' : `✖ ${s ? s.note : 'no brief yet'}`
   const statusRow: unknown[] = [
     <Box key="label" width={10} flexShrink={0}><Text bold color="subtle">STATUS</Text></Box>,
