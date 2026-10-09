@@ -53,6 +53,7 @@ host.
 ```
 uv run --quiet pytest
 claude plugin validate .
+claude plugin test .        # hooks/register.test.ts, the drawn rows
 ```
 
 CI runs both on ubuntu and macos.

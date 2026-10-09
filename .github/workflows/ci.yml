@@ -18,3 +18,4 @@ jobs:
           curl -fsSL https://claude.ai/install.sh | bash -s stable
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: claude plugin validate .
+      - run: claude plugin test .

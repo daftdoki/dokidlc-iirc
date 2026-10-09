@@ -703,6 +703,12 @@ def test_show_hooks_alone_keeps_the_default_store_and_must_be_a_bool(tmp_path):
     with pytest.raises(memory.ConfigError) as e:
         memory.load_stores(tmp_path)
     assert "show_hooks" in str(e.value)
+    cfg.write_text("ui = false\nshow_hooks = true\n")
+    assert [s.name for s in memory.load_stores(tmp_path)[0]] == ["project"]
+    cfg.write_text("ui = 0\n")
+    with pytest.raises(memory.ConfigError) as e:
+        memory.load_stores(tmp_path)
+    assert "ui must be" in str(e.value)
 
 
 def test_validate_check_refuses_writers_and_failing_checks():

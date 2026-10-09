@@ -143,16 +143,26 @@ cannot. The plugin never pushes the project repository itself.
 
 ## Seeing what the hooks say
 
-The hooks tell the agent things you do not see: the session brief, the
-pages a prompt or a failed command recalls, and the nudges to write a
-page. To see each line as well, put this at the top of
-`.claude/memory.toml`:
+The hooks tell the agent things you do not see. A hooks module in the same
+plugin draws them for you:
+
+- Under your prompt, `+ [2] memory items retrieved`. Click the `+` to list
+  the pages, with a yellow diamond on a page memory suspects is stale.
+- Under a failed command, the pages its error recalled, in the same form.
+- Under a command that failed and then worked, a row saying the agent was
+  asked to write a page.
+- On the status line, the page count and the search mode. Warnings from the
+  session-start check, and the nudge at stop, come as toasts.
+
+Both switches live in `.claude/memory.toml`. A file that holds only these
+keys keeps the default `.memory/` store.
 
 ```toml
-show_hooks = true
+ui = false          # turn the drawn rows off (default: on)
+show_hooks = true   # also print the raw text each hook gives the agent (default: off)
 ```
 
-A file that holds only this key keeps the default `.memory/` store.
+`show_hooks` is for debugging: it shows exactly what reached the model.
 
 ## Caveats
 

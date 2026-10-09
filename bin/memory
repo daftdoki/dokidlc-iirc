@@ -286,8 +286,9 @@ def load_stores(root: Path) -> tuple[list[Store], str | None]:
     """The stores .claude/memory.toml names, and its write default. No file: one project store at .memory."""
     root = Path(root).resolve()
     cfg = read_store_config(root)
-    if not isinstance(cfg.get("show_hooks", False), bool):
-        raise ConfigError(f"{STORE_CONFIG}: show_hooks must be true or false")
+    for key in ("show_hooks", "ui"):
+        if not isinstance(cfg.get(key, False), bool):
+            raise ConfigError(f"{STORE_CONFIG}: {key} must be true or false")
     if "stores" not in cfg and "write" not in cfg:
         return [Store("project", "project", root / ".memory", root, None, field_name(root))], None
     sections = cfg.get("stores")
