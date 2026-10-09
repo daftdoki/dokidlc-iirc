@@ -900,7 +900,7 @@ def test_brief_channels(tmp_path, monkeypatch, capsys):
     assert "just compacted" not in capsys.readouterr().out
     starts = [r for r in iirc.read_log(session="s3") if r["cmd"] == "start"]
     assert [r["source"] for r in starts] == ["compact", "startup"]   # SubagentStart logs no start
-    assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.34} and starts[0]["max_suggested"] == 3 and starts[0]["pages"] == 0
+    assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.34} and starts[0]["max_suggested"] == 3 and starts[0]["page_count"] == 0
     # semantic mode probes the host, and the host's source must not replace the hook's
     iirc.write_config_file({"semantic": True})
     monkeypatch.setattr(iirc, "resolve_host", lambda: ("http://127.0.0.1:11434", "config", True))
@@ -1850,3 +1850,16 @@ def test_rotate_logs_moves_last_month_aside_and_reads_both(tmp_path, monkeypatch
     os.utime(d / "log-2020-01.jsonl", (old, old))
     iirc.rotate_logs()
     assert not (d / "log-2020-01.jsonl").exists() and (d / "log.jsonl").is_file()
+
+
+def test_a_page_the_line_had_no_room_for_is_logged_line_cut(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s10"); iirc.set_root(tmp_path)
+    rows = [{"filename": f"{c}.md", "via": ["semantic"], "distance": 0.1, "summary": "x" * 80, "fm": {}} for c in "abc"]
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: rows)
+    monkeypatch.setattr(iirc, "recall_max_bytes", lambda: 10)   # room for the first page only
+    line = iirc.run_recall("a query long enough to search", "prompt", {})
+    assert line.count("`iirc read ") == 1
+    evals = [json.loads(x) for f in (tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl") for x in f.read_text().splitlines()]
+    assert [e["verdict"] for e in evals] == ["passed", "line_cut", "line_cut"]
+    assert iirc.read_log(session="s10")[-1]["pages"] == ["a.md"]

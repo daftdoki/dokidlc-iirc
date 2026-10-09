@@ -1095,8 +1095,8 @@ def recovered_commands(rows: list[dict] | None = None) -> list[tuple[str, int]]:
 EVAL_CANDIDATES = 25   # candidates logged per recall, best ranked first
 
 
-def run_recall(query: str, via: str, event: dict, **keys) -> list[dict]:
-    """Search, gate, and log one recall: the pages its line names, in order.
+def run_recall(query: str, via: str, event: dict, **keys) -> str:
+    """Search, gate, and log one recall; return its line, or "" when no page passed.
 
     The log row says what the line suggested; the eval rows say what every candidate
     scored and why each one the line left out was left out, for tuning recall.
@@ -1104,7 +1104,8 @@ def run_recall(query: str, via: str, event: dict, **keys) -> list[dict]:
     start = time.monotonic()
     verdicts = recall_verdicts(hybrid_search(query))
     passed = [r for r in verdicts if r["verdict"] == "passed"]
-    named = recall_line(passed).count("`iirc read ")
+    line = recall_line(passed)
+    named = line.count("`iirc read ")
     for r in passed[named:]:
         r["verdict"] = "line_cut"   # dropped to keep the line under recall_max_bytes()
     rows = passed[:named]
@@ -1120,7 +1121,7 @@ def run_recall(query: str, via: str, event: dict, **keys) -> list[dict]:
         "paths": r.get("via") or [], "rare_terms": r.get("rare_terms") or [], "head_terms": r.get("head_terms") or [],
         "rule": r["rule"], "verdict": r["verdict"], "kind": (r.get("fm") or {}).get("kind"),
     } for r in verdicts[:EVAL_CANDIDATES]])
-    return rows
+    return line
 
 
 def cmd_recall(args: argparse.Namespace) -> None:
@@ -1150,8 +1151,7 @@ def cmd_recall(args: argparse.Namespace) -> None:
             if not terms:
                 return
             query = " ".join([first] + terms).strip()
-            rows = run_recall(query, "failure", event, query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
-            line = recall_line(rows)
+            line = run_recall(query, "failure", event, query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
             if line:
                 print(hook_output("PostToolUseFailure", line))
             return
@@ -1164,8 +1164,7 @@ def cmd_recall(args: argparse.Namespace) -> None:
             log_event("skipped", reason=reason, chars=len(prompt), prompt_hash=prompt_hash(prompt), transcript=event.get("transcript_path"))
             keep_prompt(prompt, skipped=reason)
             return
-        rows = run_recall(prompt, "prompt", event, prompt_hash=prompt_hash(prompt))
-        line = recall_line(rows)
+        line = run_recall(prompt, "prompt", event, prompt_hash=prompt_hash(prompt))
         if line:
             print(hook_output("UserPromptSubmit", line))
     except SystemExit:
@@ -2673,7 +2672,7 @@ def install_tool(pin: dict[str, str]) -> bool:
 def conditions(mode: str, pages: int) -> dict:
     """What recall ran with: the plugin, the gate's knobs, the line's size, the search mode, the engine, the field's size."""
     return {"commit": plugin_commit(), "knobs": dict(RECALL), "max_suggested": max_suggested(), "mode": mode,
-            "tool_rev": (read_pin() or {}).get("tool_rev"), "pages": pages}
+            "tool_rev": (read_pin() or {}).get("tool_rev"), "page_count": pages}
 
 
 def suspect_pages(pages: list[Path]) -> list[str]:
