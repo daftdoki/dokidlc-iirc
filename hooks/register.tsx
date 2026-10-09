@@ -33,7 +33,7 @@ const cursor = atom({ plugin: 'iirc', key: 'cursor' } as const, { session: 0, pa
 // so the hook remembers what the last drawing measured: the rows under the header, and each item's height
 const HEADER_ROWS = 4
 // the keys row, `j: down  k: up ... q: close`, in columns
-const LEGEND_COLUMNS = 60
+const LEGEND_COLUMNS = 62
 let paneRows = 20
 let sessionRowStops: (string | null)[] = []
 let pageHeights: number[] = []
@@ -663,7 +663,8 @@ export const register: Register = on => {
     const c = await read($, cursor)
     const { Box, Text } = $.ui.resolve(e)
     // the keys row wraps in a narrow pane, and the header grows by a row
-    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0))
+    // and one row spare: a single row too many and Claude Code scrolls the window to the focus, taking the header with it
+    paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0) - 1)
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
     let items: unknown[]
     let top: number
