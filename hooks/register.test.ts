@@ -635,15 +635,3 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   await view.press({ key: 'key-q' })
   expect(closed).toEqual(['iirc'])
 })
-
-
-test('the pane asks for 60% of the terminal rows, for when it opens above the prompt', async ($: Engine, on: On) => {
-  engine(on)
-  const asked: (number | undefined)[] = []
-  on('ui.open', ($, e) => (asked.push(e.rows), { value: { isPlaced: true } }))
-  on('session.id', () => ({ value: 's1' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'PromptHint', requestId: 'hint-rows', viewport: { columns: 100, rows: 50 }, props: { isDraft: false, isWorking: false, hint: '' } } as never)
-  await $.command.run({ command: 'iirc', args: 'pane' })
-  expect(asked.at(-1)).toBe(30)
-})

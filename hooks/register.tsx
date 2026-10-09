@@ -32,10 +32,6 @@ let paneRows = 20
 let sessionRowStops: (string | null)[] = []
 let pageHeights: number[] = []
 let scrollRest = 0
-// the terminal's height, as the last drawing measured it: an inline pane asks for a share of it
-let terminalRows: number | null = null
-// above the prompt (not docked) the pane takes a third by default; it asks for this share instead
-const INLINE_SHARE = 0.6
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
@@ -298,7 +294,7 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
-  const opened = await openPane($)
+  const opened = await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   if (!opened.isPlaced) $.ui.toast(`iirc: the pane is waiting: ${opened.reason}; /iirc pane opens it`)
   let page: ShownPage | null = null
   let error: string | null = null
@@ -399,19 +395,13 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
 }
 
-/** Open the pane. Inline, above the prompt, it asks for INLINE_SHARE of the terminal's rows; docked, Claude Code ignores rows. */
-async function openPane($: EngineInterface) {
-  const rows = terminalRows ? Math.max(12, Math.round(terminalRows * INLINE_SHARE)) : undefined
-  return $.ui.open({ id: PANE, title: 'iirc', focus: true, ...(rows ? { rows } : {}) })
-}
-
 /** The Session tab, with its numbers fresh. */
 async function openSession($: EngineInterface) {
   refreshCounts($)
   await refreshHealth($)
   await update($, reader, r => ({ ...r, tab: 'session' as const }))
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
-  await openPane($)
+  await $.ui.open({ id: PANE, title: 'iirc', focus: true })
   // put the ring on the first page name, so j, k, and Enter work at once
   const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
   if (first) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
@@ -600,7 +590,6 @@ export const register: Register = on => {
     const c = await read($, cursor)
     const { Box, Text } = $.ui.resolve(e)
     // the keys row wraps in a narrow pane, and the header grows by a row
-    if (e.viewport) terminalRows = e.viewport.rows
     paneRows = Math.max(1, e.props.scroll.bodyRows - HEADER_ROWS - (e.props.bodyColumns < LEGEND_COLUMNS ? 1 : 0))
     const isPage = r.tab === 'page' && r.page !== null && !(r.loading && r.page.label !== r.loading)
     let items: unknown[]
@@ -652,7 +641,6 @@ export const register: Register = on => {
 
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (e.viewport) terminalRows = e.viewport.rows
     const s = await read($, status)
     const original = await next(e)
     if (s === null || !(await read($, isStatusShown))) return original
