@@ -65,14 +65,15 @@ export function parseBrief(text: string): { status: string; warnings: string[] }
   if (at < 0) return null
   const line = text.slice(at)
   const m = BRIEF_RE.exec(line)
-  if (!m && MIGRATE_RE.test(line)) return { status: '◆ iirc: needs migration', warnings: [] }
-  if (!m) return { status: '◆ iirc: needs setup', warnings: [line.split('. ')[0].replace(/^iirc: /, '')] }
-  const mode = m[2].startsWith('semantic') ? 'semantic' : m[2]
+  if (!m && MIGRATE_RE.test(line)) return { status: '⚠ iirc: needs migration', warnings: [] }
+  if (!m) return { status: '⚠ iirc: needs setup', warnings: [line.split('. ')[0].replace(/^iirc: /, '')] }
+  // semantic search also matches terms; without an embedding host it matches terms alone
+  const mode = m[2].startsWith('semantic') ? 'semantic+keyword' : 'keyword'
   const warnings = m[3]
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  return { status: `◆ iirc ${m[1]} · ${mode}`, warnings }
+  return { status: `⚠ iirc: [${m[1]}] ${m[1] === '1' ? 'page' : 'pages'} · [${mode}] mode`, warnings }
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -108,7 +109,8 @@ async function showBrief($: EngineInterface, text: string) {
 async function drawStatus($: EngineInterface) {
   const base = await read($, status)
   if (base === null) return
-  $.ui.status(/^◆ iirc \d+/.test(base) ? `${base} · ${await read($, readCount)} read` : base)
+  const pages = /^⚠ iirc: \[\d+\] pages?/.exec(base)
+  $.ui.status(pages ? `${pages[0]} · [${await read($, readCount)}] read${base.slice(pages[0].length)}` : base)
 }
 
 /** Ask iirc how many distinct pages this session has read, from its log. */

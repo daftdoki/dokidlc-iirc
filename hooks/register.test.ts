@@ -56,11 +56,12 @@ test('parses the recall line', () => {
 test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
-    status: '◆ iirc 68 · semantic',
+    status: '⚠ iirc: [68] pages · [semantic+keyword] mode',
     warnings: ['1 near-duplicate pair: iirc doctor names them; merge each or keep both.'],
   })
-  expect(parseBrief('iirc: not set up on this machine. Ask the creator.')?.status).toBe('◆ iirc: needs setup')
-  expect(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")?.status).toBe('◆ iirc: needs migration')
+  expect(parseBrief('iirc: not set up on this machine. Ask the creator.')?.status).toBe('⚠ iirc: needs setup')
+  expect(parseBrief('iirc: 1 page, string only. Topics: x 1.')?.status).toBe('⚠ iirc: [1] page · [keyword] mode')
+  expect(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")?.status).toBe('⚠ iirc: needs migration')
 })
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -137,7 +138,7 @@ test('sets the status line and toasts the brief warnings, and toasts the stop nu
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
   await hookRow($, 'SessionStart', BRIEF, 'h4')
   await hookRow($, 'Stop', STOP, 'h5')
-  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read'])
+  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
   expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
 })
@@ -157,7 +158,7 @@ test('at session start, asks iirc for the brief and shows it once', async ($: En
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
   expect(String((argv[0] as string[])[0])).toContain('bin/iirc')
-  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read', '◆ iirc 68 · semantic · 0 read'])
+  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode', '⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
   expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each or keep both.'])
 })
 
@@ -172,7 +173,7 @@ test('after a command that changes the brief, asks iirc for it again', async ($:
   await $.tool.call({ tool: 'Bash', command: '~/x/bin/iirc migrate', tool_use_id: 't5' })
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 1; i++) await new Promise(r => setTimeout(r, 10))
-  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read'])
+  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode'])
 })
 
 test('after a read, counts the pages this session read', async ($: Engine, on: On) => {
@@ -195,7 +196,7 @@ test('after a read, counts the pages this session read', async ($: Engine, on: O
   await clock.settle()
   for (let i = 0; i < 30 && status.length < 2; i++) await new Promise(r => setTimeout(r, 10))
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
-  expect(status).toEqual(['◆ iirc 68 · semantic · 0 read', '◆ iirc 68 · semantic · 2 read'])
+  expect(status).toEqual(['⚠ iirc: [68] pages · [0] read · [semantic+keyword] mode', '⚠ iirc: [68] pages · [2] read · [semantic+keyword] mode'])
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
