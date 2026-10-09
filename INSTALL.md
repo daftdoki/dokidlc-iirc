@@ -35,7 +35,7 @@ claude plugin install iirc@dokidlc
 ```
 
 Use the full `git@` URL, not the `daftdoki/dokidlc-plugins` shorthand.
-dokidlc-plugins is private. The shorthand clones over SSH and fails with
+The shorthand clones over SSH and fails with
 "No ED25519 host key is known for github.com" on a machine with no
 `known_hosts` file, which is the normal state of a fresh container. The
 shorthand is fine on a machine that already has github.com in

@@ -71,11 +71,12 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 
 | Part | Means |
 |---|---|
-| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates; red when iirc needs setup, an init, or a migration |
+| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a recall this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off (`iirc: hooks off`) |
 | `[76] pages` | the pages in every store |
 | `[2/5] used` | of the pages recall suggested this session, how many were then read |
 | `[12] reads` | different pages this session read with `iirc read` or `iirc pull` |
 | `[4] writes` | different pages this session wrote |
+| `· [2] timed out` | shown only when a recall this session ran past the hook's 5-second limit and Claude Code killed it |
 | `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
 | `· run iirc doubt` | shown when the circle is yellow or red: the command that clears it |
 
@@ -84,12 +85,12 @@ The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 line cannot carry color, so the line sits in the hint row.
 
 `/iirc status-line off` hides it and `/iirc status-line on` brings it
-back; `/iirc status-line` says which. `/iirc status` shows the home card,
-the same as a plain `/iirc`.
+back; `/iirc status-line` says which. `/iirc status` draws the full
+status card, described below.
 
 ## A plain `/iirc`, `/iirc status`, and `/iirc help`
 
-![The iirc card with sample numbers from /iirc demo](images/iirc-card.png)
+![An earlier version of the iirc card, with sample numbers from /iirc demo](images/iirc-card.png)
 
 A plain `/iirc` draws a short card in place of its output row:
 
@@ -132,7 +133,7 @@ draw the two cards with sample numbers.
   each with its command and current value
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `index`, `knobs`, `search QUERY`, `topics`, and
+  `sync`, `stores`, `stats`, `index`, `cost`, `knobs`, `search QUERY`, `topics`, and
   `read PAGE`. A page you read this way does not count toward the
   session's reads, which are the agent's. `/iirc doctor` draws its checks
   as a card too: a result chip, the failures with their fixes first, then
