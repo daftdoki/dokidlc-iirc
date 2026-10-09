@@ -648,7 +648,7 @@ def test_recall_line_names_read_commands_and_is_bounded(tmp_path, monkeypatch):
     rows = [{"filename": f"page-{i}.md", "summary": "s" * 150, "distance": 0.2, "via": ["semantic"]} for i in range(3)]
     line = iirc.recall_line(rows)
     assert line.startswith("iirc: ") and "`iirc read page-0.md`" in line
-    assert len(line.encode()) <= iirc.RECALL_MAX_BYTES
+    assert len(line.encode()) <= iirc.recall_max_bytes()
     assert "page-2.md" not in line or line.count("`iirc read") == 3   # whole entries dropped, never cut
     assert iirc.recall_line([]) == ""
 
@@ -669,6 +669,24 @@ def test_recall_line_shows_the_match_and_its_rule():
     assert iirc.match_text({"rule": "term"}) == "term match"
     rows = iirc.recall_filter([{"filename": "a.md", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
     assert rows[0]["rule"] == "meaning"
+
+
+def test_pages_sets_how_many_pages_recall_names(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    iirc.set_root(tmp_path); iirc.write_config_file({"semantic": True, "embedding_host": "http://h:1"})
+    assert iirc.recall_pages() == 3
+    rows = [{"filename": f"p{i}.md", "summary": "s", "distance": 0.1, "via": ["semantic"]} for i in range(6)]
+    assert len(iirc.recall_filter(rows)) == 3
+    iirc.main(["pages", "5"])
+    assert "up to 5 pages" in capsys.readouterr().out
+    assert iirc.recall_pages() == 5 and len(iirc.recall_filter(rows)) == 5
+    assert iirc.read_config()["embedding_host"] == "http://h:1"   # the other settings stay
+    iirc.main(["pages"])
+    assert "up to 5 pages" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        iirc.main(["pages", "0"])
+    iirc.write_config_file({"recall_pages": "lots"})
+    assert iirc.recall_pages() == 3
 
 
 def test_clip_cuts_at_a_word_boundary():

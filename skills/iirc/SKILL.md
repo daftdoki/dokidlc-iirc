@@ -27,6 +27,7 @@ iirc migrate                            move a repository and this machine from 
 iirc doctor --fix                       install or repair prerequisites; clone missing remote stores
 iirc init                               create .iirc/ and the CLAUDE.md paragraph
 iirc stores                             the stores, their page counts, and anything not committed or pushed
+iirc pages [N]                          how many pages the hook names at most (default 3); N sets it on this machine
 iirc sync                               commit, pull, and push the remote stores
 ```
 
@@ -83,8 +84,11 @@ and commit on their word.
 ## When to search
 
 A hook searches iirc on every prompt and, when pages match, adds one
-line naming them with the exact `iirc read` command. Read those pages
-before you do anything else. The same hook runs when a shell command
+line naming them with the exact `iirc read` command. Each page ends with
+how it matched: `[69% match, meaning+term]`, higher is closer, or
+`[term match]`, a shared word and no closeness of meaning. Read the
+percentage pages before you do anything else; read a term-match page
+when its summary fits the task. The same hook runs when a shell command
 fails, with the command and its error as the query.
 
 The hook is silent when nothing matched or the prompt was short. Then

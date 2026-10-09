@@ -41,6 +41,7 @@ const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)
 const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
+const PAGES_ARGS_RE = /^\s*pages(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
 const KEEP = 200
@@ -235,10 +236,21 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
-  // `/iirc status on|off` turns the hint-row line on or off; every other /iirc goes to the skill.
+  // `/iirc status on|off` turns the hint-row line on or off, and `/iirc pages N` sets how many pages
+  // recall names; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
+    if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
+    const pagesArgs = PAGES_ARGS_RE.exec(e.args)
+    if (pagesArgs) {
+      // the recall hook runs in the CLI, so the CLI keeps the number, in the machine config
+      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'pages', ...(pagesArgs[1] ? [pagesArgs[1]] : [])], {
+        cwd: await $.session.root(),
+        timeoutMs: 15000,
+      })
+      return { text: (ran.stdout || ran.stderr).trim() }
+    }
     const m = STATUS_ARGS_RE.exec(e.args)
-    if ((e.command !== 'iirc' && e.command !== 'iirc:iirc') || !m) return next(e)
+    if (!m) return next(e)
     if (m[1]) {
       const isOn = m[1] === 'on'
       await $.store.set('isStatusShown', isOn)
@@ -336,7 +348,7 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
   const { Box, Button, Text } = $.ui.resolve(e)
   const toggle = () => update($, open, map => keepLast(map, id, !(map[id] === true)))
   const noun = pages.length === 1 ? 'page' : 'pages'
-  const label = verb === 'suggested' ? `${noun} suggested` : `${noun} ${pages.length === 1 ? 'matches' : 'match'} this error`
+  const label = verb === 'suggested' ? `${noun} suggested` : `${noun} suggested for this error`
   return (
     <Box key={`iirc-${id}`} flexDirection="column" paddingLeft={3}>
       {/* the whole row is one button, so a click on the words opens the list too */}

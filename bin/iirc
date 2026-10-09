@@ -808,9 +808,30 @@ def row_current(r: dict) -> bool:
 RECALL_MIN_PROMPT = 40
 RECALL_SEMANTIC_ONLY = 0.28      # a semantic hit alone must be this close
 RECALL_BOTH = 0.34               # a semantic hit backed by a strong term must be this close
-RECALL_MAX_BYTES = 480
+RECALL_PAGES = 3             # pages a recall line names at most; `iirc pages N` changes it per machine
 IDENTIFIER_RE = re.compile(r"[0-9._-]")
 ANSWER_RE = re.compile(r"^(yes|yeah|no|nope|ok|okay|agreed?|go( ahead)?|sure|done|thanks?|correct)\b", re.I)
+
+
+def recall_pages() -> int:
+    """How many pages a recall line names at most: `recall_pages` in the machine config, 1 to 10."""
+    n = read_config().get("recall_pages", RECALL_PAGES)
+    return n if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= 10 else RECALL_PAGES
+
+
+def recall_max_bytes() -> int:
+    """Room for every page the line may name, with its score, one of them suspect."""
+    return 120 + 200 * recall_pages()
+
+
+def cmd_pages(args: argparse.Namespace) -> None:
+    if args.n is None:
+        print(f"recall names up to {recall_pages()} page{'s' if recall_pages() != 1 else ''}; `iirc pages N` changes it (1 to 10)")
+        return
+    if not 1 <= args.n <= 10:
+        die("pages must be 1 to 10")
+    path = write_config_file({**read_config(), "recall_pages": args.n})
+    print(f"recall names up to {args.n} page{'s' if args.n != 1 else ''}; written to {path}")
 
 
 def recall_worthy(prompt: str) -> bool:
@@ -842,7 +863,7 @@ def recall_filter(rows: list[dict]) -> list[dict]:
             keep.append({**r, "rule": "meaning"})
         elif not sem and strong_term:
             keep.append({**r, "rule": "term"})
-    return keep[:3]
+    return keep[:recall_pages()]
 
 
 def clean(text: str, limit: int = 160) -> str:
@@ -869,7 +890,7 @@ def clip(text: str, limit: int) -> str:
 
 
 def recall_line(rows: list[dict]) -> str:
-    """One line, at most RECALL_MAX_BYTES, naming the read command for each page."""
+    """One line, at most recall_max_bytes(), naming the read command for each page."""
     if not rows:
         return ""
     parts = []
@@ -885,7 +906,7 @@ def recall_line(rows: list[dict]) -> str:
         return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read before you investigate: " + " · ".join(ps)
 
     # drop whole entries from the end rather than cut a page name in half
-    while len(parts) > 1 and len(render(parts).encode()) > RECALL_MAX_BYTES:
+    while len(parts) > 1 and len(render(parts).encode()) > recall_max_bytes():
         parts.pop()
     return render(parts)
 
@@ -1918,7 +1939,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         print("  2. a remote ollama host")
         choice = input("1 or 2: ").strip()
         host = normalize_host(input("host, like http://frame:11434: ").strip()) if choice == "2" else normalize_host(DEFAULT_HOST)
-    values = {"semantic": semantic}
+    values = {**read_config(), "semantic": semantic}   # keep keys setup does not ask about
     if host:
         values["embedding_host"] = host
     elif read_config().get("embedding_host"):
@@ -2764,6 +2785,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", help="embeddings from a remote ollama host (implies --semantic)")
     p.set_defaults(func=cmd_setup)
 
+    p = sub.add_parser("pages", help="how many pages a recall line names at most, on this machine")
+    p.add_argument("n", nargs="?", type=int, metavar="N", help="1 to 10; without N, print the current number")
+    p.set_defaults(func=cmd_pages)
+
     p = sub.add_parser("init", help="create .iirc/ and the CLAUDE.md paragraph")
     p.set_defaults(func=cmd_init)
 
@@ -2799,9 +2824,9 @@ def main(argv: list[str] | None = None) -> None:
     if CONFIG_ERROR:
         if args.command in ("recall", "nudge") or (args.command == "doctor" and args.brief):
             return   # hooks fail open
-        if args.command not in ("setup", "stats"):
+        if args.command not in ("setup", "stats", "pages"):
             die(CONFIG_ERROR)
-    if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats", "migrate"):
+    if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats", "migrate", "pages"):
         check_format()
     args.func(args)
 

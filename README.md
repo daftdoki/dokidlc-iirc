@@ -159,14 +159,22 @@ plugin draws them for you:
   asked to write a page.
 - Under the prompt, beside Claude Code's own hint, one line with the page
   count, how many pages this session has read and written, and the search
-  mode: `● iirc: [73] pages · [3] reads · [1] writes · [semantic+keyword] mode`.
+  mode: `● iirc: [73] pages · [2/5] used · [3] reads · [1] writes · [semantic+keyword] mode`.
   The circle is green when all is well, yellow when the session-start
   check has a warning such as a suspect page, and red when iirc needs
-  setup or migration. The mode is `keyword` without an embedding host. A `write`,
+  setup or migration; when it is not green, the line ends with the
+  command that fixes it, such as `· run iirc doubt`. The mode is
+  `keyword` without an embedding host. A `write`,
   `delete`, or `sync` updates the page count, a `read` or `pull` the
   reads, and a `write` the writes. `/iirc status off` hides the line and
   `/iirc status on` brings it back; it is on by default, and the choice
-  holds on that machine.
+  holds on that machine. `[used/suggested] used` counts the pages recall
+  named this session and how many of them were then read.
+- Each suggested page shows how it matched: `[69% match, meaning+term]`
+  (100% less its semantic distance, and the rule that let it through) or
+  `[term match]`. The agent sees the same score in its line.
+  `/iirc pages N` sets how many pages recall names at most, 3 by default;
+  the number holds on that machine.
 - Warnings from the session-start check, and the nudge at stop, come as
   toasts.
 

@@ -152,7 +152,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       requestId: 't1',
       props: { tool_use_id: 't1', tool: 'Bash', input: {}, isRunning: false, isErrored: true, isInterrupted: false },
     })
-    expect(await failed.find({ text: 'pages match this error' })).toBeDefined()
+    expect(await failed.find({ text: 'pages suggested for this error' })).toBeDefined()
     const fixed = await $.ui.mount({
       plugin: 'iirc',
       surface,
@@ -169,7 +169,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       requestId: 'g1',
       props: { calls: [{ ...call, tool_use_id: 't1' }, { ...call, tool_use_id: 't2' }, { ...call, tool_use_id: 't3' }], isActive: false, isExpanded: false },
     })
-    expect(await group.find({ text: 'pages match this error' })).toBeDefined()
+    expect(await group.find({ text: 'pages suggested for this error' })).toBeDefined()
     expect(await group.find({ text: /failed 2 times, then worked/ })).toBeDefined()
     await group.press({ key: 'toggle-t1' })
     expect(await group.find({ text: 'alpha-page' })).toBeDefined()
@@ -180,7 +180,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       requestId: 'g2',
       props: { calls: [{ ...call, tool_use_id: 't1' }], isActive: false, isExpanded: true },
     })
-    expect(await unfolded.find({ text: 'pages match this error' })).toBeUndefined()
+    expect(await unfolded.find({ text: 'pages suggested for this error' })).toBeUndefined()
   })
 }
 
@@ -259,6 +259,16 @@ test('/iirc status off hides the hint-row line, on shows it, and other /iirc arg
   expect((await $.command.run({ command: 'iirc', args: 'status on' })).text).toBe('iirc status on')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'search hooks' })).text).toBe('the skill ran')
+})
+
+test('/iirc pages N asks the CLI to keep the number', async ($: Engine, on: On) => {
+  engine(on)
+  const argv: string[][] = []
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'recall names up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  expect((await $.command.run({ command: 'iirc:iirc', args: 'pages 5' })).text).toBe('recall names up to 5 pages')
+  expect(argv[0].slice(1)).toEqual(['pages', '5'])
+  await $.command.run({ command: 'iirc', args: 'pages' })
+  expect(argv[1].slice(1)).toEqual(['pages'])
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
