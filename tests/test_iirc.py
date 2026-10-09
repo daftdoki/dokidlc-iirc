@@ -797,14 +797,15 @@ def test_stats(tmp_path, monkeypatch, capsys):
     assert "1 session" in out and "read after a search or recall named it: 1/1" in out
 
 
-def test_stats_session_counts_distinct_pages_read(tmp_path, monkeypatch, capsys):
+def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s5"); iirc.set_root(tmp_path)
     iirc.log_event("read", pages=["a.md", "b.md"]); iirc.log_event("pull", query="q", hits=2, pages=["b.md", "c.md"])
     iirc.log_event("search", query="q", hits=1, pages=["d.md"])
+    iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"]}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"]}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

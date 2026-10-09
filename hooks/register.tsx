@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, ResolveInput } from 'claude-code'
 
-import type { IircStatus, RecalledPage, ToolNote } from '../types'
+import type { IircStatus, RecalledPage, SessionCounts, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -18,7 +18,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const readCount = atom({ plugin: 'iirc', key: 'readCount' } as const, 0)
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0 })
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
@@ -30,7 +30,7 @@ const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S+|string only|string searc
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|setup|init|doctor)\b/
-const READS_RE = /\biirc\s+(read|pull)\b/
+const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 const STATUS_ARGS_RE = /^\s*status(?:\s+(on|off))?\s*$/
 const KEEP = 200
@@ -82,9 +82,9 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
 }
 
 /** The hint row's text after the circle. */
-export function statusText(s: IircStatus, reads: number): string {
+export function statusText(s: IircStatus, c: SessionCounts): string {
   if (s.pages === null) return `iirc: ${s.note}`
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${reads}] read · [${s.mode}] mode`
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -115,8 +115,8 @@ async function showBrief($: EngineInterface, text: string) {
   }
 }
 
-/** Ask iirc how many distinct pages this session has read, from its log. */
-function refreshReads($: EngineInterface) {
+/** Ask iirc how many distinct pages this session has read and written, from its log. */
+function refreshCounts($: EngineInterface) {
   $.clock.after(0, () => {
     void (async () => {
       if (!(await uiEnabled($))) return
@@ -125,9 +125,9 @@ function refreshReads($: EngineInterface) {
         timeoutMs: 15000,
       })
       if (ran.exitCode !== 0) return
-      const pages = (JSON.parse(ran.stdout) as { read?: unknown }).read
-      if (!Array.isArray(pages)) return
-      await update($, readCount, () => pages.length)
+      const { read: reads, written } = JSON.parse(ran.stdout) as { read?: unknown; written?: unknown }
+      if (!Array.isArray(reads) || !Array.isArray(written)) return
+      await update($, counts, () => ({ reads: reads.length, writes: written.length }))
     })().catch(() => {})
   })
 }
@@ -154,7 +154,7 @@ export const register: Register = on => {
     const result = await next(e)
     $.ui.status(undefined)   // earlier versions drew the brief on the status line
     refreshBrief($)
-    refreshReads($)
+    refreshCounts($)
     try {
       if ((await $.store.get('isStatusShown')) === false) await update($, isStatusShown, () => false)
     } catch {}   // the line stays on, the default
@@ -167,7 +167,7 @@ export const register: Register = on => {
     // keep the hint row's page count and read count current within the session
     if (e.tool === 'Bash') {
       if (CHANGES_BRIEF_RE.test(e.command)) refreshBrief($)
-      if (READS_RE.test(e.command)) refreshReads($)
+      if (COUNTS_RE.test(e.command)) refreshCounts($)
     }
     return result
   })
@@ -221,14 +221,14 @@ export const register: Register = on => {
     const s = await read($, status)
     const original = await next(e)
     if (s === null || !(await read($, isStatusShown))) return original
-    const reads = await read($, readCount)
+    const c = await read($, counts)
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {original}
         <Box flexDirection="row">
           <Text color={LEVEL_COLOR[s.level]}>● </Text>
-          <Text color="subtle">{statusText(s, reads)}</Text>
+          <Text color="subtle">{statusText(s, c)}</Text>
         </Box>
       </Box>
     )

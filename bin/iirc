@@ -2635,10 +2635,11 @@ def cmd_nudge(args: argparse.Namespace) -> None:
 
 def cmd_stats(args: argparse.Namespace) -> None:
     if args.session is not None:
-        # one session, for the status line: the distinct pages it read or pulled
+        # one session, for the line under the prompt: the distinct pages it read or pulled, and wrote
         rows = [r for r in read_log(session=args.session or session_id()) if r.get("repo") == str(ROOT)]
         read = sorted({p for r in rows if r["cmd"] in ("read", "pull") for p in r.get("pages") or []})
-        print(json.dumps({"session": args.session or session_id(), "read": read}))
+        written = sorted({r["page"] for r in rows if r["cmd"] == "write" and r.get("page")})
+        print(json.dumps({"session": args.session or session_id(), "read": read, "written": written}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}
@@ -2766,7 +2767,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("stats", help="how the pages are being used, from the local log")
     p.add_argument("--days", type=int, default=7)
-    p.add_argument("--session", nargs="?", const="", metavar="ID", help="JSON: the pages one session read or pulled; this session without ID")
+    p.add_argument("--session", nargs="?", const="", metavar="ID", help="JSON: the pages one session read or pulled, and wrote; this session without ID")
     p.set_defaults(func=cmd_stats)
 
     args = parser.parse_args(argv)
