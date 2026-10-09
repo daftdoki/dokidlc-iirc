@@ -20,6 +20,7 @@ const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
 const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0 })
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
+const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -156,7 +157,9 @@ async function helpText($: EngineInterface): Promise<string> {
     const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'max-suggested'], { cwd: await $.session.root(), timeoutMs: 15000 })
     max = /up to (\d+)/.exec(ran.stdout)?.[1] ?? '?'
   } catch {}
-  const head = s === null ? 'iirc: no session brief yet' : statusText(s, await read($, counts))
+  if (max !== '?') await update($, maxSuggested, () => Number(max))
+  // the engine puts the plugin's name in front of a command's text
+  const head = s === null ? 'no session brief yet' : statusText(s, await read($, counts)).replace(/^iirc: /, '')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   return [
     `${head} · status ${shown} · max-suggested ${max}`,
@@ -282,6 +285,13 @@ export const register: Register = on => {
     return { text: `iirc status is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc status on|off changes it` }
   })
 
+  // A plain /iirc draws its help as a panel in place of the text row.
+  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
+    const isIirc = e.props.command === 'iirc' || e.props.command === 'iirc:iirc'
+    if (!isIirc || e.props.args.trim() !== '' || e.props.isErrored) return next(e)
+    return drawHelp($, e, await read($, status), await read($, counts), await read($, isStatusShown), await read($, maxSuggested))
+  })
+
   // The brief under the prompt, beside the engine's hint: a status line takes no color.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const s = await read($, status)
@@ -347,6 +357,69 @@ export const register: Register = on => {
     )
   })
 
+}
+
+function drawHelp($: EngineInterface, e: ResolveInput, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null) {
+  const { Box, Text } = $.ui.resolve(e)
+  const stat = (n: number | string, label: string) => (
+    <>
+      <Text bold color="claude">{String(n)}</Text>
+      <Text color="subtle">{` ${label}`}</Text>
+    </>
+  )
+  const dot = <Text color="subtle">{'  ·  '}</Text>
+  const row = (label: string, value: string, command: string) => (
+    <Box flexDirection="row">
+      <Box width={16} flexShrink={0}><Text color="subtle">{label}</Text></Box>
+      <Box width={12} flexShrink={0}><Text bold>{value}</Text></Box>
+      <Text color="suggestion">{command}</Text>
+    </Box>
+  )
+  return (
+    <Box flexDirection="column" paddingLeft={2}>
+      <Box flexDirection="row">
+        <Text color={s ? LEVEL_COLOR[s.level] : 'subtle'}>● </Text>
+        <Text bold color="claude">iirc</Text>
+        <Text>{'   '}</Text>
+        {s && s.pages !== null ? (
+          <>
+            {stat(s.pages, s.pages === 1 ? 'page' : 'pages')}
+            {dot}
+            {stat(`${c.used}/${c.suggested}`, 'used')}
+            {dot}
+            {stat(c.reads, 'reads')}
+            {dot}
+            {stat(c.writes, 'writes')}
+            {s.mode !== 'semantic+keyword' && (
+              <>
+                {dot}
+                <Text color="warning">{`${s.mode} mode`}</Text>
+              </>
+            )}
+          </>
+        ) : (
+          <Text color="subtle">{s ? s.note : 'no session brief yet'}</Text>
+        )}
+      </Box>
+      {s && s.level !== 'ok' && s.fix && (
+        <Box flexDirection="row" paddingLeft={2}>
+          <Text color={LEVEL_COLOR[s.level]}>{'fix  '}</Text>
+          <Text bold>{`run ${s.fix}`}</Text>
+        </Box>
+      )}
+      <Text> </Text>
+      {row('line under prompt', isShown ? 'on' : 'off', '/iirc status on|off')}
+      {row('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
+      <Text> </Text>
+      <Box flexDirection="row">
+        <Box width={16} flexShrink={0}><Text color="subtle">ask in words</Text></Box>
+        <Text color="suggestion">/iirc &lt;request&gt;</Text>
+      </Box>
+      <Box flexDirection="row" paddingLeft={16}>
+        <Text dimColor italic>what do we know about ollama hangs? · remember that… · what's out of date?</Text>
+      </Box>
+    </Box>
+  )
 }
 
 function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNote, isOpen: boolean) {

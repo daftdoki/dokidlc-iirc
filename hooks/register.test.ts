@@ -267,9 +267,30 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'recall suggests up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await hookRow($, 'SessionStart', BRIEF, 'h8')
   const text = (await $.command.run({ command: 'iirc:iirc', args: '  ' })).text
-  expect(text).toContain(LINE + ' · status on · max-suggested 4')
+  expect(text).toContain(LINE.replace('iirc: ', '') + ' · status on · max-suggested 4')
   expect(text).toContain('/iirc max-suggested N')
   expect(text).not.toContain('the skill ran')
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const panel = await $.ui.mount({
+      plugin: 'iirc',
+      surface,
+      component: 'CommandOutput',
+      requestId: `help-${surface}`,
+      props: { command: 'iirc:iirc', args: '', text, isErrored: false },
+    })
+    expect(await panel.find({ text: '68' })).toBeDefined()
+    expect(await panel.find({ text: 'up to 4' })).toBeDefined()
+    expect(await panel.find({ text: '/iirc max-suggested N' })).toBeDefined()
+    expect(await panel.find({ text: 'run iirc doctor' })).toBeDefined()
+  }
+  const other = await $.ui.mount({
+    plugin: 'iirc',
+    surface: 'terminal',
+    component: 'CommandOutput',
+    requestId: 'not-help',
+    props: { command: 'iirc:iirc', args: 'status', text: 'iirc status is on', isErrored: false },
+  })
+  expect(await other.find({ text: 'up to 4' })).toBeUndefined()
 })
 
 test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {

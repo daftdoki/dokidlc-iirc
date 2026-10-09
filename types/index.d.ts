@@ -25,6 +25,8 @@ declare module 'claude-code' {
       counts: SessionCounts
       /** Whether the hint row shows the brief; `/iirc status on|off`, kept in $.store. */
       isStatusShown: boolean
+      /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */
+      maxSuggested: number | null
     }
   }
 }
