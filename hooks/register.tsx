@@ -287,6 +287,11 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   ].join('\n')
 }
 
+/** A text cut to a width with an ellipsis, for a row of one-character Texts that would otherwise shrink some to nothing. */
+export function fitTo(text: string, width: number): string {
+  return text.length <= width ? text : text.slice(0, Math.max(0, width - 1)) + '…'
+}
+
 /** A page name as a tab label: no `.md`, cut to TAB_TITLE_MAX. */
 export function tabTitle(name: string, max = TAB_TITLE_MAX): string {
   const bare = name.replace(/\.md$/, '')
@@ -318,6 +323,8 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
   const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   if (!opened.isPlaced) $.ui.toast(`iirc: the reader is waiting: ${opened.reason}; /iirc reader opens it`)
+  // while the page loads, the ring stays off the keys row too, where Enter would close the tab or the reader
+  await $.ui.focus({ requestId: PANE, key: 'tab-page' }).catch(() => undefined)
   let page: ShownPage | null = null
   let error: string | null = null
   try {
@@ -338,6 +345,9 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
     loading: null,
     history: isBack || !page || !r.page || r.page.label === page.label ? r.history : [...r.history, r.page.label].slice(-20),
   }))
+  // the name that held the focus ring is gone with the session tab, and the ring would fall on the next button, `x`,
+  // so a second Enter would close the page; the page's own tab chip takes it, where Enter changes nothing
+  if (page) await $.ui.focus({ requestId: PANE, key: 'tab-page' }).catch(() => undefined)
 }
 
 /** The page before this one, if the reader has one. */
@@ -419,8 +429,8 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
     })
   }
   scrollRest = 0
-  // a link takes the focus ring, so Enter opens it; the drawn › shows where the cursor is either way
-  if (!key.startsWith('para-')) await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+  // a link takes the focus ring, so Enter opens it; on a paragraph the page's tab chip holds it, where Enter changes nothing
+  await $.ui.focus({ requestId: PANE, key: key.startsWith('para-') ? 'tab-page' : key }).catch(() => undefined)
 }
 
 /** The Session tab, with its numbers fresh. */
@@ -607,9 +617,9 @@ export const register: Register = on => {
       // unfold the latest suggested-pages row, the keyboard's way to what a click on [+] does
       const keys = Object.keys(await read($, byPrompt))
       const last = keys[keys.length - 1]
-      if (!last) return { text: 'iirc: no suggested pages yet this session' }
+      if (!last) return { text: 'no suggested pages yet this session' }
       await update($, open, map => keepLast(map, last, true))
-      return { text: 'iirc: the latest suggested pages are unfolded above' }
+      return { text: 'the latest suggested pages are unfolded above' }
     }
     const readerArgs = READER_ARGS_RE.exec(e.args)
     if (readerArgs) {
@@ -1077,8 +1087,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {/* two lines: one row this wide would shrink every piece and wrap each word */}
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
-        {/* one Text per character, each a step along the gradient */}
-        {[...TAGLINE].map((ch, k) => (
+        {/* one Text per character, each a step along the gradient; cut to the card, or the row drops letters to fit */}
+        {[...fitTo(TAGLINE, inner - 9)].map((ch, k) => (
           <Text key={k} italic color={mix(TAGLINE_FROM, TAGLINE_TO, k / (TAGLINE.length - 1))}>{ch}</Text>
         ))}
       </Box>

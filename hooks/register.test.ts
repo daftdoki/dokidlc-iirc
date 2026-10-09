@@ -665,6 +665,8 @@ test('the status card is never wider than the terminal', async ($: Engine, on: O
     return (card as { props?: { width?: number } } | undefined)?.props?.width
   }
   expect(await widthOf('narrow', 40)).toBe(40)
+  const narrow = await mount('narrow-tagline', 40)
+  expect(await narrow.find({ text: '…' })).toBeDefined()                 // the tagline is cut, not squeezed letter by letter
   expect(await widthOf('wide', 200)).toBeLessThan(200)          // a wide terminal: as wide as the widest row
 })
 
