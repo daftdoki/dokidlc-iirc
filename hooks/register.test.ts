@@ -50,7 +50,7 @@ async function promptRow($: Engine, uuid: string) {
   })
 }
 
-const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · [semantic+keyword] mode · run iirc doctor'
+const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · run iirc doctor'
 
 // The hint row as the terminal draws it under the prompt, mounted fresh each time.
 let mounts = 0
@@ -244,7 +244,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · [semantic+keyword] mode · run iirc doctor')).toBe(true)
+  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run iirc doctor')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
 })
 

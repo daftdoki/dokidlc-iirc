@@ -159,12 +159,13 @@ plugin draws them for you:
   asked to write a page.
 - Under the prompt, beside Claude Code's own hint, one line with the page
   count, how many pages this session has read and written, and the search
-  mode: `● iirc: [73] pages · [2/5] used · [3] reads · [1] writes · [semantic+keyword] mode`.
+  mode: `● iirc: [73] pages · [2/5] used · [3] reads · [1] writes`.
   The circle is green when all is well, yellow when the session-start
   check has a warning such as a suspect page, and red when iirc needs
   setup or migration; when it is not green, the line ends with the
-  command that fixes it, such as `· run iirc doubt`. The mode is
-  `keyword` without an embedding host. A `write`,
+  command that fixes it, such as `· run iirc doubt`. The search mode
+  shows only when it is not the default semantic search:
+  `· [keyword] mode` means no embedding host. A `write`,
   `delete`, or `sync` updates the page count, a `read` or `pull` the
   reads, and a `write` the writes. `/iirc status off` hides the line and
   `/iirc status on` brings it back; it is on by default, and the choice

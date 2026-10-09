@@ -115,7 +115,9 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
 export function statusText(s: IircStatus, c: SessionCounts): string {
   const fix = s.level !== 'ok' && s.fix ? ` · run ${s.fix}` : ''
   if (s.pages === null) return `iirc: ${s.note}${fix}`
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes · [${s.mode}] mode${fix}`
+  // the mode shows only when it is not the default, so a weaker search stands out
+  const mode = s.mode === 'semantic+keyword' ? '' : ` · [${s.mode}] mode`
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes${mode}${fix}`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
