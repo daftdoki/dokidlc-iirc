@@ -943,7 +943,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["stats", "--session", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0}
     iirc.main(["stats", "--session"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 
@@ -1045,8 +1045,50 @@ def test_config_error_kills_commands_and_silences_hooks(tmp_path, monkeypatch, c
     assert ".claude/iirc.toml" in capsys.readouterr().err
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "a prompt long enough to be worth a recall search here"})))
     iirc.main(["recall"])
-    iirc.main(["doctor", "--brief"])
     assert capsys.readouterr() == ("", "")
+    # the brief says the hooks are off and names the fix, so the hint row turns red
+    iirc.main(["doctor", "--brief"])
+    out = capsys.readouterr().out
+    assert out.startswith("iirc: hooks off, .claude/iirc.toml") and "`iirc doctor`" in out
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    assert "FAIL .claude/iirc.toml loads, so the hooks run" in capsys.readouterr().out
+
+
+def test_doctor_fix_comments_out_a_bad_knob(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / ".claude").mkdir()
+    toml = tmp_path / ".claude" / "iirc.toml"
+    toml.write_text("ui = true\n\n[recall]\nsemantic_only = 0.9   # too loose\nboth = 0.34\n")
+    iirc.main(["doctor", "--brief"])
+    assert "`iirc doctor --fix`" in capsys.readouterr().out
+    monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor", "--fix"])
+    out = capsys.readouterr().out
+    assert "commented out `semantic_only = 0.9   # too loose`" in out and "ok  .claude/iirc.toml loads" in out
+    assert "# semantic_only = 0.9   # too loose  # iirc doctor --fix: must be a number from 0.1 to 0.6" in toml.read_text()
+    assert "ui = true" in toml.read_text() and "\nboth = 0.34" in toml.read_text()
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL["semantic_only"] == 0.28
+    # a broken store table is the person's to fix: doctor names it and does not touch the file
+    toml.write_text("[stores.x]\nkind = \"nope\"\n")
+    iirc.set_root(tmp_path)
+    assert not iirc.knob_error_only()
+
+
+def test_a_killed_recall_is_logged_as_a_timeout_at_the_next(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s11"); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
+    marker = iirc.inflight_marker(); marker.parent.mkdir(parents=True); marker.write_text("2026-10-09T00:00:00Z")   # as a killed recall leaves it
+    iirc.run_recall("a query long enough to search", "prompt", {})
+    rows = iirc.read_log(session="s11")
+    assert [r["cmd"] for r in rows] == ["timeout", "recall"] and rows[0]["started"] == "2026-10-09T00:00:00Z"
+    assert not marker.exists()                       # a finished recall removes its marker
+    assert iirc.session_summary("s11")["timeouts"] == 1
 
 
 def test_config_text_lists_every_store(tmp_path, monkeypatch):

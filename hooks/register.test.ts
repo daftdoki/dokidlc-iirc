@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import { liveStatus, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 
 const RECALL =
   'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -93,17 +93,17 @@ test('parses the recovery nudge and the brief', () => {
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc setup` with their answer.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null } })).toBe('iirc: needs setup · run iirc setup')
+  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc setup')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc setup` to fix). Topics: x 5.')!
   expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc setup' })
   expect(down.warnings).toEqual([])
-  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null } })).toBe('iirc: needs init · run iirc init')
+  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc doubt')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
-  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2, missed: [], match: { all: null, read: null, unread: null } })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
-  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null } })).toBe('iirc: needs migration · run iirc migrate')
+  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
+  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs migration · run iirc migrate')
 })
 
 test('wraps page lines by word and keeps each part styled', () => {
@@ -445,4 +445,18 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   expect(await card.find({ text: ' ×4' })).toBeDefined()
   expect(await card.find({ text: '62%' })).toBeDefined()
   expect(await card.find({ text: ' · not read ' })).toBeDefined()
+})
+
+
+test('a config error reads as hooks off, and a timed-out recall turns the line yellow', () => {
+  const off = parseBrief('iirc: hooks off, .claude/iirc.toml: [recall] semantic_only must be a number from 0.1 to 0.6. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.')!
+  expect(off.status.level).toBe('error')
+  expect(statusText(off.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: hooks off · run iirc doctor --fix')
+  const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read them.')!.status
+  const c = { reads: 1, writes: 0, suggested: 2, used: 1, missed: [], match: { all: null, read: null, unread: null }, timeouts: 2 }
+  expect(liveStatus(ok, c).level).toBe('warn')
+  expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run iirc doctor')
+  const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. 3 recalls timed out in the last 7 days, past the hook\'s 5 s limit: iirc doctor names the cause.')!
+  expect(brief.status.level).toBe('warn')
+  expect(brief.status.fix).toBe('iirc doctor')
 })

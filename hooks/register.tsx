@@ -19,7 +19,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
@@ -36,6 +36,7 @@ const WARNING_FIX: [RegExp, string][] = [
   [/not pushed/, 'iirc sync'],
   [/Persistence:/, 'iirc doctor --fix'],
   [/near-duplicate/, 'iirc doctor'],
+  [/timed out/, 'iirc doctor'],
 ]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
@@ -57,6 +58,7 @@ const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keywo
 const DEMO_COUNTS: SessionCounts = {
   reads: 58, writes: 9, suggested: 42, used: 31,
   match: { all: 68, read: 74, unread: 55 },
+  timeouts: 0,
   missed: [['ollama-keep-alive-for-the-embed-model.md', 4], ['plugin-cache-keeps-old-versions.md', 3], ['gh-auth-on-a-new-machine.md', 2]],
 }
 const DEMO_HEALTH: IircHealth = {
@@ -151,6 +153,8 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
         ? 'needs setup'
         : /no \.iirc\//.test(line)
           ? 'needs init'
+          : /^iirc: hooks off/.test(line)
+            ? 'hooks off'
           : /no store/.test(line)
             ? 'needs a store'
             : /newer iirc plugin/.test(line)
@@ -172,12 +176,19 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
 }
 
 /** The hint row's text after the circle. */
+/** The brief's status, turned yellow when a recall this session ran past the hook's time limit. */
+export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
+  return s.level === 'ok' && c.timeouts > 0 ? { ...s, level: 'warn', fix: 'iirc doctor' } : s
+}
+
 export function statusText(s: IircStatus, c: SessionCounts): string {
+  s = liveStatus(s, c)
   const fix = s.level !== 'ok' && s.fix ? ` · run ${s.fix}` : ''
   if (s.pages === null) return `iirc: ${s.note}${fix}`
   // the mode shows only when it is not the default, so a weaker search stands out
   const mode = s.mode === 'semantic+keyword' ? '' : ` · [${s.mode}] mode`
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes${mode}${fix}`
+  const timedOut = c.timeouts > 0 ? ` · [${c.timeouts}] timed out` : ''
+  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes${timedOut}${mode}${fix}`
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -290,7 +301,8 @@ function refreshCounts($: EngineInterface) {
       const n = (key: string) => (Array.isArray(got[key]) ? (got[key] as unknown[]).length : 0)
       const missed = Array.isArray(got.missed) ? (got.missed as [string, number][]) : []
       const match = { ...NO_MATCH, ...(got.match as Partial<MatchAverages> | undefined) }
-      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match }))
+      const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
+      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
     })().catch(() => {})
   })
 }
@@ -435,7 +447,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {original}
         <Box flexDirection="row">
-          <Text color={LEVEL_COLOR[s.level]}>● </Text>
+          <Text color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>
           <Text color="subtle">{statusText(s, c)}</Text>
         </Box>
       </Box>
@@ -508,6 +520,7 @@ function mix(a: string, b: string, t: number): string {
 // The cards align to the start, so each is only as wide as its longest line; the terminal still caps it.
 function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
   const { Box, Text } = $.ui.resolve(e)
+  if (s) s = liveStatus(s, c)
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
   // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
   const isHealthWarn = !!checkup && (checkup.suspect.length > 0 || isUnpushed)

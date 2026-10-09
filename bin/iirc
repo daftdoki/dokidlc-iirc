@@ -236,6 +236,51 @@ KNOBS: dict[str, tuple[float, float, float, str]] = {
 RECALL: dict[str, float] = {k: v[0] for k, v in KNOBS.items()}
 
 
+def knob_error_only() -> bool:
+    """True when .claude/iirc.toml fails only on its [recall] knobs, which `doctor --fix` can reset."""
+    try:
+        cfg = read_store_config(ROOT)
+        load_stores(ROOT)
+    except ConfigError:
+        return False
+    try:
+        load_knobs(cfg)
+    except ConfigError:
+        return isinstance(cfg.get("recall"), dict)
+    return False
+
+
+def bad_knobs(sec: dict) -> dict[str, str]:
+    """Each [recall] key that fails, with why."""
+    bad = {k: "no such knob" for k in sec if k not in KNOBS}
+    for name, (_, low, high, _) in KNOBS.items():
+        v = sec.get(name)
+        if name in sec and (isinstance(v, bool) or not isinstance(v, (int, float)) or not low <= v <= high):
+            bad[name] = f"must be a number from {low} to {high}"
+    good = {k: sec[k] for k in KNOBS if k in sec and k not in bad}
+    if good.get("both", KNOBS["both"][0]) < good.get("semantic_only", KNOBS["semantic_only"][0]):
+        bad["both" if "both" in good else "semantic_only"] = "both must be at least semantic_only"
+    return bad
+
+
+def reset_bad_knobs() -> list[str]:
+    """Comment out each failing knob line in the [recall] table, so its default applies; the lines it changed."""
+    path = ROOT / STORE_CONFIG
+    bad = bad_knobs(read_store_config(ROOT).get("recall", {}))
+    out, changed, table = [], [], None
+    for line in path.read_text().splitlines(keepends=True):
+        head = re.match(r"\s*\[([^\]]+)\]", line)
+        if head:
+            table = head[1].strip()
+        key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
+        if table == "recall" and key and key[1] in bad:
+            changed.append(line.strip())
+            line = f"# {line.rstrip()}  # iirc doctor --fix: {bad[key[1]]}\n"
+        out.append(line)
+    path.write_text("".join(out))
+    return changed
+
+
 def load_knobs(cfg: dict) -> dict[str, float]:
     """The [recall] table, each knob checked against its range; a missing knob takes its default."""
     sec = cfg.get("recall", {})
@@ -1093,6 +1138,23 @@ def recovered_commands(rows: list[dict] | None = None) -> list[tuple[str, int]]:
 
 
 EVAL_CANDIDATES = 25   # candidates logged per recall, best ranked first
+RECALL_HOOK_TIMEOUT = 5   # seconds; hooks.json gives the recall hooks this limit, and Claude Code kills a hook past it
+
+
+def inflight_marker() -> Path:
+    return state_dir() / "inflight" / re.sub(r"[^A-Za-z0-9-]", "_", session_id())
+
+
+def note_timeout() -> None:
+    """A marker left by a recall that never finished means Claude Code killed it at the hook's limit: log it once."""
+    marker = inflight_marker()
+    try:
+        if marker.is_file():
+            started = marker.read_text().strip()
+            marker.unlink()
+            log_event("timeout", started=started, limit=RECALL_HOOK_TIMEOUT)
+    except OSError:
+        pass
 
 
 def run_recall(query: str, via: str, event: dict, **keys) -> str:
@@ -1102,6 +1164,13 @@ def run_recall(query: str, via: str, event: dict, **keys) -> str:
     scored and why each one the line left out was left out, for tuning recall.
     """
     start = time.monotonic()
+    note_timeout()
+    marker = inflight_marker()
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(now_iso())
+    except OSError:
+        pass
     verdicts = recall_verdicts(hybrid_search(query))
     passed = [r for r in verdicts if r["verdict"] == "passed"]
     line = recall_line(passed)
@@ -1121,6 +1190,7 @@ def run_recall(query: str, via: str, event: dict, **keys) -> str:
         "paths": r.get("via") or [], "rare_terms": r.get("rare_terms") or [], "head_terms": r.get("head_terms") or [],
         "rule": r["rule"], "verdict": r["verdict"], "kind": (r.get("fm") or {}).get("kind"),
     } for r in verdicts[:EVAL_CANDIDATES]])
+    marker.unlink(missing_ok=True)
     return line
 
 
@@ -2698,6 +2768,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
         def emit(line: str) -> None:
             print(hook_output(hook, line))
+        if CONFIG_ERROR:
+            fix = "iirc doctor --fix" if knob_error_only() else "iirc doctor"
+            emit(f"iirc: hooks off, {CONFIG_ERROR}. Every iirc hook stays quiet until it is fixed; run `{fix}`.")
+            return
         if old_layout():
             emit(MIGRATION_LINE)
             return
@@ -2762,6 +2836,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             close = sum(1 for d, _, _ in flagged_pairs(PAIR_BUDGET) if d <= DUPLICATE) if semantic_enabled() else 0
         except Exception:   # a hook must never fail the session start
             close = 0
+        timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
+        if timeouts:
+            parts.append(f"{timeouts} recall{'s' if timeouts != 1 else ''} timed out in the last 7 days, past the hook's {RECALL_HOOK_TIMEOUT} s limit: iirc doctor names the cause.")
         if close:
             parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.")
         if hook == "SessionStart":
@@ -2780,6 +2857,20 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         print(f"{'ok ' if good else 'FAIL'} {label}" + ("" if good else f"  ({fix})" if fix else ""))
         ok = ok and good
         return good
+
+    if CONFIG_ERROR and args.fix and knob_error_only():
+        for line in reset_bad_knobs():
+            print(f"iirc: {STORE_CONFIG}: commented out `{line}`; the knob takes its default")
+        set_root(ROOT)
+    if CONFIG_ERROR:
+        # nothing else can be checked: the stores are unknown, and every hook is quiet
+        report(f"{STORE_CONFIG} loads, so the hooks run", False,
+               "iirc doctor --fix comments out the bad [recall] knob" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
+        sys.exit(1)
+    report(f"{STORE_CONFIG} loads, so the hooks run", True)
+    timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
+    report(f"recall finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
+           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc setup")
 
     if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
         sys.exit(1)
@@ -2925,7 +3016,7 @@ def session_summary(session: str) -> dict:
     return {"session": session, "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed, "match": match,
             "read_unsuggested": unsuggested, "searches": sum(1 for r in rows if r["cmd"] == "search"),
             "recalls": sum(1 for r in rows if r["cmd"] == "recall"), "recalls_with_pages": sum(1 for r in rows if r["cmd"] == "recall" and r.get("pages")),
-            "skipped": sum(1 for r in rows if r["cmd"] == "skipped"),
+            "skipped": sum(1 for r in rows if r["cmd"] == "skipped"), "timeouts": sum(1 for r in rows if r["cmd"] == "timeout"),
             "suggested_verified": touched("verify"), "suggested_rewritten": touched("write"), "suggested_deleted": touched("delete")}
 
 
@@ -2933,6 +3024,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
     if args.snapshot:
         # SessionEnd and PreCompact: the session in one row, with the conditions it ran under; the last row per session wins
         event = read_event() if args.hook else {}
+        note_timeout()
         pages = sum(len(list_pages(st.dir)) for st in live_stores())
         summary = session_summary(session_id())
         log_event("session", trigger=str(event.get("hook_event_name") or "manual"), reason=event.get("reason") or event.get("trigger"),
@@ -2943,7 +3035,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
     if args.session is not None:
         # one session, for the line under the prompt
         summary = session_summary(args.session or session_id())
-        print(json.dumps({k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match")}))
+        print(json.dumps({k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}))
         return
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}
@@ -3090,9 +3182,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     set_root(project_root())
     if CONFIG_ERROR:
-        if args.command in ("recall", "nudge") or (args.command == "doctor" and args.brief):
-            return   # hooks fail open
-        if args.command not in ("setup", "stats", "max-suggested"):
+        if args.command in ("recall", "nudge"):
+            return   # hooks fail open; the session-start brief says why they are quiet
+        if args.command not in ("setup", "stats", "max-suggested", "doctor"):
             die(CONFIG_ERROR)
     if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats", "migrate", "max-suggested"):
         check_format()
