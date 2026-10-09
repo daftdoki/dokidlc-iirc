@@ -24,6 +24,8 @@ Usage:
   iirc cost                  bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
   iirc stats [--days N]      how the pages are being used
+  iirc knobs [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
+  iirc tune gather|judge|sweep|done  evidence and judgments for tuning recall, and a sweep of the knobs
   iirc setup                 semantic (default) or string search, and the embedding host; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
   iirc sync                  commit, pull, and push every remote store
@@ -906,11 +908,60 @@ def recall_max_bytes() -> int:
 
 
 def cmd_knobs(args: argparse.Namespace) -> None:
-    """The recall gate's knobs: each value, its default and range, and what it sets."""
+    """The recall gate's knobs: each value, its default and range, and what it sets. `set` writes one."""
+    if args.action == "set":
+        if args.name is None or args.value is None:
+            die("usage: iirc knobs set NAME VALUE")
+        knobs_set(args.name, args.value)
+        return
     print(f"[recall] in {STORE_CONFIG}; a knob left out takes its default")
     for name, (default, low, high, what) in KNOBS.items():
         mark = "" if RECALL[name] == default else f"  (default {default})"
         print(f"{name} = {RECALL[name]:g}{mark}  {low:g} to {high:g}: {what}")
+
+
+RECALL_HEADER_RE = re.compile(r"^\s*\[recall\]\s*(#.*)?$")
+
+
+def set_knob_text(text: str, name: str, value: float) -> str:
+    """The config text with one knob set in its [recall] table. Edits lines, so every other line and comment stays."""
+    entry = f"{name} = {value:g}"
+    lines = text.splitlines()
+    head = next((i for i, line in enumerate(lines) if RECALL_HEADER_RE.match(line)), None)
+    if head is None:
+        body = text if not text or text.endswith("\n") else text + "\n"
+        return body + ("\n" if body.strip() else "") + f"[recall]\n{entry}\n"
+    end = next((i for i in range(head + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+    key_re = re.compile(rf"^\s*{re.escape(name)}\s*=\s*[^#]*?(\s*#.*)?$")
+    at = next((i for i in range(head + 1, end) if key_re.match(lines[i])), None)
+    if at is not None:
+        lines[at] = entry + (key_re.match(lines[at])[1] or "")
+    else:
+        last = max([i for i in range(head, end) if lines[i].strip()])   # after the table's last line, before its blank lines
+        lines.insert(last + 1, entry)
+    return "\n".join(lines) + "\n"
+
+
+def knobs_set(name: str, value: float) -> None:
+    """Write one knob into .claude/iirc.toml after the same checks set_root applies when it reads the file."""
+    default, low, high, _ = KNOBS[name]
+    if not low <= value <= high:
+        die(f"{name} must be a number from {low:g} to {high:g}")
+    knobs = {**RECALL, name: value}
+    if knobs["both"] < knobs["semantic_only"]:
+        first = "both" if name == "semantic_only" else "semantic_only"
+        die(f"both must be at least semantic_only; set {first} first (now semantic_only {knobs['semantic_only']:g}, both {knobs['both']:g})")
+    path = ROOT / STORE_CONFIG
+    old = path.read_text() if path.is_file() else ""
+    new = set_knob_text(old, name, value)
+    try:
+        if load_knobs(tomllib.loads(new))[name] != value:
+            raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [recall]")
+    except (tomllib.TOMLDecodeError, ConfigError) as e:
+        die(f"knobs set: {STORE_CONFIG} would not read back, so nothing was written: {e}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new)
+    print(f"{name} = {value:g} in {path}; commit it, it is the repository's config")
 
 
 def cmd_max_suggested(args: argparse.Namespace) -> None:
@@ -2971,6 +3022,389 @@ def cmd_stats(args: argparse.Namespace) -> None:
     print(f"log: {state_dir() / 'log.jsonl'}")
 
 
+# --- tune: evidence for judging recall, and a sweep of the gate's knobs -----
+
+TUNE_TOOLS = 5          # tool calls the evidence lists after each prompt
+TUNE_NEAR = 0.06        # a refused candidate this close to a knob is worth judging
+TUNE_FLOOR = 30         # judged pairs with a distance before the sweep proposes a change
+TUNE_LABELS = ("relevant", "noise", "unsure")
+CONDITION_KEYS = ("ts", "cmd", "source", "trigger", "commit", "knobs", "max_suggested", "mode", "tool_rev", "page_count")
+NOT_A_PROMPT = ("<command-name>", "<local-command-", "<bash-input>", "<bash-stdout>", "<bash-stderr>")
+
+
+def tune_dir() -> Path:
+    return state_dir() / "tune"
+
+
+def safe_name(session: str) -> str:
+    return re.sub(r"[^A-Za-z0-9-]", "_", session)
+
+
+def parse_ts(ts) -> float | None:
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def base(page) -> str:
+    """A page's file name without its store: read rows may say STORE/PAGE.md, eval rows never do."""
+    return str(page).split("/")[-1]
+
+
+def transcript_for(session: str, rows: list[dict]) -> Path | None:
+    """The session's transcript, from a log row that names it, else where Claude Code keeps it; None once deleted."""
+    named = next((r["transcript"] for r in rows if isinstance(r.get("transcript"), str)), None)
+    claude = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    path = Path(named) if named else claude / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(ROOT)) / f"{session}.jsonl"
+    return path if path.is_file() else None
+
+
+def block_text(content) -> str | None:
+    """A prompt's text: a string, or a list of text blocks. None when the list holds anything but text, such as a tool result."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and content and all(isinstance(b, dict) and b.get("type") in ("text", "image") for b in content):
+        return "\n".join(b["text"] for b in content if b.get("type") == "text")
+    return None
+
+
+def read_transcript(path: Path) -> dict:
+    """The main thread's prompts and tool calls, and every tool result by id. One pass per session."""
+    prompts: list[dict] = []
+    tools: list[dict] = []
+    results: dict[str, str] = {}
+    for line in path.read_text(errors="replace").splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(r, dict) or r.get("isSidechain"):
+            continue
+        ts = parse_ts(r.get("timestamp"))
+        content = (r.get("message") or {}).get("content") if isinstance(r.get("message"), dict) else None
+        text = None
+        if r.get("type") == "user" and not r.get("isMeta") and not r.get("isCompactSummary"):
+            text = block_text(content)
+            for b in content if isinstance(content, list) else []:
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id"):
+                    results[b["tool_use_id"]] = block_text(b.get("content")) or str(b.get("content") or "")
+        elif r.get("type") == "attachment":
+            # a prompt typed while the agent works arrives queued, as an attachment, not as a user row
+            a = r.get("attachment") or {}
+            if a.get("type") == "queued_command" and a.get("commandMode", "prompt") == "prompt":
+                text = block_text(a.get("prompt"))
+        elif r.get("type") == "assistant" and isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_use":
+                    tools.append({"ts": ts, "id": b.get("id"), "tool": b.get("name"), "input": tool_input_text(b.get("input"))})
+        if text is None or ts is None or text.lstrip().startswith(NOT_A_PROMPT):
+            continue
+        h = prompt_hash(text)
+        if prompts and prompts[-1]["hash"] == h and ts - prompts[-1]["ts"] < 120:
+            continue   # the queued attachment and the user row of one prompt
+        prompts.append({"ts": ts, "hash": h, "text": text})
+    return {"prompts": prompts, "tools": tools, "results": results}
+
+
+def tool_input_text(inp) -> str:
+    """The part of a tool's input that says what it did, at most 120 characters."""
+    if isinstance(inp, dict):
+        for key in ("command", "file_path", "pattern", "query", "url", "skill", "description", "prompt"):
+            if isinstance(inp.get(key), str):
+                return clip(inp[key], 120)
+    return clip(json.dumps(inp, default=str), 120)
+
+
+def read_prompts_file(session: str) -> list[dict]:
+    path = state_dir() / "prompts" / f"{safe_name(session)}.jsonl"
+    out = []
+    for line in path.read_text().splitlines() if path.is_file() else []:
+        with contextlib.suppress(json.JSONDecodeError):
+            out.append(json.loads(line))
+    return out
+
+
+def eval_rows() -> dict[str, list[dict]]:
+    """Every candidate row in this repository, by recall_id, best rank first."""
+    out: dict[str, list[dict]] = {}
+    for path in sorted(state_dir().glob("eval-*.jsonl")):
+        for line in path.read_text().splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("cmd") == "candidate" and r.get("repo") == str(ROOT) and r.get("recall_id"):
+                out.setdefault(r["recall_id"], []).append(r)
+    for rows in out.values():
+        rows.sort(key=lambda r: r.get("rank", 0))
+    return out
+
+
+def worth_judging(c: dict, knobs: dict[str, float]) -> bool:
+    """Suggested, passed but left off the line, or refused within TUNE_NEAR of a knob."""
+    if c.get("verdict") in ("passed", "over_max", "line_cut"):
+        return True
+    d = c.get("distance")
+    return isinstance(d, (int, float)) and d <= max(knobs.values()) + TUNE_NEAR
+
+
+def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None, pf: list[dict], evals: dict[str, list[dict]], knobs: dict[str, float]) -> dict:
+    """One recall: what it was asked, what it suggested and refused, and what the session did next."""
+    r = rows[i]
+    ts = parse_ts(r["ts"]) or 0.0
+    nxt = next((j for j in turns if j > i), len(rows))
+    end = parse_ts(rows[nxt]["ts"]) if nxt < len(rows) else math.inf
+    out: dict = {"key": r.get("recall_id") or r["ts"], "ts": r["ts"], "via": r.get("via"), "recall_id": r.get("recall_id")}
+    start = ts
+    if r.get("via") == "failure":
+        use = next((t for t in (tx or {}).get("tools", []) if t["id"] and t["id"] == r.get("tool_use_id")), None)
+        out["failed"] = {"command": use["input"] if use else None,
+                         "error": clip((tx or {}).get("results", {}).get(r.get("tool_use_id"), ""), 200) if use else None}
+        start = use["ts"] if use else ts
+    else:
+        # the prompt: from the prompts file, else the transcript by hash, else the transcript's last prompt before the recall
+        h = r.get("prompt_hash")
+        kept = next((p for p in pf if r.get("recall_id") and p.get("recall_id") == r["recall_id"]), None) \
+            or next((p for p in pf if h and p.get("prompt_hash") == h), None)
+        in_tx = next((p for p in (tx or {}).get("prompts", []) if h and p["hash"] == h), None)
+        joined = "hash"
+        if in_tx is None and tx and not kept:
+            # the log's ts is cut to the second and written after the search, so a prompt row may carry the same second
+            before = [p for p in tx["prompts"] if p["ts"] < ts + 1]
+            in_tx = before[-1] if before else None
+            joined = "time"
+        if kept:
+            out["prompt"] = {"text": kept.get("excerpt", ""), "from": "prompts file"}
+        elif in_tx:
+            out["prompt"] = {"text": clean(in_tx["text"], 300), "from": f"transcript by {joined}"}
+        else:
+            out["prompt"] = {"text": None, "from": None}
+        if in_tx:
+            start = min(start, in_tx["ts"])
+    window = rows[i + 1:nxt]
+    suggested = [base(p) for p in r.get("pages") or []]
+    sugg = []
+    for p, score in zip(suggested, (r.get("scores") or []) + [None] * len(suggested)):
+        j = next((j for j in range(i + 1, len(rows)) if rows[j]["cmd"] in ("read", "pull") and p in {base(x) for x in rows[j].get("pages") or []}), None)
+        sugg.append({"page": p, "score": score, "read_turns_later": None if j is None else sum(1 for t in turns if i < t < j)})
+    out["suggested"] = sugg
+    out["candidates"] = [{
+        "page": c.get("page"), "store": c.get("store"), "rank": c.get("rank"),
+        "distance": round(c["distance"], 4) if isinstance(c.get("distance"), (int, float)) else None,
+        "rule": c.get("rule"), "verdict": c.get("verdict"), "rare_terms": c.get("rare_terms") or [], "head_terms": c.get("head_terms") or [],
+        "judge": worth_judging(c, knobs),
+    } for c in evals.get(r.get("recall_id") or "", [])]
+    out["next_tools"] = [{"tool": t["tool"], "input": t["input"]} for t in (tx or {}).get("tools", [])
+                         if t["ts"] is not None and start <= t["ts"] < end][:TUNE_TOOLS] if tx else None
+    out["searches"] = [{"query": w.get("query"), "pages": w.get("pages") or []} for w in window if w["cmd"] == "search"]
+    read = [base(p) for w in window if w["cmd"] in ("read", "pull") for p in w.get("pages") or []]
+    out["read_unsuggested"] = sorted(set(read) - set(suggested))
+    return out
+
+
+def gather_session(session: str, rows: list[dict], evals: dict[str, list[dict]]) -> dict:
+    """The evidence file for one session: its conditions and one entry per recall."""
+    path = transcript_for(session, rows)
+    tx = read_transcript(path) if path else None
+    pf = read_prompts_file(session)
+    # the turns as the hook saw them: every prompt it searched for or passed by
+    turns = [i for i, r in enumerate(rows) if r["cmd"] == "skipped" or (r["cmd"] == "recall" and r.get("via") == "prompt")]
+    conds = [{k: r[k] for k in CONDITION_KEYS if k in r} for r in rows if r["cmd"] in ("start", "session")]
+    knobs = next((c["knobs"] for c in reversed(conds) if isinstance(c.get("knobs"), dict)), RECALL)
+    recalls = [recall_evidence(i, rows, turns, tx, pf, evals, knobs) for i, r in enumerate(rows) if r["cmd"] == "recall"]
+    return {"session": session, "repo": str(ROOT), "gathered": now_iso(), "transcript": str(path) if path else None,
+            "prompts_file": bool(pf), "conditions": conds, "recalls": recalls}
+
+
+def repo_sessions() -> dict[str, list[dict]]:
+    """This repository's log rows, by session, in the order they were written."""
+    out: dict[str, list[dict]] = {}
+    for r in read_log():
+        if r.get("repo") == str(ROOT):
+            out.setdefault(r.get("session", "?"), []).append(r)
+    return out
+
+
+def cmd_tune_gather(args: argparse.Namespace) -> None:
+    sessions = repo_sessions()
+    if args.session:
+        if args.session not in sessions:
+            die(f"no log rows for session {args.session} in {ROOT}")
+        chosen = [args.session]
+    else:
+        tuned = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
+        cutoff = time.time() - args.days * 86400 if args.days is not None else -math.inf
+        chosen = [s for s, rows in sessions.items() if s not in tuned
+                  and any(r["cmd"] == "recall" and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
+                  and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
+    if not chosen:
+        print("iirc tune: no session to gather; each one with recalls is tuned already, or its transcript and prompts are gone")
+        return
+    evals = eval_rows()
+    tune_dir().mkdir(parents=True, exist_ok=True)
+    total = 0
+    for s in chosen:
+        ev = gather_session(s, sessions[s], evals)
+        path = tune_dir() / f"{safe_name(s)}.json"
+        path.write_text(json.dumps(ev, indent=1) + "\n")
+        n = len(ev["recalls"])
+        total += n
+        sugg = sum(len(r["suggested"]) for r in ev["recalls"])
+        judge = sum(c["judge"] for r in ev["recalls"] for c in r["candidates"])
+        source = "transcript" if ev["transcript"] else "no transcript"
+        print(f"{path}: {n} recalls, {sugg} pages suggested, {judge} candidates to judge ({source})")
+    print(f"{len(chosen)} session{'s' if len(chosen) != 1 else ''}, {total} recalls")
+
+
+def read_evidence(session: str) -> dict | None:
+    path = tune_dir() / f"{safe_name(session)}.json"
+    try:
+        return json.loads(path.read_text()) if path.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_tune_judge(args: argparse.Namespace) -> None:
+    """Validate every line on stdin first; write all of them or none."""
+    rows, errors = [], []
+    for n, line in enumerate(sys.stdin.read().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            j = json.loads(line)
+        except json.JSONDecodeError as e:
+            errors.append(f"line {n}: not JSON: {e.msg}")
+            continue
+        if not isinstance(j, dict):
+            errors.append(f"line {n}: not a JSON object")
+            continue
+        session, key, page = j.get("session"), j.get("recall_id") or j.get("ts"), j.get("page")
+        label, note = j.get("label"), j.get("note", "")
+        bad = []
+        if not isinstance(session, str) or not session:
+            bad.append("session is missing")
+        if not isinstance(key, str) or not key:
+            bad.append("recall_id or ts is missing")
+        if not isinstance(page, str) or not PAGE_RE.match(base(page)):
+            bad.append("page must be a page file name, like name.md")
+        if label not in TUNE_LABELS:
+            bad.append(f"label must be one of {', '.join(TUNE_LABELS)}")
+        if not isinstance(note, str):
+            bad.append("note must be a string")
+        if isinstance(session, str) and session and isinstance(key, str) and key:
+            ev = read_evidence(session)
+            if ev is None:
+                bad.append(f"no evidence for session {session}; run `iirc tune gather --session {session}` first")
+            elif key not in {r["key"] for r in ev["recalls"]}:
+                bad.append(f"session {session} has no recall {key}")
+        if bad:
+            errors.append(f"line {n}: " + "; ".join(bad))
+            continue
+        rows.append({"ts": now_iso(), "session": session, "recall": key, "page": base(page), "label": label, "note": clean(note, 500)})
+    if errors:
+        die("tune judge: nothing recorded\n" + "\n".join(errors))
+    if not rows:
+        die("tune judge: no judgments on stdin; one JSON object per line")
+    tune_dir().mkdir(parents=True, exist_ok=True)
+    path = tune_dir() / "judgments.jsonl"
+    with path.open("a") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+    print(f"recorded {len(rows)} judgment{'s' if len(rows) != 1 else ''} in {path}")
+
+
+def judgments() -> dict[tuple[str, str, str], dict]:
+    """The latest judgment of each (session, recall, page); a later line supersedes an earlier one."""
+    path = tune_dir() / "judgments.jsonl"
+    out: dict[tuple[str, str, str], dict] = {}
+    for line in path.read_text().splitlines() if path.is_file() else []:
+        with contextlib.suppress(json.JSONDecodeError, KeyError, TypeError):
+            j = json.loads(line)
+            out[(j["session"], j["recall"], base(j["page"]))] = j
+    return out
+
+
+def knob_grid() -> list[dict[str, float]]:
+    """semantic_only 0.20 to 0.40 and both 0.26 to 0.46, in steps of 0.02, with both never below semantic_only."""
+    return [{"semantic_only": so / 100, "both": b / 100} for so in range(20, 41, 2) for b in range(26, 47, 2) if b >= so]
+
+
+def sweep_counts(pairs: list[tuple[dict, bool]], knobs: dict[str, float]) -> dict:
+    """What the gate would do under these knobs to the judged pairs: (candidate, relevant)."""
+    c = {"relevant_passed": 0, "noise_passed": 0, "relevant_refused": 0, "noise_refused": 0}
+    for cand, relevant in pairs:
+        passed = gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs)[0] is not None
+        c[("relevant_" if relevant else "noise_") + ("passed" if passed else "refused")] += 1
+    tp, fp, fn = c["relevant_passed"], c["noise_passed"], c["relevant_refused"]
+    c["precision"] = tp / (tp + fp) if tp + fp else 0.0
+    c["recall"] = tp / (tp + fn) if tp + fn else 0.0
+    c["f1"] = 2 * c["precision"] * c["recall"] / (c["precision"] + c["recall"]) if c["precision"] + c["recall"] else 0.0
+    return c
+
+
+def sweep_line(knobs: dict[str, float], c: dict) -> str:
+    return (f"semantic_only {knobs['semantic_only']:.2f} both {knobs['both']:.2f}: relevant passed {c['relevant_passed']}, "
+            f"noise passed {c['noise_passed']}, relevant refused {c['relevant_refused']}; "
+            f"precision {c['precision']:.2f}, recall {c['recall']:.2f}, F1 {c['f1']:.2f}")
+
+
+def cmd_tune_sweep(args: argparse.Namespace) -> None:
+    evals = eval_rows()
+    by_pair = {(c.get("session"), rid, base(c.get("page"))): c for rid, rows in evals.items() for c in rows}
+    pairs, unsure, no_distance = [], 0, 0
+    for (session, key, page), j in judgments().items():
+        if j["label"] == "unsure":
+            unsure += 1
+            continue
+        cand = by_pair.get((session, key, page))
+        # a pair with no distance passes or fails on terms alone, so no knob moves it
+        if cand is None or not isinstance(cand.get("distance"), (int, float)) or "semantic" not in (cand.get("paths") or []):
+            no_distance += 1
+            continue
+        pairs.append((cand, j["label"] == "relevant"))
+    rel = sum(r for _, r in pairs)
+    print(f"judged pairs with a distance: {len(pairs)} ({rel} relevant, {len(pairs) - rel} noise); "
+          f"left out: {no_distance} with no candidate distance, which no knob moves, and {unsure} unsure")
+    print("criterion: F1 = 2PR/(P+R), where P (precision) = relevant passed / all passed and R (recall) = relevant passed / all relevant")
+    now = sweep_counts(pairs, RECALL)
+    print("current  " + sweep_line(RECALL, now))
+    if len(pairs) < TUNE_FLOOR:
+        print(f"too few judged pairs to propose a change: {len(pairs)}, and the floor is {TUNE_FLOOR}. Judge more sessions, then sweep again.")
+        return
+    grid = [(k, sweep_counts(pairs, k)) for k in knob_grid()]
+
+    def off(k: dict[str, float]) -> float:
+        """How far a grid point moves the knobs; a tie goes to the smaller change."""
+        return abs(k["semantic_only"] - RECALL["semantic_only"]) + abs(k["both"] - RECALL["both"])
+    best = sorted(grid, key=lambda kc: (-round(kc[1]["f1"], 6), -round(kc[1]["precision"], 6), off(kc[0])))[:5]
+    print("best by F1:")
+    for k, c in best:
+        print("  " + sweep_line(k, c))
+    held = [kc for kc in grid if kc[1]["recall"] >= now["recall"]]
+    if held:
+        k, c = max(held, key=lambda kc: (round(kc[1]["precision"], 6), round(kc[1]["f1"], 6), -off(kc[0])))
+        print("best precision at equal or better recall:")
+        print("  " + sweep_line(k, c))
+    k, c = best[0]
+    if c["f1"] > now["f1"] + 1e-9:
+        print(f"the best grid point beats the current knobs on F1 by {c['f1'] - now['f1']:.2f}")
+    else:
+        print("no grid point beats the current knobs on F1; propose no knob change")
+
+
+def cmd_tune_done(args: argparse.Namespace) -> None:
+    if args.session not in repo_sessions():
+        die(f"no log rows for session {args.session} in {ROOT}")
+    # the target goes in its own field; the row's session stays the one that tuned, so stats never count the old session again
+    log_event("tuned", tuned=args.session)
+    print(f"session {args.session} is tuned; `iirc tune gather` skips it from now on")
+
+
+def cmd_tune(args: argparse.Namespace) -> None:
+    {"gather": cmd_tune_gather, "judge": cmd_tune_judge, "sweep": cmd_tune_sweep, "done": cmd_tune_done}[args.tune_cmd](args)
+
+
 # --- main -------------------------------------------------------------------
 
 
@@ -3032,8 +3466,22 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--query", default="how to install and configure tools")
     p.set_defaults(func=cmd_cost)
 
-    p = sub.add_parser("knobs", help="the recall gate's knobs in .claude/iirc.toml, with their ranges")
+    p = sub.add_parser("knobs", help="the recall gate's knobs in .claude/iirc.toml, with their ranges; `knobs set NAME VALUE` changes one")
+    p.add_argument("action", nargs="?", choices=["set"])
+    p.add_argument("name", nargs="?", choices=list(KNOBS))
+    p.add_argument("value", nargs="?", type=float)
     p.set_defaults(func=cmd_knobs)
+
+    p = sub.add_parser("tune", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
+    tsub = p.add_subparsers(dest="tune_cmd", required=True)
+    t = tsub.add_parser("gather", help="write one evidence file per session under the state dir; no model calls")
+    t.add_argument("--session", metavar="ID", help="this session only, even when it is tuned already")
+    t.add_argument("--days", type=int, metavar="N", help="only sessions with a recall in the last N days")
+    t = tsub.add_parser("judge", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
+    t = tsub.add_parser("sweep", help="the gate's counts on the judged pairs for the current knobs and a grid of others")
+    t = tsub.add_parser("done", help="mark a session tuned, so gather skips it")
+    t.add_argument("session", metavar="SESSION")
+    p.set_defaults(func=cmd_tune)
 
     p = sub.add_parser("doctor", help="check prerequisites; --fix installs them")
     p.add_argument("--fix", action="store_true")
