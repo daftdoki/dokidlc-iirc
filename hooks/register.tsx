@@ -1292,11 +1292,11 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
         <Box key={key} flexDirection="row">
           <Box width={2} flexShrink={0}><Text bold color={TAGLINE_FROM}>{here === `open-${key}` ? '›' : ' '}</Text></Box>
           <Box width={3} flexShrink={0}><Text bold color={color}>{mark}</Text></Box>
+          {/* the times suggested, left of the name in a column that will not shrink, as on the status card */}
+          <Box width={5} flexShrink={0}><Text bold color={LEVEL_COLOR.warn}>{isGone ? '' : tail.trim()}</Text></Box>
           {/* a page renamed or deleted since is no link: there is nothing to open */}
-          {isGone ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}
+          <Box flexShrink={1}>{isGone ? <Text dimColor strikethrough>{name.replace(/\.md$/, '')}</Text> : pageLink($, e, `open-${key}`, name)}</Box>
           {isGone && <Text color="subtle">{'  renamed or deleted'}</Text>}
-          {!isGone && tail && <Text>{' '}</Text>}
-          {!isGone && tail && chip($, e, 'times', tail.trim(), LEVEL_COLOR.warn)}
         </Box>
       ),
     })
@@ -1323,7 +1323,7 @@ function sessionItems($: EngineInterface, e: ResolveInput, sp: SessionPages, c: 
   line('legend', [
     <Text key="a" color={LEVEL_COLOR.ok}>{'  ✓ '}</Text>, <Text key="b" color="subtle">{'read   '}</Text>,
     <Text key="c" color="subtle">{'· '}</Text>, <Text key="d" color="subtle">{'not read   '}</Text>,
-    chip($, e, 'e', '×N', LEVEL_COLOR.warn), <Text key="f" color="subtle">{' times suggested'}</Text>,
+    <Text key="e" bold color={LEVEL_COLOR.warn}>{'×N'}</Text>, <Text key="f" color="subtle">{' times suggested'}</Text>,
   ])
   const suggested = sortSuggested(sp, c)
   if (suggested.length === 0) line('none', <Box paddingLeft={2}><Text dimColor>nothing yet</Text></Box>)

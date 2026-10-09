@@ -495,7 +495,7 @@ test('/iirc pane opens the Session tab; a page name opens the reader tab, a link
     props: { title, isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
   })
   const view = await pane('iirc', 'iirc')
-  expect(await view.find({ text: ' ×3' })).toBeDefined()
+  expect(await view.find({ text: '×3' })).toBeDefined()
   expect(await view.find({ text: 'w' })).toBeDefined()                       // written
   expect(await view.find({ key: 'open-x-old.md' })).toBeDefined()           // suspect
   expect(await view.find({ key: 'tab-page' })).toBeUndefined()              // no page tab until a page is open
