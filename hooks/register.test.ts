@@ -108,7 +108,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
       requestId: 'p1',
       props: { text: 'a prompt', origin: { kind: 'composer' }, isExpanded: false },
     })
-    expect(await ui.find({ text: 'pages retrieved' })).toBeDefined()
+    expect(await ui.find({ text: 'pages suggested' })).toBeDefined()
     expect(await ui.find({ text: 'iirc: ' })).toBeDefined()
     expect(await ui.find({ text: 'alpha-page' })).toBeUndefined()
     await ui.press({ key: 'toggle-p1' })
@@ -251,7 +251,7 @@ test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
     requestId: 'p2',
     props: { text: 'a prompt', origin: { kind: 'composer' }, isExpanded: false },
   })
-  expect(await ui.find({ text: 'retrieved' })).toBeUndefined()
+  expect(await ui.find({ text: 'suggested' })).toBeUndefined()
 })
 
 test('leaves a prompt with no recall alone', async ($: Engine, on: On) => {
@@ -263,5 +263,5 @@ test('leaves a prompt with no recall alone', async ($: Engine, on: On) => {
     requestId: 'nope',
     props: { text: 'x', origin: { kind: 'composer' }, isExpanded: false },
   })
-  expect(await ui.find({ text: 'retrieved' })).toBeUndefined()
+  expect(await ui.find({ text: 'suggested' })).toBeUndefined()
 })

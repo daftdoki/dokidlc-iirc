@@ -151,7 +151,7 @@ cannot. The plugin never pushes the project repository itself.
 The hooks tell the agent things you do not see. A hooks module in the same
 plugin draws them for you:
 
-- Under your prompt, `+ iirc: [2] pages retrieved`. Click the `+` to list
+- Under your prompt, `+ iirc: [2] pages suggested`. Click the `+` to list
   the pages, with a yellow diamond on a page iirc suspects is stale.
 - Under a failed command, the pages its error recalled, in the same form.
 - Under a command that failed and then worked, a row saying the agent was

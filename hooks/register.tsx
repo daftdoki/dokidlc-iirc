@@ -243,7 +243,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {original}
-        {drawPages($, e, e.requestId, pages, isOpen, 'retrieved')}
+        {drawPages($, e, e.requestId, pages, isOpen, 'suggested')}
       </Box>
     )
   })
@@ -304,7 +304,7 @@ function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: Recal
   const { Box, Button, Text } = $.ui.resolve(e)
   const toggle = () => update($, open, map => keepLast(map, id, !(map[id] === true)))
   const noun = pages.length === 1 ? 'page' : 'pages'
-  const label = verb === 'retrieved' ? `${noun} retrieved` : `${noun} ${pages.length === 1 ? 'matches' : 'match'} this error`
+  const label = verb === 'suggested' ? `${noun} suggested` : `${noun} ${pages.length === 1 ? 'matches' : 'match'} this error`
   return (
     <Box key={`iirc-${id}`} flexDirection="column" paddingLeft={3}>
       <Box flexDirection="row">
