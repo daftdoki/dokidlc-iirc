@@ -2692,3 +2692,67 @@ def test_string_only_failure_recall_keeps_the_term_rule(tmp_path, monkeypatch):
     assert [r["verdict"] for r in iirc.recall_verdicts(terms, knobs, source="failure")] == ["passed", "over_max"]
     iirc.write_config_file({"semantic": True})
     assert [r["verdict"] for r in iirc.recall_verdicts(near + terms, knobs, source="failure")] == ["failure_needs_both"] * 3
+
+
+# p5 step 17
+
+def _audit_fixture(tmp_path, monkeypatch):
+    """A store with one page per audit check, a clean page, and near misses; returns the vectors a stub index would give."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    field = tmp_path / ".iirc"; field.mkdir()
+    token = "ghp_" + "Zx9Yw8" * 6   # built in two parts so no scanner takes the file for a leak
+
+    def page(name, title, body="One fact.\n", summary=None, extra=""):
+        (field / name).write_text(f"---\ntitle: {title}\nsummary: {summary or title}\ntopics: [t]\nkind: finding\n{extra}---\n{body}\n## Sources\n\n- x\n")
+    page("clean.md", "Pelican feeders refill hourly")
+    page("long.md", "Wombat burrows collapse after heavy rain when the soil holds too much clay underneath",
+         summary="2026-10-09 wombat burrows collapse in rain")
+    page("leak.md", "Narwhal token rotation", body=f"The token was {token} once.\n")
+    page("aa-decoy.md", "Quokka zebrafish ledger")
+    page("zz-target.md", "Quokka zebrafish ledger")   # the decoy's name sorts first, so its own title ranks the decoy first
+    page("hub.md", "Axolotl hatchery schedule")
+    page("few.md", "Ibex grazing rota")                # noise only, but under six judgments
+    page("old.md", "Marmot tunnel layout", body="Replaced by [[marmot-tunnels]].\n\nThe east tunnel ran north.\n\nThe west tunnel ran south.\n")
+    page("brief-old.md", "Lemur perch height", body="Superseded by [[lemur-perches]].\n\nThe perch stood at two metres.\n")
+    page("prose.md", "Gecko lamp wiring", body="The old switch was replaced by a dimmer.\n\nThe lamp sits left.\n\nThe cord runs under it.\n")   # prose, no link
+    page("marked.md", "Tapir pen gates", extra="superseded: tapir-pens.md\n", body="The gates opened inward.\n\nThe pens held two tapirs.\n")
+    iirc.write_config_file({"semantic": False})
+    r = str(tmp_path.resolve())
+    _jsonl(tmp_path / "st" / "dokidlc-iirc" / "tune" / "judgments.jsonl",
+           [{"repo": r, "session": "s", "recall": f"r{i}", "page": "hub.md", "label": "noise" if i < 6 else "relevant"} for i in range(8)]
+           + [{"repo": r, "session": "s", "recall": f"r{i}", "page": "few.md", "label": "noise"} for i in range(5)]
+           + [{"repo": "/other", "session": "s", "recall": f"r{i}", "page": "clean.md", "label": "noise"} for i in range(9)])
+    near = [0.96, 0.28, 0.0]
+    vectors = {p.name: [0.0, 0.0, 1.0] for p in field.glob("*.md")}
+    vectors.update({"hub.md": [1.0, 0.0, 0.0], "few.md": near, "clean.md": near})
+    return vectors
+
+
+def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
+    vectors = _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
+    before = sorted(str(p) for p in tmp_path.rglob("*"))
+    iirc.main(["audit"])
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    found = {tuple(line.split(": ", 2)[:2]) for line in lines[:-1]}
+    assert found == {("long.md", "title"), ("long.md", "summary"), ("leak.md", "secret"), ("zz-target.md", "own-title"),
+                     ("hub.md", "hub"), ("old.md", "superseded"), ("marked.md", "superseded")}, out
+    assert "ghp_" not in out
+    hub = next(line for line in lines if line.startswith("hub.md: hub: "))
+    # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
+    assert hub == "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2; narrow it or split it"
+    assert 'says "replaced by" and keeps 2 paragraphs' in out
+    assert lines[-1] == f"7 findings in 11 pages; vectors checked with {iirc.read_pin()['model']}"
+    assert sorted(str(p) for p in tmp_path.rglob("*")) == before   # the audit never writes
+    iirc.main(["audit", "--json"])
+    rows = json.loads(capsys.readouterr().out)
+    assert len(rows) == 7 and all(set(r) == {"page", "check", "what", "fix"} for r in rows)
+    iirc.main(["audit", "old.md"])
+    assert capsys.readouterr().out.splitlines()[-1] == f"1 finding in 1 page; vectors checked with {iirc.read_pin()['model']}"
+    monkeypatch.setattr(iirc, "page_vectors", lambda: {})
+    iirc.main(["audit"])
+    out = capsys.readouterr().out
+    assert ": own-title: " not in out and "hub.md: hub: " in out
+    assert out.splitlines()[-1] == "6 findings in 11 pages; no vectors: own-title skipped"

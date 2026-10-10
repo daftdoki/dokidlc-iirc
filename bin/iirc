@@ -1648,18 +1648,18 @@ def validate_page(name: str, fm: dict, body: str) -> list[str]:
     return problems
 
 
-def shape_warnings(fm: dict) -> list[str]:
-    """Title and summary shapes that search and recall show badly. A write that has them still succeeds."""
+def shape_warnings(fm: dict) -> list[tuple[str, str]]:
+    """(field, warning) for title and summary shapes that search and recall show badly. A write that has them still succeeds."""
     title, summary = str(fm.get("title") or ""), str(fm.get("summary") or "")
     out = []
     if re.match(r"\d{4}-\d\d", summary) or summary.startswith("Creator decision"):
-        out.append("the summary starts with a date or 'Creator decision'; start it with the fact")
+        out.append(("summary", "the summary starts with a date or 'Creator decision'; start it with the fact"))
     if len(title) > 70:
-        out.append(f"the title is {len(title)} characters, over 70; shorten it")
+        out.append(("title", f"the title is {len(title)} characters, over 70; shorten it"))
     def words(s: str) -> set[str]:
         return set(re.findall(r"[a-z]{4,}", s.lower()))
     if not words(summary[:90]) & words(title):
-        out.append("the summary's first 90 characters share no word of four letters or more with the title; use the title's words")
+        out.append(("summary", "the summary's first 90 characters share no word of four letters or more with the title; use the title's words"))
     return out
 
 
@@ -2129,7 +2129,7 @@ def cmd_write(args: argparse.Namespace) -> None:
     if proc.returncode:
         die(proc.stderr.strip() or "write failed")
     print(proc.stdout.strip())
-    for w in shape_warnings(fm):
+    for _, w in shape_warnings(fm):
         print(f"iirc: warning: {w}", file=sys.stderr)
     log_event("write", page=page_label(store.name, args.page), kind=args.kind)
     stamp_index(store.dir)
@@ -3801,6 +3801,92 @@ def cmd_tune(args: argparse.Namespace) -> None:
     {"gather": cmd_tune_gather, "judge": cmd_tune_judge, "sweep": cmd_tune_sweep, "done": cmd_tune_done}[args.tune_cmd](args)
 
 
+# --- audit ------------------------------------------------------------------
+
+
+# only the link form: prose says "replaced by" about many things besides pages
+SUPERSEDED_RE = re.compile(r"\b(superseded by|replaced by) \[\[", re.I)
+HUB_RATIO = 3      # noise judgments per relevant one that make a page a hub
+HUB_JUDGED = 6     # fewer judgments than this say too little about one page
+
+
+def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], bool]:
+    """Findings {page, check, what, fix} for these pages, and whether own-title ran, which needs vectors. Reads only."""
+    vectors = page_vectors()
+    judged: dict[str, dict[str, int]] = {}
+    for (repo, _, _, page), j in judgments().items():
+        if repo == str(ROOT) and j.get("label") in ("relevant", "noise"):
+            judged.setdefault(page, {"relevant": 0, "noise": 0})[j["label"]] += 1
+    findings: list[dict] = []
+    for store, path in pages:
+        label = page_label(store.name, path.name)
+
+        def add(check: str, what: str, fix: str) -> None:
+            findings.append({"page": label, "check": check, "what": what, "fix": fix})
+        text = path.read_text()
+        fm, body = parse_page(text)
+        for check, warning in shape_warnings(fm):
+            what, _, fix = warning.rpartition("; ")
+            add(check, what, fix)
+        for n, line in enumerate(text.splitlines(), 1):
+            for name, pattern in SECRET_PATTERNS.items():
+                if pattern.search(line):
+                    # never the match: this text reaches the transcript
+                    add("secret", f"line {n} matches the secret pattern {name!r}", "remove the secret and write the page again")
+        if vectors:
+            title = str(fm.get("title") or "")
+            ranked = [(row_store(r), r["filename"]) for r in (hybrid_search(title) if title else [])]
+            if ranked[:1] != [(store.name, path.name)]:
+                rank = ranked.index((store.name, path.name)) + 1 if (store.name, path.name) in ranked else None
+                what = (f"a search for its title ranks {page_label(*ranked[0])} first and this page {rank}" if rank
+                        else f"a search for its title ranks {page_label(*ranked[0])} first and never finds this page" if ranked
+                        else "a search for its title finds nothing")
+                add("own-title", what, "write the title in the words a prompt would use, or merge it with the page that ranks first")
+        # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
+        c = judged.get(path.name)
+        if c and c["noise"] + c["relevant"] >= HUB_JUDGED and c["noise"] >= HUB_RATIO * c["relevant"]:
+            total = c["noise"] + c["relevant"]
+            add("hub", f"noise in {c['noise']} of {total} tune judgments ({round(100 * c['noise'] / total)}%), relevant in {c['relevant']}",
+                "narrow it or split it")
+        # a page that names its successor and keeps the old text still wins searches with it
+        prose = [b for b in re.split(r"\n\s*\n", SOURCES_RE.sub("", body))
+                 if any(not line.lstrip().startswith("#") for line in b.strip().splitlines())]
+        said = [m for m in (SUPERSEDED_RE.search(b) for b in prose) if m]
+        kept = len(prose) - len(said)
+        if (fm.get("superseded") or said) and kept > 1:
+            why = "the frontmatter has superseded" if fm.get("superseded") else f'says "{said[0][1].lower()}"'
+            add("superseded", f"{why} and keeps {kept} paragraphs", "rewrite or delete the old text")
+    return findings, bool(vectors)
+
+
+def print_audit(findings: list[dict], pages: int, vectors: bool) -> None:
+    for f in findings:
+        print(f"{f['page']}: {f['check']}: {f['what']}; {f['fix']}")
+    n = len(findings)
+    tail = f"vectors checked with {read_pin().get('model', 'the pinned model')}" if vectors else "no vectors: own-title skipped"
+    print(f"{n} finding{'s' if n != 1 else ''} in {pages} page{'s' if pages != 1 else ''}; {tail}")
+
+
+def audit_pages(ref: str | None = None) -> list[tuple[Store, Path]]:
+    if ref is None:
+        return [(s, p) for s in live_stores() for p in list_pages(s.dir)]
+    store, name = resolve_page(ref if ref.endswith(".md") else ref + ".md")
+    if not (store.dir / name).is_file():
+        die(f"no page {ref}")
+    return [(store, store.dir / name)]
+
+
+def cmd_audit(args: argparse.Namespace) -> None:
+    """Pages that search shows badly or that carry what they should not. Prints findings; writes nothing; exits 0."""
+    require_stores()
+    pages = audit_pages(args.page)
+    findings, vectors = audit_findings(pages)
+    if args.json:
+        print(json.dumps(findings, indent=2))
+        return
+    print_audit(findings, len(pages), vectors)
+
+
 # --- main -------------------------------------------------------------------
 
 
@@ -3859,6 +3945,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--all", action="store_true", help="list clean pages too")
     p.add_argument("--network", action="store_true", help="also contact every URL in refs; needs the creator's permission")
     p.set_defaults(func=cmd_doubt)
+
+    p = sub.add_parser("audit", help="pages search shows badly: title and summary shape, secrets, own title, hubs, superseded text")
+    p.add_argument("page", nargs="?", help="one page; default: every page")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_audit)
 
     p = sub.add_parser("index", help="full reindex")
     p.set_defaults(func=cmd_index)
