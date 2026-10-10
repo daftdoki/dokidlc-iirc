@@ -871,6 +871,9 @@ def query_terms(query: str) -> list[str]:
     return terms
 
 
+SOURCES_RE = re.compile(r"^## Sources[ \t]*$.*?(?=^## |\Z)", re.M | re.S)
+
+
 def string_search(terms: list[str]) -> list[dict]:
     """Exact-text match over filename, title, and summary. Local, no embedding call."""
     rows = []
@@ -878,6 +881,8 @@ def string_search(terms: list[str]) -> list[dict]:
     texts = []
     for store, page in pages:
         fm, body = parse_page(page.read_text())
+        # a file named in Sources or a page named in a link is not what the page is about
+        body = LINK_RE.sub("", SOURCES_RE.sub("", body))
         head = f"{page.name} {fm.get('title', '')} {fm.get('summary', '')}".lower()
         texts.append((store, page, fm, head, head + " " + body.lower()))
     per_page = [(store, page, fm, head, [t for t in terms if t in text]) for store, page, fm, head, text in texts]

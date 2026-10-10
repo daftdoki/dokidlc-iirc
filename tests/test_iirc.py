@@ -2578,6 +2578,22 @@ def test_gather_skips_recordings(tmp_path, monkeypatch, capsys):
     assert "recording" not in iirc.conditions("semantic", 5)
 
 
+# p5 step 5
+
+
+def test_string_search_ignores_sources_and_links(tmp_path):
+    field = tmp_path / ".iirc"; field.mkdir()
+    (field / "cited.md").write_text("---\ntitle: Recall timeouts\nsummary: the hook waits\n---\n"
+                                    "The hook gives up after five seconds.\n\n## Sources\n\n- bin/iirc recall_hook, read 2026-10-01\n")
+    (field / "linker.md").write_text("---\ntitle: Ollama unloads\nsummary: keep_alive\n---\nSee [[keepalive-trap|the trap page]] and [[hook-budget]].\n")
+    (field / "plain.md").write_text("---\ntitle: Budget\nsummary: a limit\n---\nThe recall_hook budget is five seconds.\n\n## Sources\n\n- none\n")
+    (field / "hook-budget.md").write_text("---\ntitle: Hook budget\nsummary: the limit\n---\nx\n")
+    iirc.set_root(tmp_path)
+    assert [r["filename"] for r in iirc.string_search(["recall_hook"])] == ["plain.md"]   # in cited.md only under Sources
+    assert [r["filename"] for r in iirc.string_search(["keepalive-trap", "trap", "hook-budget"])] == ["hook-budget.md"]   # in linker.md only inside links; a head still counts
+    assert sorted(r["filename"] for r in iirc.string_search(["five"])) == ["cited.md", "plain.md"]   # the body before Sources still counts
+
+
 # p5 step 22
 
 
