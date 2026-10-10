@@ -279,13 +279,13 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
-  expect(helpText).toContain('summary-line-visibility on · max-suggested-pages 4')
+  expect(helpText).toContain('summary line on · max-suggested-pages 4')
   expect(helpText).toContain('/iirc max-suggested-pages N')
-  expect(helpText).toContain('/iirc summary-line-visibility on|off ')
+  expect(helpText).toContain('/iirc summary-line-visibility ')
   for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
-  expect(helpText).toContain('summary-line-visibility on · max-suggested-pages 4 · search semantic+keyword')
+  expect(helpText).toContain('summary line on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
-  expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate the thresholds/)
+  expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate thresholds/)
   expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
   expect((helpText ?? '').indexOf('/iirc set-search-backend')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
@@ -687,6 +687,18 @@ test('the status card is never wider than the terminal', async ($: Engine, on: O
   const narrow = await mount('narrow-tagline', 40)
   expect(await narrow.find({ text: '…' })).toBeDefined()                 // the tagline is cut, not squeezed letter by letter
   expect(await widthOf('wide', 200)).toBeLessThan(200)          // a wide terminal: as wide as the widest row
+})
+
+test('every row of the help fits an 80-column terminal', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'a suggestion line names up to 10 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  // on a wide terminal the card is as wide as its widest row, so a card of 80 or less fits 80 columns unclamped
+  const card = await (await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'help-80',
+    viewport: { columns: 200, rows: 40 }, props: { command: 'iirc', args: 'help', text: 'x', isErrored: false } } as never)).find({ key: 'card' })
+  expect((card as { props?: { width?: number } } | undefined)?.props?.width).toBeLessThanOrEqual(80)
+  const text = (await $.command.run({ command: 'iirc', args: 'help' })).text ?? ''
+  for (const line of text.split('\n')) expect(line.length).toBeLessThanOrEqual(76)
 })
 
 

@@ -97,21 +97,21 @@ const LIST_MAX = 3
 // tune-suggestions and audit-page-findability go to the skill, which runs them and asks for each fix; the rest run directly
 const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
-  ['doctor --fix', 'install or repair, then rebuild the index', 'MAINTENANCE'],
+  ['doctor --fix', 'install or repair, rebuild the index', 'MAINTENANCE'],
   ['find-suspect-pages', 'pages that may be wrong', 'MAINTENANCE'],
-  ['audit-page-findability', 'pages search shows badly, each with its fix', 'MAINTENANCE'],
+  ['audit-page-findability', 'pages search shows badly, with fixes', 'MAINTENANCE'],
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
   ['show-page-stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['summarize-page-usage', 'how the pages are being used', 'MAINTENANCE'],
   ['rebuild-search-index', 'rebuild the search index', 'MAINTENANCE'],
-  ['show-suggestion-thresholds', "the suggestion gate's distances and ranges", 'MAINTENANCE'],
-  ['tune-suggestions', 'judge suggestions, then evaluate the thresholds', 'MAINTENANCE'],
+  ['show-suggestion-thresholds', "the gate's distances and their ranges", 'MAINTENANCE'],
+  ['tune-suggestions', 'judge suggestions, evaluate thresholds', 'MAINTENANCE'],
   ['estimate-context-tokens', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['show-page-topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
   ['unfold-suggested-pages', 'unfold the latest suggested pages', 'LOOK UP'],
-  ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
+  ['reader [PAGE]', 'session pages, or one page, in a pane', 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
@@ -128,11 +128,12 @@ const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
 // the settings' commands, as the card and the text help list them
-const SET_LINE = '/iirc summary-line-visibility on|off'
+const SET_LINE = '/iirc summary-line-visibility'
 const SET_MAX = '/iirc max-suggested-pages N'
 const SET_SEARCH = '/iirc set-search-backend'
 const REQUEST_CMD = '/iirc <request>'
-// the help card's command column: the longest command, plus a gap
+// the help card's command column: the longest command, plus a gap. A row is 2 + CMD_COL + its text, so a
+// text of up to 40 characters keeps every row inside an 80-column terminal's 76 inner columns
 const CMD_COL = 2 + Math.max(...[SET_LINE, SET_MAX, SET_SEARCH, REQUEST_CMD, ...COMMANDS.map(([cmd]) => `/iirc ${cmd}`)].map(c => c.length))
 // the hit-rate gauge: its cells, and its title row, the title then a percentage of up to four characters
 const BAR = 36
@@ -300,12 +301,12 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `summary-line-visibility ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
-    row(SET_LINE, 'show or hide the line under the prompt'),
-    row(SET_MAX, 'pages a suggestion line names at most (1-10)'),
+    `summary line ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
+    row(SET_LINE, 'on|off: show or hide the summary line'),
+    row(SET_MAX, 'pages per suggestion line (1-10)'),
     row(SET_SEARCH, 'the embedding model, or substring search'),
     ...COMMANDS.map(([cmd, what]) => row(`/iirc ${cmd}`, what)),
-    row(REQUEST_CMD, "ask iirc in words: search, remember, what's out of date"),
+    row(REQUEST_CMD, REQUEST_HINT),
   ].join('\n')
 }
 
@@ -1012,7 +1013,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     <Box flexDirection="column">
       <Text> </Text>
       {heading('SETTINGS')}
-      {setting('line under the prompt', isShown ? 'on' : 'off', SET_LINE)}
+      {setting('summary line, on|off', isShown ? 'on' : 'off', SET_LINE)}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, SET_MAX)}
       {setting('search', s?.mode ?? '?', SET_SEARCH)}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
