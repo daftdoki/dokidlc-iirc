@@ -3500,3 +3500,22 @@ def test_line_pages_counted_from_its_pages(tmp_path, monkeypatch):
     assert iirc.read_log()[0]["pages"] == ["a.md"]
     evals = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl") for line in f.read_text().splitlines()]
     assert {e["page"]: e["verdict"] for e in evals} == {"a.md": "passed", "b.md": "line_cut"}
+
+
+def test_subagent_recall_keeps_its_own_repeat_history(tmp_path, monkeypatch):
+    """A subagent's hooks carry agent_id: a page the parent's line named is new to the subagent, and a page its own line named is a repeat."""
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    row = {"filename": "a.md", "store": "project", "via": ["semantic", "pysqlite3"], "distance": 0.2, "rare_terms": ["pysqlite3"], "head_terms": [],
+           "summary": "the uv override", "fm": {"title": "t", "summary": "s", "kind": "finding"}}
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [dict(row)])
+    prompt = {"session_id": "s1", "prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"}
+    failure = {"session_id": "s1", "agent_id": "ag1", "agent_type": "general-purpose", "tool_name": "Bash",
+               "tool_input": {"command": "uv tool install memoryfield-tool"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
+    for event, flag in ((prompt, []), (failure, ["--failure"]), (failure, ["--failure"]), (prompt, [])):
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
+        iirc.main(["recall", *flag])
+    recalls = [(r.get("agent"), r["pages"]) for r in iirc.read_log() if r["cmd"] == "recall"]
+    assert recalls == [(None, ["a.md"]), ("ag1", ["a.md"]), ("ag1", []), (None, [])]

@@ -712,11 +712,14 @@ def session_id() -> str:
     return os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID") or "no-session"
 
 
+AGENT_ID: str | None = None   # a subagent's hook event carries its agent_id; the main thread's carries none
+
+
 def log_event(cmd: str, **fields) -> None:
     """One JSON line per command, keyed by session, for `iirc stats`. Never raises."""
     try:
         state_dir().mkdir(parents=True, exist_ok=True)
-        row = {"ts": now_iso(), "session": session_id(), "repo": str(ROOT), "cmd": cmd, **fields}
+        row = {"ts": now_iso(), "session": session_id(), **({"agent": AGENT_ID} if AGENT_ID else {}), "repo": str(ROOT), "cmd": cmd, **fields}
         with (state_dir() / "log.jsonl").open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")
     except OSError:
@@ -1274,11 +1277,12 @@ def compaction(row: dict) -> bool:
     return row["cmd"] == "session" and row.get("trigger") == "PreCompact"
 
 
-def recent_named(session: str) -> set[str]:
-    """Pages this session's recalls named, read, or pulled since its last compaction: the earlier lines are still in context."""
+def recent_named(session: str, agent: str | None = None) -> set[str]:
+    """Pages this session's recalls named, read, or pulled since its last compaction: the earlier lines are still in context.
+    A subagent's context holds only its own lines, so its rows are its own; `iirc read` runs in Bash with no agent_id, so reads count for the main thread."""
     if session == "no-session":
         return set()   # recalls run outside Claude Code share this id; they are not one session
-    rows = read_log(session=session)
+    rows = [r for r in read_log(session=session) if r.get("agent") == agent]
     since = max((i for i, r in enumerate(rows) if compaction(r)), default=-1)
     return {base(p) for r in rows[since + 1:] if r["cmd"] in ("recall", "read", "pull") for p in r.get("pages") or []}
 
@@ -1304,7 +1308,7 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
     kept = 0
     cap = 1 if source == "failure" else max_suggested() if cap is None else cap
     semantic = semantic_enabled()
-    seen = recent_named(session_id()) if repeats else set()
+    seen = recent_named(session_id(), AGENT_ID) if repeats else set()
     for rank, r in enumerate(rows):
         rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], knobs or RECALL, source,
                             semantic)
@@ -1402,13 +1406,15 @@ def hook_output(event_name: str, text: str) -> str:
 
 
 def read_event() -> dict:
-    """The hook payload on stdin, if any. Adopts its session id for the log."""
+    """The hook payload on stdin, if any. Adopts its session id, and a subagent's agent_id, for the log."""
+    global AGENT_ID
     try:
         event = json.load(sys.stdin) if not sys.stdin.isatty() else {}
     except (json.JSONDecodeError, ValueError, OSError):
         event = {}
     if isinstance(event, dict) and event.get("session_id"):
         os.environ["CLAUDE_CODE_SESSION_ID"] = str(event["session_id"])
+    AGENT_ID = str(event["agent_id"]) if isinstance(event, dict) and event.get("agent_id") else None
     return event if isinstance(event, dict) else {}
 
 
