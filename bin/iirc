@@ -2468,7 +2468,19 @@ def cmd_index(args: argparse.Namespace) -> None:
     reindex(full=True)
     for store in live_stores():
         save(store, "iirc: index")
-    print("index current")
+    missing = unembedded() if semantic_enabled() else 0
+    print(f"index: {missing} page{'s have' if missing != 1 else ' has'} no vectors; search finds them by string match until an index embeds them"
+          if missing else "index current")
+
+
+def unembedded() -> int:
+    """Pages in the live stores with no vector in this model's store."""
+    n = 0
+    for store in live_stores():
+        have = iirc_embed.load(vector_path(store))
+        names = set(have.names) if have is not None else set()
+        n += sum(1 for p in list_pages(store.dir) if p.name not in names)
+    return n
 
 
 # --- cost -------------------------------------------------------------------

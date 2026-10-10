@@ -3652,7 +3652,9 @@ def test_openai_host_that_refuses_is_down(tmp_path, monkeypatch, capsys, status)
         assert iirc.semantic_search("alpha") == []
         assert "no embedding host answers" in capsys.readouterr().err
         iirc.main(["index"])
-        assert "no embedding host answers" in capsys.readouterr().err
+        out, err = capsys.readouterr()
+        assert "no embedding host answers" in err
+        assert "index current" not in out and "have no vectors" in out   # nothing was embedded
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
         out = capsys.readouterr().out
