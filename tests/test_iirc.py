@@ -2331,3 +2331,39 @@ def test_read_footer_write_names_the_store(tmp_path, monkeypatch, capsys):
     iirc.main(["read", "p.md", "agent/a.md"])
     assert capsys.readouterr().out.splitlines()[-1].endswith(
         "where PAGE is project/p.md or agent/a.md; write takes `p.md` or `a.md --store agent`.")
+
+
+# p5 step 3
+
+def _line_replay():
+    loader = SourceFileLoader("line_replay", str(ROOT / "scripts" / "line-replay.py"))
+    spec = importlib.util.spec_from_loader("line_replay", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def test_line_replay_counts_reads(tmp_path):
+    lr = _line_replay()
+    replay = tmp_path / "replay.jsonl"
+    rows = [{"repo": str(tmp_path), "qid": "q1", "prompt": "why does recall time out?", "via": "prompt", "page": p, "label": l}
+            for p, l in [("hook-timeout.md", "relevant"), ("host-hang.md", "noise"), ("maybe.md", "unsure")]]
+    replay.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    labels = lr.load_replay(replay)[(str(tmp_path), "q1")]["labels"]
+
+    def bash(cmd):
+        return json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": cmd}}]}})
+    stream = "\n".join([
+        json.dumps({"type": "system", "subtype": "init"}),
+        bash("iirc read hook-timeout.md"),
+        bash("iirc read project/host-hang && iirc read unlabelled.md"),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "iirc read host-hang.md"},
+                                                                 {"type": "tool_use", "name": "Read", "input": {"file_path": ".iirc/host-hang.md"}}]}}),
+        bash("iirc pull hook-timeout"),
+        bash("iirc pull ollama keep_alive"),
+        bash("git status"),
+        "not json",
+    ])
+    counts = lr.count_reads(stream, labels)
+    assert (counts["relevant"], counts["noise"], counts["other"], counts["pulls"]) == (2, 1, 1, 1)
+    assert counts["pages"] == {"hook-timeout.md": 2, "host-hang.md": 1, "unlabelled.md": 1}
