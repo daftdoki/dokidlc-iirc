@@ -1,6 +1,8 @@
 """Tests for scripts/iirc that need neither the tool nor ollama."""
 
+import contextlib
 import json
+import os
 import time
 import re
 import socket
@@ -16,6 +18,18 @@ _loader = SourceFileLoader("iirc", str(ROOT / "bin" / "iirc"))
 _spec = importlib.util.spec_from_loader("iirc", _loader)
 iirc = importlib.util.module_from_spec(_spec)
 _loader.exec_module(iirc)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_cache(tmp_path_factory):
+    """One temp cache for the whole run; yields the real memoryfield-tool cache and its test-* entries before the run."""
+    real = iirc.cache_dir() / "memoryfield-tool"
+    before = {p.name for p in real.glob("test-*")}
+    base = tmp_path_factory.mktemp("cache")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("IIRC_CACHE_DIR", str(base))
+        mp.setenv("XDG_CACHE_HOME", str(base))
+        yield real, before
 
 
 @pytest.fixture(autouse=True)
@@ -2562,3 +2576,19 @@ def test_gather_skips_recordings(tmp_path, monkeypatch, capsys):
     assert "2 sessions" in capsys.readouterr().out and not (st / "tune" / "rec.json").exists()
     monkeypatch.delenv("IIRC_RECORDING")
     assert "recording" not in iirc.conditions("semantic", 5)
+
+
+# p5 step 22
+
+
+def test_tests_leave_no_cache_dirs(_real_cache, tmp_path_factory):
+    """Last in the file, so every test before it had its chance to leak."""
+    real, before = _real_cache
+    assert iirc.cache_dir() == Path(os.environ["IIRC_CACHE_DIR"])
+
+    def this_run(name):
+        # another checkout's tests may run at the same time; only a field under this run's temp root is a leak from here
+        with contextlib.suppress(OSError):
+            return str(tmp_path_factory.getbasetemp()) in (real / name / "config.toml").read_text()
+        return False
+    assert [n for n in {p.name for p in real.glob("test-*")} - before if this_run(n)] == []

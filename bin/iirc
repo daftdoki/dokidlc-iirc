@@ -323,7 +323,9 @@ def strip_ansi(text: str) -> str:
 
 
 def cache_dir() -> Path:
-    """The platform cache directory memoryfield-tool itself uses."""
+    """The platform cache directory memoryfield-tool itself uses. IIRC_CACHE_DIR overrides it, so tests stay out of the real one."""
+    if os.environ.get("IIRC_CACHE_DIR"):
+        return Path(os.environ["IIRC_CACHE_DIR"])
     if platform.system() == "Darwin":
         return Path.home() / "Library" / "Caches"
     return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
