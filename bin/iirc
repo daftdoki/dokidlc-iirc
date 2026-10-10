@@ -1356,6 +1356,8 @@ def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict
         return "meaning+term", None
     if sem and d <= knobs["semantic_only"]:
         return ("meaning", None) if source != "failure" else (None, "failure_needs_both")
+    # a page with no semantic row: under a model cut at 0.90 that is almost only a page without a vector; letting
+    # the rule fire past `both` instead added noise and no relevant page on nomic (replay, 2026-10-10), so it stays
     if not sem and any(IDENTIFIER_RE.search(t) for t in rare):
         return ("term", None) if source != "failure" or not semantic else (None, "failure_needs_both")
     if sem and d <= knobs["both"]:
