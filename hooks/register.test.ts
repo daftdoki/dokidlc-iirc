@@ -309,6 +309,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   })
   expect(await demo.find({ text: '142' })).toBeDefined()
   expect(await demo.find({ text: '74%' })).toBeDefined()
+  expect(await demo.find({ text: 'SUGGESTION HIT RATE · THIS SESSION' })).toBeDefined()
   const other = await $.ui.mount({
     plugin: 'iirc',
     surface: 'terminal',

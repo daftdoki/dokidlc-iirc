@@ -23,12 +23,12 @@ nothing. Do this instead:
    mention. "Why does install fail on a mac" becomes
    `install pysqlite3 macos wheel`.
 2. Search them in one call; pages matching more terms rank first.
-3. Nothing? `iirc topics` lists every topic with its page count; search
+3. Nothing? `iirc show-page-topics` lists every topic with its page count; search
    the nearest topics. Try shorter stems (`instal`, `sqlite`) and synonyms.
-4. Read the top two or three pages with `iirc pull` or `iirc read`
+4. Read the top two or three pages with `iirc read-matching-pages` or `iirc read`
    rather than stopping at the summaries.
 
 Tell the creator when a search came back empty in string mode, so they
 know the limit is the mode and not the pages. If ollama cannot run on
-this machine, `iirc setup --cpu` gives search by meaning without it;
+this machine, `iirc set-search-backend --cpu` gives search by meaning without it;
 offer it, and run it on their yes.

@@ -35,7 +35,7 @@ export type Reader = { page: ShownPage | null; history: string[]; error: string 
 /** Where `j` and `k` stand in each tab's stops, and the item each tab's content starts at under the fixed header. */
 export type Cursor = { session: number; page: number; sessionTop: number; pageTop: number }
 
-/** This session's pages by name, from `iirc stats --session`, for the Session tab; `gone` were renamed or deleted since. */
+/** This session's pages by name, from `iirc summarize-session-usage`, for the Session tab; `gone` were renamed or deleted since. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[]; gone: string[] }
 
 export type ToolNote = { pages: RecalledPage[]; recovered: { command: string; failures: number }[] }
@@ -51,7 +51,7 @@ declare module 'claude-code' {
       briefShown: string | null
       /** The brief as the hint row draws it, before the session counts join it. */
       status: IircStatus | null
-      /** Distinct pages this session read or pulled, and wrote, from `iirc stats --session`. */
+      /** Distinct pages this session read or pulled, and wrote, from `iirc summarize-session-usage`. */
       counts: SessionCounts
       /** Whether the hint row shows the brief; `/iirc status on|off`, kept in $.store. */
       isStatusShown: boolean
@@ -65,11 +65,11 @@ declare module 'claude-code' {
       sessionPages: SessionPages
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
       health: IircHealth | null
-      /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */
+      /** `iirc max-suggested-pages` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
-      /** Whether this compaction window asked `iirc nudge --compact` already. */
+      /** Whether this compaction window asked `iirc remind-to-write --at compaction` already. */
       compactAsked: boolean
-      /** The line `iirc nudge --compact` printed, waiting for the next tool result or prompt. */
+      /** The line `iirc remind-to-write --at compaction` printed, waiting for the next tool result or prompt. */
       compactNudge: string | null
     }
   }

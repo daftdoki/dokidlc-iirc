@@ -82,7 +82,7 @@ def main() -> None:
     env = dict(os.environ, PATH=f"{plugin / 'bin'}:{clean_path()}", XDG_STATE_HOME=str(state))
     env.pop("CLAUDE_PROJECT_DIR", None)
     env.pop("CLAUDECODE", None)
-    # warm the field's index for this copy so the first recall hook does not time out
+    # warm the field's index for this copy so the first suggest-pages hook does not time out
     subprocess.run(["iirc", "search", "warm"], cwd=repo, env=env, capture_output=True, stdin=subprocess.DEVNULL)
 
     prompt = ev["prompt"]

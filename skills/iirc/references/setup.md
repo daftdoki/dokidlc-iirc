@@ -19,10 +19,10 @@ run the commands yourself.
 Then run, in order, showing each command first:
 
 ```
-iirc setup --local          ollama here; --host URL for a remote one; qwen3-embedding:0.6b unless --model names nomic-embed-text or embeddinggemma
-iirc setup --openai URL     or: an OpenAI-compatible host serving qwen3-embedding
-iirc setup --cpu            or: all-MiniLM-L6-v2 on this CPU; fetches about 90 MB and installs onnxruntime once
-iirc setup --substring      or: the string fallback
+iirc set-search-backend --local          ollama here; --host URL for a remote one; qwen3-embedding:0.6b unless --model names nomic-embed-text or embeddinggemma
+iirc set-search-backend --openai URL     or: an OpenAI-compatible host serving qwen3-embedding
+iirc set-search-backend --cpu            or: all-MiniLM-L6-v2 on this CPU; fetches about 90 MB and installs onnxruntime once
+iirc set-search-backend --substring      or: the string fallback
 iirc init                   if the creator said yes to a field
 iirc doctor --fix           installs the tool; for a local host on macOS also ollama and the model
 ```
@@ -30,8 +30,8 @@ iirc doctor --fix           installs the tool; for a local host on macOS also ol
 If `--cpu` fails because onnxruntime has no wheel for this machine, it
 writes nothing; offer the string fallback. A model change starts a
 vector store of its own: every page is embedded again, by the next
-`iirc index` or in the background by the first search. The recall knobs
-are per model, in `[recall.MODEL-ID]` of `.claude/iirc.toml`, so a new
+`iirc rebuild-search-index` or in the background by the first search. The suggestion thresholds
+are per model, in `[suggestions.MODEL-ID]` of `.claude/iirc.toml`, so a new
 model starts at its own defaults and a table tuned for another model
 stays as it was.
 
@@ -42,17 +42,17 @@ what it creates; tell the creator what is left to commit. If `doctor` names
 something only the creator can do, such as installing ollama on a remote
 host, say exactly that and stop.
 
-The host is whatever the creator named; a guess is never right. `setup`
+The host is whatever the creator named; a guess is never right. `set-search-backend`
 runs once per machine: running it again overwrites their choice, so ask
 before a second run.
 
 ## What the creator sees of the hooks
 
-By default the plugin draws the hook lines for the creator: recalled pages
+By default the plugin draws the hook lines for the creator: suggested pages
 under the prompt or failed command, a row when a command failed and then
 worked, and a colored line under the prompt with the page count and the
 pages this session read and wrote. The creator turns that line on or off
-by typing `/iirc status-line on` or `/iirc status-line off`; it is on by
+by typing `/iirc summary-line-visibility on` or `/iirc summary-line-visibility off`; it is on by
 default and the choice holds on that machine. In `.claude/iirc.toml`,
 `ui = false` turns all of it off, and `show_hooks = true` also prints the raw
 text you receive, for debugging. Add the key the creator asks for at the

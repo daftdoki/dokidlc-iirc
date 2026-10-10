@@ -14,25 +14,27 @@ Fix or delete a page the moment you find it wrong.
 ## Commands
 
 ```
-iirc search "what am I looking for"     ranked pages with summary and markers
-iirc search term1 term2 term3           several terms, searched separately, merged
-iirc pull "what am I looking for"       full text of the matching pages
-iirc read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
-iirc suspect-pages [--network]          pages with evidence they may be wrong; --network checks URL refs, with permission
-iirc audit [PAGE]                       pages search shows badly, each with its fix
-iirc verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
-iirc approve PAGE.md                    run a page's check once and approve it here (ask first)
+iirc search "what am I looking for"               ranked pages with summary and markers
+iirc search term1 term2 term3                     several terms, searched separately, merged
+iirc read-matching-pages "what am I looking for"  full text of the matching pages
+iirc read PAGE.md                                 one page; STORE/PAGE.md when two stores hold the name
+iirc find-suspect-pages [--network]               pages with evidence they may be wrong; --network checks URL refs, with permission
+iirc audit-page-findability [PAGE]                pages search shows badly, each with its fix
+iirc verify PAGE.md                               you re-confirmed it; re-run its check, refresh its refs
+iirc approve-page-check PAGE.md                   run a page's check once and approve it here (ask first)
 iirc delete PAGE.md
-iirc setup [--local|--host URL|--openai URL|--cpu|--substring]   the embedding model and where it runs, or the string fallback; once per machine
-iirc migrate                            move a repository and this machine from the memory plugin's layout
-iirc doctor --fix                       install or repair prerequisites; clone missing remote stores
-iirc init                               create .iirc/ and the CLAUDE.md paragraph
-iirc stores                             the stores, their page counts, and anything not committed or pushed
-iirc topics                             every topic with its page count
-iirc max-suggested [N]                  how many pages the hook suggests at most (default 3); N sets it on this machine
-iirc thresholds                         the recall gate's distances, from [recall.MODEL-ID] in .claude/iirc.toml
-iirc tune gather|judge|sweep|done       judge what recall suggested, and propose fixes; see references/tune.md
-iirc sync                               commit, pull, and push the remote stores
+iirc set-search-backend [--local|--host URL|--openai URL|--cpu|--substring]
+                                                  the embedding model and where it runs, or the string fallback; once per machine
+iirc migrate                                      move a repository and this machine from the memory plugin's layout
+iirc doctor --fix                                 install or repair prerequisites; clone missing remote stores
+iirc init                                         create .iirc/ and the CLAUDE.md paragraph
+iirc show-page-stores                             the stores, their page counts, and anything not committed or pushed
+iirc show-page-topics                             every topic with its page count
+iirc max-suggested-pages [N]                      how many pages the hook suggests at most (default 3); N sets it on this machine
+iirc show-suggestion-thresholds                   the suggestion gate's distances, from [suggestions.MODEL-ID] in .claude/iirc.toml
+iirc tune-suggestions STEP                        gather-suggestion-data, record-relevance-judgments, evaluate-suggestion-thresholds,
+                                                  or mark-session-tuned: tune the suggestions and propose fixes; see references/tune.md
+iirc sync                                         commit, pull, and push the remote stores
 ```
 
 Write a page, body on stdin. The body carries the finding and its
@@ -59,7 +61,7 @@ when that section changes or its heading disappears.
 
 Pages live in stores: the project's own `.iirc/`, and any remote store
 `.claude/iirc.toml` names, which is a separate iirc repository shared
-by every project and machine that names it. `iirc stores` lists them.
+by every project and machine that names it. `iirc show-page-stores` lists them.
 With two or more, results read `STORE/PAGE.md`; read and verify a page by
 that name.
 
@@ -67,7 +69,7 @@ Write a fact about this project to the project store. Write a fact that
 holds in any project, such as how a tool behaves, to the remote store,
 with `--store NAME` when the default store is the wrong one. Every change
 commits itself, and a remote store pushes too. When a line says
-`not pushed`, run `iirc sync`. Run `iirc stores add` only when the
+`not pushed`, run `iirc sync`. Run `iirc add-remote-store` only when the
 creator asks; it changes the repository's configuration.
 
 ## Setup, led by you
@@ -113,7 +115,7 @@ How a result was found (`via semantic, install, pysqlite3`) and what to
 do when `doctor` says the mode is string, or every result says "string
 match": `references/search.md`.
 
-When the creator says tune, or runs `/iirc tune`, follow
+When the creator says tune, or runs `/iirc tune-suggestions`, follow
 `references/tune.md`.
 
 ## When to write
@@ -197,7 +199,7 @@ iirc.
 A page is trusted until there is evidence against it. Time alone is not
 evidence. Search marks a page `suspect` when a file it cites changed since
 the cited commit, and `glance` when an unverified page is past its kind's
-age. `suspect-pages` also runs each page's `--check` command and marks failures.
+age. `find-suspect-pages` also runs each page's `--check` command and marks failures.
 
 - `suspect`: read the page and the cited diff before relying on it. Then
   `verify` it, rewrite it, or `delete` it. In the same turn.
@@ -206,20 +208,20 @@ age. `suspect-pages` also runs each page's `--check` command and marks failures.
   Every `iirc read` ends with the commands.
 - Found right in use: `verify` it. One command. `verify` re-runs the
   page's check.
-- Run `iirc suspect-pages` when the session-start line names a suspect, after a
+- Run `iirc find-suspect-pages` when the session-start line names a suspect, after a
   `git pull` or `iirc sync`, and before you close a quest stage. A page
-  another project wrote is not checked here; `suspect-pages` counts them.
+  another project wrote is not checked here; `find-suspect-pages` counts them.
 - A `--check` must be read-only and must pass when you write it; the
-  wrapper refuses one that does not. Checks run only from `suspect-pages`,
-  `verify`, and `approve`, never from hooks.
+  wrapper refuses one that does not. Checks run only from `find-suspect-pages`,
+  `verify`, and `approve-page-check`, never from hooks.
 - A check that came with a clone is not approved on this machine.
-  `suspect-pages` lists it instead of running it, and `verify` refuses the page
+  `find-suspect-pages` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run
-  `iirc approve PAGE`. Claude Code prompts them to approve that command
+  `iirc approve-page-check PAGE`. Claude Code prompts them to approve that command
   as well.
 
-A ref may be a URL. Search never contacts it, and `iirc suspect-pages` skips
-URL refs and says how many it skipped. `iirc suspect-pages --network` sends one
+A ref may be a URL. Search never contacts it, and `iirc find-suspect-pages` skips
+URL refs and says how many it skipped. `iirc find-suspect-pages --network` sends one
 HEAD request per URL; before you run it, tell the creator which URLs it
 will contact and ask. The wrapper itself refuses unless a terminal answers
 yes or `IIRC_ALLOW_NETWORK=1` is set, which only the creator does. A URL

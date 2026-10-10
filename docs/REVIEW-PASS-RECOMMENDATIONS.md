@@ -238,7 +238,7 @@ linked page is suspect or gone, as that chore already proposes.
 ### 4.1 Contract
 
 - Reads the field, the git history, and the local log. Writes nothing.
-  Never runs a `check` (that stays in `doubt`, `verify`, `approve`).
+  Never runs a `check` (that stays in `find-suspect-pages`, `verify`, `approve-page-check`).
 - Prints sections in a fixed order, each a list of pages with the reason and
   the command that acts on it. Empty sections are omitted.
 - Logs one `review` event with the counts, so `memory stats` can report
@@ -256,7 +256,7 @@ linked page is suspect or gone, as that chore already proposes.
 | **Accreting** | Body grew across ≥3 commits since creation, or a `decision` page over ~2.5 KB, or a page that links to ≥2 others it also restates | `git log --follow -- PAGE`, `parse_page()`, wikilink scan |
 | **Multi-finding** | Title contains `;`, or joins clauses with ", and", or body has an `Also:` / `Also,` paragraph | `parse_page()` |
 | **Hygiene** | No Sources section; Sources with no date; body over the 8 KB soft limit | `validate_page()` rules, reused |
-| **Never read** (this machine) | Recall named the page ≥N times across sessions and no `read` or `pull` followed, in this machine's log | `read_log()`; the `pages` field on `recall`, `read`, `pull` rows |
+| **Never read** (this machine) | Recall named the page ≥N times across sessions and no `read` or `read-matching-pages` followed, in this machine's log | `read_log()`; the `pages` field on `recall`, `read`, `pull` rows |
 | **Origin** | For each page above, the author of its first commit, so the agent knows when it is editing a cloned page | `git log --diff-filter=A --format=%an -- PAGE` |
 
 The "Never read" section is the only one that uses the log, and the log is
@@ -295,8 +295,8 @@ threshold.
   field needs more often than merging.
 - No deletion on the log's evidence. "Never read on this machine" is not
   "never read."
-- No `check` execution. A cloned page's check is remote code; `doubt` and
-  `approve` already handle that boundary.
+- No `check` execution. A cloned page's check is remote code; `find-suspect-pages` and
+  `approve-page-check` already handle that boundary.
 
 ### 4.6 Measuring it
 
@@ -355,7 +355,7 @@ it.
 | Automatic merging of overlapping pages | Skill rule 2. And the field's duplication problem is hub pages accreting, not pairs; the fix is splitting. |
 | Decay tiers or time-based deletion | Design decision 4, and the research: no evidence that age-based forgetting helps; `decision` never aging is right. Age stays a glance. |
 | Promotion by recall frequency | MINJA: frequency is what an injected record optimises for. Recall counts are display, never trust. |
-| Calling it "dream" | The report's finding that the metaphor invites phases you do not need. `review` sits beside `doubt` and `verify` in the plugin's own vocabulary. |
+| Calling it "dream" | The report's finding that the metaphor invites phases you do not need. `review` sits beside `find-suspect-pages` and `verify` in the plugin's own vocabulary. |
 
 ## 7. Relation to open work
 

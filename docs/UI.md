@@ -11,11 +11,11 @@ tested on Claude Code 2.1.295.
 
 ![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
 
-![The same row unfolded by /iirc unfold-suggestions: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
+![The same row unfolded by /iirc unfold-suggested-pages: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
 
-A click on `[+]` unfolds the row; `/iirc unfold-suggestions` unfolds the latest one from the keyboard.
+A click on `[+]` unfolds the row; `/iirc unfold-suggested-pages` unfolds the latest one from the keyboard.
 
-When recall finds pages for your prompt, a row appears under it:
+When the suggestion hook finds pages for your prompt, a row appears under it:
 
 ```
 [+] iirc: [3] pages suggested
@@ -57,8 +57,8 @@ name, title, or summary that is not common English. The agent sees the
 same label in its line, and a page appears once per session until the
 context is compacted.
 
-Recall suggests up to 3 pages. `/iirc max-suggested N` changes that, from 1
-to 10, and `/iirc max-suggested` prints the number. It is kept in
+A suggestion line names up to 3 pages. `/iirc max-suggested-pages N` changes that, from 1
+to 10, and `/iirc max-suggested-pages` prints the number. It is kept in
 `~/.config/dokidlc-iirc/config.toml` as `max_suggested`, so it holds on
 that machine.
 
@@ -80,26 +80,26 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 
 | Part | Means |
 |---|---|
-| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a recall this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off (`iirc: hooks off`) |
+| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off (`iirc: hooks off`) |
 | `[76] pages` | the pages in every store |
-| `[2/5] used` | of the pages recall suggested this session, how many were then read |
-| `[12] reads` | different pages this session read with `iirc read` or `iirc pull` |
+| `[2/5] used` | of the pages the suggestion hook suggested this session, how many were then read |
+| `[12] reads` | different pages this session read with `iirc read` or `iirc read-matching-pages` |
 | `[4] writes` | different pages this session wrote |
-| `· [2] timed out` | shown only when a recall this session ran past the hook's 5-second limit and Claude Code killed it |
+| `· [2] timed out` | shown only when a suggestion line this session ran past the hook's 5-second limit and Claude Code killed it |
 | `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
-| `· run iirc suspect-pages` | shown when the circle is yellow or red: the command that clears it |
+| `· run iirc find-suspect-pages` | shown when the circle is yellow or red: the command that clears it |
 
-The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
-`migrate`, `setup`, `init`, and `doctor`, and after each recall. A status
+The line updates after each `iirc read`, `read-matching-pages`, `write`, `delete`, `sync`,
+`migrate`, `set-search-backend`, `init`, and `doctor`, and after each suggestion line. A status
 line cannot carry color, so the line sits in the hint row.
 
-`/iirc status-line off` hides it and `/iirc status-line on` brings it
-back; `/iirc status-line` says which. `/iirc status` draws the full
+`/iirc summary-line-visibility off` hides it and `/iirc summary-line-visibility on` brings it
+back; `/iirc summary-line-visibility` says which. `/iirc status` draws the full
 status card, described below.
 
 ## A plain `/iirc`, `/iirc status`, and `/iirc help`
 
-![The /iirc card with sample numbers from /iirc demo: ask in words, more commands, full status, the recall hit rate gauge at 74%, and the page count](images/iirc-card-home.png)
+![The /iirc card with sample numbers from /iirc demo: ask in words, more commands, full status, the suggestion hit rate gauge at 74%, and the page count](images/iirc-card-home.png)
 
 A plain `/iirc` draws a short card in place of its output row:
 
@@ -109,7 +109,7 @@ A plain `/iirc` draws a short card in place of its output row:
 - MORE COMMANDS: a pointer to `/iirc help`
 - FULL STATUS: a pointer to `/iirc status`, in yellow or red with
   `▲ needs a look` when the status is not green
-- RECALL HIT RATE, for this session: the share of suggested pages that
+- SUGGESTION HIT RATE, for this session: the share of suggested pages that
   were read, as a percentage and a bar that runs from red into green as
   it fills, and the average match of the suggestions: all of them, the
   ones read, and the ones not read
@@ -122,15 +122,15 @@ A plain `/iirc` draws a short card in place of its output row:
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it, in green, yellow, or red
 - TRUST: the number of suspect pages, whose cited file changed since
-  they cited it, and up to three by name, with `iirc suspect-pages` as the fix
+  they cited it, and up to three by name, with `iirc find-suspect-pages` as the fix
 - STORES: each store's pages, then `clean` or its uncommitted changes
   and unpushed commits, with `iirc sync` as the fix for unpushed ones
 - the counts, under STORE (pages) and THIS SESSION (used, reads, and
   writes)
-- RECALL HIT RATE, as on the short card
-- SUGGESTED, NOT READ: up to three pages recall suggested this session
+- SUGGESTION HIT RATE, as on the short card
+- SUGGESTED, NOT READ: up to three pages the suggestion hook suggested this session
   that nobody read, most often suggested first, with the count. A page
-  that keeps coming back here is recall's noise.
+  that keeps coming back here is the suggestion hook's noise.
 
 TRUST and STORES come from `iirc doctor --health`, run as the status card
 opens, so they are current. The STATUS chip comes from the session-start
@@ -143,18 +143,18 @@ draw the two cards with sample numbers.
 ![The /iirc help card: settings with their values, the maintenance commands, and the look-up commands](images/iirc-card-help.png)
 
 - SETTINGS: the line under the prompt, the number of suggested pages,
-  and the search mode, each with its command and current value. `setup`
+  and the search mode, each with its command and current value. `set-search-backend`
   goes to the skill, which asks which embedding model and where it runs
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
-  directly, printing what they print: `doctor`, `doctor --fix`, `suspect-pages`,
-  `sync`, `stores`, `stats`, `index`, `token-cost`, `thresholds`, `search QUERY`, `topics`, and
-  `read PAGE`. `audit` and `tune` are maintenance too, but they go to the
+  directly, printing what they print: `doctor`, `doctor --fix`, `find-suspect-pages`,
+  `sync`, `show-page-stores`, `summarize-page-usage`, `rebuild-search-index`, `estimate-context-tokens`, `show-suggestion-thresholds`, `search QUERY`, `show-page-topics`, and
+  `read PAGE`. `audit-page-findability` and `tune-suggestions` are maintenance too, but they go to the
   skill, which proposes each fix for your yes. A page you read this way does not count toward the
   session's reads, which are the agent's. `/iirc doctor` draws its checks
   as a card too: a result chip, the failures with their fixes first, then
   notes, then the checks that passed.
 - `/iirc <request>`, which goes to the skill, as do the commands that need
-  a question first: `stores add`, `init`, `write`, `delete`, and `approve`
+  a question first: `add-remote-store`, `init`, `write`, `delete`, and `approve-page-check`
 
 ![The /iirc doctor card: all 13 checks pass, each listed](images/iirc-card-doctor.png)
 
@@ -210,8 +210,8 @@ closes it.
 The session tab lists this session's pages; the counts are on `/iirc status`,
 so the reader's few rows go to the list:
 
-- SUGGESTED: every page recall suggested, read ones first with `✓ read`,
-  then the rest with `· not read` and how many times recall suggested it
+- SUGGESTED: every page the suggestion hook suggested, read ones first with `✓ read`,
+  then the rest with `· not read` and how many times the suggestion hook suggested it
 - WRITTEN: the pages the agent wrote, marked `✎`
 - SUSPECT: pages whose cited file changed
 

@@ -3,7 +3,7 @@
 What iirc suggests to the agent, how often it is right, and what to change.
 Written 2026-10-09 from one tune run and ten research reports, then
 revised after an independent review. The creator asked for: a page audit
-that `tune` runs, better pages from the moment they are written, a review
+that `tune-suggestions` runs, better pages from the moment they are written, a review
 of what the model sees, a comparison of embedding models, a middle tier
 that needs no ollama, and a view on a port to Go or Rust. Phases 1 and 2
 are built; [Results](#results) has what they measured.
@@ -130,14 +130,14 @@ embedding model) has waited five weeks.
 ## Plan
 
 Each phase ships on its own and is measured before the next starts.
-`iirc tune` stays the entry point for optimizing.
+`iirc tune-suggestions` stays the entry point for optimizing.
 
 ### Phase 1: measure, then fix the line, the gate, read, and write
 
 Measurement comes first, because the gate changes alter the inputs that
-`iirc tune sweep` replays.
+`iirc tune-suggestions evaluate-suggestion-thresholds` replays.
 
-1. **Replay harness.** `iirc tune sweep --replay` recomputes the string
+1. **Replay harness.** `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts` recomputes the string
    side of each judged pair from the full prompt (recovered from the
    transcript), with the current code, instead of the term lists logged
    at recall time. It reads the pooled judged sets as well as the tune
@@ -193,13 +193,13 @@ Write (`iirc write` checks; the skill carries the reasons):
 
 Audit:
 
-15. New command `iirc audit [PAGE]`. Script checks per page: the write
+15. New command `iirc audit-page-findability [PAGE]`. Script checks per page: the write
     checks above; a search for the page's own title ranks it first;
     hubness (how many pages and judged prompts fall within the gate of
     this page), reported with its relevant share, not as a fault alone;
     tune history (noise against relevant judgments); a superseded page
     that keeps its old text. One line per finding, with the fix.
-16. `iirc tune` runs `iirc audit` after the sweep. The tune reference
+16. `iirc tune-suggestions` runs `iirc audit-page-findability` after the sweep. The tune reference
     adds an agent step: for each flagged page, write two realistic
     prompts without the title's words, check the page ranks in the top
     three, and propose a rewrite, split, merge, or delete. The creator
@@ -213,7 +213,7 @@ Tune fixes from the first run:
 
 18. `read_unsuggested` counts only reads made for guidance: drop reads
     by verify, write, and doctor loops, and reads before the recall.
-19. `tune judge` stops marking the judging session as tuned for good.
+19. `tune-suggestions record-relevance-judgments` stops marking the judging session as tuned for good.
 20. Normalize page names with and without `.md`; fix the gather join
     that attached a recall to the wrong hand-back; keep the failed
     command and its error in the evidence.
@@ -242,7 +242,7 @@ was relevant).
     config error turns every hook off, so the loader, the knob ranges
     (0.10 to 0.60), and the sweep grid (0.20 to 0.46) change first.
     MiniLM's useful distances sit near 0.5 to 0.7.
-25. `iirc setup` offers: ollama (nomic, Qwen3-0.6B, EmbeddingGemma), an
+25. `iirc set-search-backend` offers: ollama (nomic, Qwen3-0.6B, EmbeddingGemma), an
     OpenAI-compatible host (frame's `svc:llm`), the CPU tier
     (MiniLM-ONNX, windows), and substring.
 26. Before choosing a default, a pooling round judges the top pages of
@@ -262,7 +262,7 @@ was relevant).
 Phases 1 and 2 were built on 2026-10-09 as quest 2610100115-p5 in
 agent-builder, whose `plan.md` records each step's measurement under
 "Deviations from plan". A count below is relevant passes, noise passes,
-and relevant pairs refused, from `iirc tune sweep --replay` on the strict
+and relevant pairs refused, from `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts` on the strict
 labels. Up to the retune, the replay files are as committed at
 agent-builder 5a3ae04: agent-builder has 1,131 judged pairs (60
 relevant) from 98 prompts, and neckbeard has 437 pairs (77 relevant)
@@ -324,7 +324,7 @@ recall on agent-builder went from a median 474 ms to 509 ms.
 2.63 to 2.80 s to 39 calls in 0.73 to 0.74 s (item 17). Search in the
 wrapper (item 23) matched memoryfield-tool's distances to 1.1e-6 over
 777 page-query pairs, left both replays byte-identical, and cut recall
-on agent-builder from a median 0.564 s to 0.251 s. `iirc index` embeds
+on agent-builder from a median 0.564 s to 0.251 s. `iirc rebuild-search-index` embeds
 95 pages in 2.3 s.
 
 **The audit's first run** on agent-builder found 79 findings in 95
@@ -359,7 +359,7 @@ above.
 
 | Item | Outcome |
 |---|---|
-| 1 | Built: `tune sweep --replay`, `scripts/replay-files.py`, and the session replay `scripts/line-replay.py`. |
+| 1 | Built: `tune-suggestions evaluate-suggestion-thresholds --replay-prompts`, `scripts/replay-files.py`, and the session replay `scripts/line-replay.py`. |
 | 2, 3 | Built. |
 | 4 | Changed: rarity is a share of pages (`RARE_SHARE` 0.10), not a weight. The first word list, first20hours google-10000-english, permits only educational and personal use, so the list is the 1,000 top English words of wordfreq 3.1.1, CC-BY-SA 4.0, with a `NOTICE` file and `scripts/common-words.py` to rebuild it. |
 | 5 | Changed: `meaning+term` is required on a failure only with semantic search on; string-only search keeps the `term` rule. The one-page cap holds in both. New verdict `failure_needs_both`. |
@@ -368,13 +368,13 @@ above.
 | 8 | Built. |
 | 9 | Dropped by the creator after the replay; the line and the row keep the percentage. |
 | 10 | Dropped: neither experiment passed its bar. |
-| 11 | Built; `iirc pull` prints pages the same way. |
+| 11 | Built; `iirc read-matching-pages` prints pages the same way. |
 | 12 | Built; each secret pattern starts at a word, so `task-...` never matches `sk-`. |
 | 13, 14, 16 | Built. |
 | 15 | Changed: `hub` rests on tune judgments only, because page-to-page distances are not on the prompt-to-page scale (for each page, 82 to 94 of 95 pages fell within 0.38); `superseded` matches only the link form or the frontmatter key. |
 | 17 to 22 | Built. |
-| 23 | Built, with an addition: a search that finds pages without vectors starts one background `iirc index`, at most every ten minutes per store. A search embeds at most 5 changed pages. |
-| 24 | Built: `[recall.MODEL-ID]`, a quoted name for a model with a dot, and `doctor --fix` moving a flat `[recall]` table. |
+| 23 | Built, with an addition: a search that finds pages without vectors starts one background `iirc rebuild-search-index`, at most every ten minutes per store. A search embeds at most 5 changed pages. |
+| 24 | Built: `[suggestions.MODEL-ID]`, a quoted name for a model with a dot, and `doctor --fix` moving a flat `[recall]` table. |
 | 25 | Built; MiniLM runs the fp32 model, not the 23 MB int8 one, so every machine computes the same vectors. |
 | 26 | Built: setup offers qwen3-embedding:0.6b where ollama or a host answers, MiniLM otherwise, substring last. A machine with no model in its setup file keeps nomic. |
 | Phase 3 | Not started: ideas 2610100122-x9 (reranker) and 2610100122-zj (native binary). |

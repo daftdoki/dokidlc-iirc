@@ -99,18 +99,18 @@ def grade(run: Path, eval_name: str):
         ex.append({"text": text, "passed": bool(passed), "evidence": str(evidence)[:400]})
 
     fixture_pages = {"ledger": 4, "syncproj": 2, "devserver": 3}
-    reads = any_index(calls, r"iirc (read|pull)\b")
-    searches = any_index(calls, r"iirc (search|pull)\b")
+    reads = any_index(calls, r"iirc (read|read-matching-pages)\b")
+    searches = any_index(calls, r"iirc (search|read-matching-pages)\b")
 
     if eval_name in ("search-before-debug", "search-when-hook-is-silent"):
         first_fix = first_index(calls, r"make db|build_db\.py")
         first_mem = min(searches + reads, default=None)
-        add("IIRC is consulted (search, read, or pull) before the fix is applied",
+        add("IIRC is consulted (search, read, or read-matching-pages) before the fix is applied",
             first_mem is not None and (first_fix is None or first_mem < first_fix),
             f"first iirc call at step {first_mem}, make db at step {first_fix}")
         cats = any_index(calls, r"(cat|head|sed|tail|less|more)\s+[^;|&>]*\.iirc/[a-z0-9-]+\.md")
-        add("Pages are read with iirc read or pull, not cat", not cats, f"cat of a page at steps {cats}")
-        read_page = any_index(calls, r"iirc (read|pull).*ledger-tests-need-make-db")
+        add("Pages are read with iirc read or read-matching-pages, not cat", not cats, f"cat of a page at steps {cats}")
+        read_page = any_index(calls, r"iirc (read|read-matching-pages).*ledger-tests-need-make-db")
         make_db = first_index(calls, r"make db|build_db\.py")
         add("The agent reads ledger-tests-need-make-db.md before running make db",
             read_page and (make_db is None or min(read_page) < make_db),
@@ -141,7 +141,7 @@ def grade(run: Path, eval_name: str):
         add("An iirc search runs before the first sync attempt", (min(searches + reads, default=10**6) < (first_index(calls, r"sync\.py") or 10**6)), f"iirc at {min(searches + reads, default=None)}, sync at {first_index(calls, r'sync\.py')}")
 
     elif eval_name == "suspect-page-same-turn":
-        read_page = any_index(calls, r"iirc (read|pull).*dev-server-port|iirc pull")
+        read_page = any_index(calls, r"iirc (read|read-matching-pages).*dev-server-port|iirc read-matching-pages")
         add("The agent reads dev-server-port.md", bool(read_page), f"steps {read_page}")
         script_write = next((i for i, c in enumerate(calls) if c["tool"] in ("Write", "Edit") and "healthcheck" in str(c["input"].get("file_path", ""))), None)
         if script_write is None:
@@ -169,7 +169,7 @@ def grade(run: Path, eval_name: str):
     elif eval_name == "remember-a-fact-a-file-holds":
         first_write = first_index(calls, r"iirc write")
         consulted = searches + reads
-        add("IIRC is consulted (search, read, or pull) before any write", consulted and (first_write is None or min(consulted) < first_write), f"consulted at {consulted}, write at {first_write}")
+        add("IIRC is consulted (search, read, or read-matching-pages) before any write", consulted and (first_write is None or min(consulted) < first_write), f"consulted at {consulted}, write at {first_write}")
         add("No new page: the field still holds 4 pages", len(field) == 4, f"{len(field)} pages: {sorted(field)}")
         add("The reply names ledger-tests-need-make-db.md as already holding the fact", "ledger-tests-need-make-db" in answer, answer[:200])
         pg = field.get("ledger-tests-need-make-db.md", {})

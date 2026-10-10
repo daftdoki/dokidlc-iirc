@@ -3041,7 +3041,7 @@ def test_changed_page_reembeds(tmp_path, monkeypatch):
 
 
 def test_search_starts_one_background_index_when_many_pages_changed(tmp_path, monkeypatch):
-    """A missing store, or a pull of many pages, heals itself: the search that finds them starts `iirc index` once."""
+    """A missing store, or a pull of many pages, heals itself: the search that finds them starts `iirc rebuild-search-index` once."""
     field = _vector_project(tmp_path, monkeypatch)
     started = []
     monkeypatch.setattr(iirc, "start_background", lambda argv: started.append(argv))
@@ -3080,7 +3080,7 @@ def test_hybrid_search_in_process(tmp_path, monkeypatch):
 # p5 step 24
 
 def _machine_model(model):
-    """The setup file names this embedding model, as `iirc setup` writes it."""
+    """The setup file names this embedding model, as `iirc set-search-backend` writes it."""
     path = iirc.config_file(); path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f'embedding = {{backend = "{iirc.iirc_embed.MODELS[model].backend}", model = "{model}"}}\n')
     iirc._CONFIG = None
@@ -3515,7 +3515,7 @@ def test_docs_name_every_command():
     # as a command, in backticks: the noun "recall" or "read" in prose does not count
     missing = [c for c in commands if not re.search(rf"`(?:/?iirc )?{re.escape(c)}\b", usage)]
     assert missing == []
-    assert "`iirc audit" in usage and "--replay" in usage
+    assert "`iirc audit-page-findability" in usage and "--replay-prompts" in usage
 
 
 def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
@@ -3609,7 +3609,7 @@ def test_subagent_recall_keeps_its_own_repeat_history(tmp_path, monkeypatch):
 
 
 def test_background_index_never_commits(tmp_path, monkeypatch):
-    """The `iirc index` a search starts writes the vector cache and nothing else: a loose file in .iirc stays uncommitted."""
+    """The `iirc rebuild-search-index` a search starts writes the vector cache and nothing else: a loose file in .iirc stays uncommitted."""
     field = _vector_project(tmp_path, monkeypatch)
     _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "pages")
     real, procs = iirc.start_background, []

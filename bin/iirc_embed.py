@@ -67,7 +67,7 @@ MODELS: dict[str, Model] = {m.id: m for m in (
 )}
 DEFAULT_MODEL = "nomic-embed-text"
 
-# all-minilm-l6-v2's files, fetched by `iirc setup --cpu` at a pinned commit and checked against these sha256 values.
+# all-minilm-l6-v2's files, fetched by `iirc set-search-backend --cpu` at a pinned commit and checked against these sha256 values.
 # The fp32 model, not the 23 MB int8 one: one file, so every machine computes the same vectors.
 MINILM_REPO = "sentence-transformers/all-MiniLM-L6-v2"
 MINILM_COMMIT = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"

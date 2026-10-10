@@ -938,6 +938,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     : []
   const share = c.suggested > 0 ? c.used / c.suggested : 0
   const BAR = 36
+  // the gauge's title row: the title, then a percentage of up to four characters
+  const GAUGE_TITLE = 'SUGGESTION HIT RATE · THIS SESSION'
+  const GAUGE_W = Math.max(BAR + 2, 2 + GAUGE_TITLE.length + 5)
   const filled = Math.round(share * BAR)
   const pct = Math.round(share * 100)
   const band = pct >= 50 ? GAUGE[2] : pct >= 25 ? GAUGE[1] : GAUGE[0]
@@ -1042,8 +1045,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     )),
   ]
   const gauge = c.suggested > 0 ? [
-    <Box key="gauge-title" flexDirection="row" width={BAR + 2}>
-      <Box flexGrow={1}>{heading('RECALL HIT RATE · THIS SESSION')}</Box>
+    <Box key="gauge-title" flexDirection="row" width={GAUGE_W}>
+      <Box flexGrow={1}>{heading(GAUGE_TITLE)}</Box>
       <Text bold color={band}>{`${pct}%`}</Text>
     </Box>,
     <Box key="gauge-bar" flexDirection="row" paddingLeft={2}>{cells}</Box>,
@@ -1080,7 +1083,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     widths.push(16 + '/iirc help'.length, 4 + MORE_HINT.length)
     widths.push(16 + '/iirc status'.length, 4 + statusHint.length)
     if (s && s.pages !== null) widths.push(2 + 'STORE'.length, 2 + String(s.pages).length, 2 + 'pages'.length)
-    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
+    if (c.suggested > 0) widths.push(GAUGE_W, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
   } else if (view === 'status') {
     const fixWidth = s && level !== 'ok' && s.fix ? '   fix with '.length + s.fix.length : 0
     const modeWidth = s && s.mode && s.mode !== 'semantic+keyword' ? `   ${s.mode} mode`.length : 0
@@ -1089,7 +1092,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       const [n, label] = tiles[tiles.length - 1]
       widths.push(15 + 2 + 'THIS SESSION'.length, 2 + 13 * (tiles.length - 1) + Math.max(n.length, label.length))
     }
-    if (c.suggested > 0) widths.push(BAR + 2, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
+    if (c.suggested > 0) widths.push(GAUGE_W, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
     widths.push(...factWidths)
     if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name]) => 2 + 5 + name.replace(/\.md$/, '').length))
   } else {

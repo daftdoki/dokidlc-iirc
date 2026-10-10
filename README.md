@@ -86,7 +86,7 @@ Once per machine, in Claude Code:
 
 Then open a session in a repository and say "set up iirc". The agent
 asks where the embedding model runs, and recommends qwen3-embedding when
-ollama answers, the CPU model otherwise. It then runs `iirc setup`,
+ollama answers, the CPU model otherwise. It then runs `iirc set-search-backend`,
 `iirc init`, and `iirc doctor --fix`, which installs memoryfield-tool at
 the pinned commit and, for a local model on macOS, ollama and the model.
 You commit what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
@@ -120,7 +120,7 @@ pysqlite3-install-override.md: Why memoryfield-tool needs a uv overrides file on
 makes the agent write a page. A plain `/iirc` draws a short card,
 `/iirc status` every number, and `/iirc help` the settings and commands.
 
-![The /iirc card with sample numbers: ask in words, more commands, full status, the recall hit rate gauge at 74%, and the page count](docs/images/iirc-card-home.png)
+![The /iirc card with sample numbers: ask in words, more commands, full status, the suggestion hit rate gauge at 74%, and the page count](docs/images/iirc-card-home.png)
 
 ![The iirc reader docked beside the transcript, reading a page: its title, kind and trust chips, summary, topics, and body](docs/images/iirc-pane-docked-page.png)
 
@@ -132,12 +132,12 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 - The hooks fail open, then say so. A dead embedding host is skipped
   after a two-second probe. A bad `.claude/iirc.toml` turns every hook
   off, and the session-start line and the line under the prompt say so.
-  A recall that runs past the hook's 5-second limit is logged and counted.
-- iirc records what recall did on this machine, in
-  `~/.local/state/dokidlc-iirc/`, for 90 days: each recall and its
+  A page suggestion that runs past the hook's 5-second limit is logged and counted.
+- iirc records what the suggestion hook did on this machine, in
+  `~/.local/state/dokidlc-iirc/`, for 90 days: each suggestion line and its
   candidates, each session's numbers, and the first 300 characters of each
-  prompt, with anything that looks like a secret redacted. Nothing there is committed or pushed. `/iirc tune` reads it, runs
-  `iirc audit`, and proposes page fixes and knob changes, each for your
+  prompt, with anything that looks like a secret redacted. Nothing there is committed or pushed. `/iirc tune-suggestions` runs
+  `iirc audit-page-findability`, reads the records, and proposes page fixes and threshold changes, each for your
   yes. See [what iirc records](docs/HOW-IT-WORKS.md#what-iirc-records).
 - Every change the agent makes to the pages is committed at once, the
   store's directory and nothing else, so your own staged work stays out.
@@ -145,7 +145,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
   not the repository. A fresh clone or a new model rebuilds them on first use.
 - Nothing from a page runs or goes out without you. A check command that
   came with a clone runs only after you approve it, and a page's URLs are
-  contacted only by `iirc suspect-pages --network`, which asks first.
+  contacted only by `iirc find-suspect-pages --network`, which asks first.
 - The guard refuses a raw read of a page by pattern, which is a
   convention, not a boundary.
 - Two near-duplicate pages make search name the wrong one; `iirc doctor`
@@ -157,9 +157,9 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 
 | Setting | Where | Changed by |
 |---|---|---|
-| search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc setup` again |
-| pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
-| how close a page must be for recall to suggest it, per model | `.claude/iirc.toml`, `[recall.MODEL-ID]` | `/iirc tune`, on your yes; `/iirc thresholds` prints them |
+| search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc set-search-backend` again |
+| pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested-pages N` |
+| how close a page must be for the hook to suggest it, per model | `.claude/iirc.toml`, `[suggestions.MODEL-ID]` | `/iirc tune-suggestions`, on your yes; `/iirc show-suggestion-thresholds` prints them |
 
 [docs/USAGE.md](docs/USAGE.md#every-setting) lists every setting, with
 its default, its range, and when to turn it.

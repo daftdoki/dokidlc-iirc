@@ -44,11 +44,11 @@ shorthand is fine on a machine that already has github.com in
 ### 3. Choose the search mode
 
 ```sh
-iirc setup --local                      # ollama on this machine
-iirc setup --host http://frame:11434    # ollama on another host
-iirc setup --openai https://llm.example.net   # an OpenAI-compatible host
-iirc setup --cpu                        # all-MiniLM-L6-v2 on this CPU, no ollama
-iirc setup --substring                  # string search only
+iirc set-search-backend --local                      # ollama on this machine
+iirc set-search-backend --host http://frame:11434    # ollama on another host
+iirc set-search-backend --openai https://llm.example.net   # an OpenAI-compatible host
+iirc set-search-backend --cpu                        # all-MiniLM-L6-v2 on this CPU, no ollama
+iirc set-search-backend --substring                  # string search only
 ```
 
 With ollama, the model is `qwen3-embedding:0.6b` unless `--model` names
@@ -138,7 +138,7 @@ iirc doctor
 
 Every row should read `ok`, including "field validates". The last line
 names the index cache directory, which holds one vector store per store
-and model. That cache is derived, never committed, and `iirc index`
+and model. That cache is derived, never committed, and `iirc rebuild-search-index`
 rebuilds it.
 
 ## What project settings do not do

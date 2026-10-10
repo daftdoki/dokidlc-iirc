@@ -11,7 +11,7 @@ bin/iirc_words.txt         common English words, CC-BY-SA (NOTICE); scripts/comm
 iirc.pin                   memoryfield-tool commit and the embedding model
 scripts/                   guard.sh, the replay builders and the session replay, screenshots and demo
 skills/iirc/SKILL.md       the agent's rules
-hooks/hooks.json             SessionStart and SubagentStart: doctor --brief --hook; UserPromptSubmit and PostToolUse(Failure): recall; Stop: nudge; PreToolUse (Bash, Read): guard
+hooks/hooks.json             SessionStart and SubagentStart: doctor --brief --hook; UserPromptSubmit and PostToolUseFailure: suggest-pages; PostToolUse: record-command-success; Stop: remind-to-write; PreCompact and SessionEnd: record-session-summary; PreToolUse (Bash, Read): guard
 tests/                       pytest; nothing needs ollama or memoryfield-tool
 ```
 
@@ -54,7 +54,7 @@ no longer embeds. In string mode it skips reindexing. An `openai`
 backend has one host, the URL setup wrote; `onnx` has none. An ollama
 host, when semantic is on, is resolved in this order: `OLLAMA_HOST` in the environment, then
 `embedding_host` in `~/.config/dokidlc-iirc/config.toml` (written by
-`iirc setup`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
+`iirc set-search-backend`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
 `doctor` names the source. `doctor --fix` installs ollama only for a local
 host.
 
@@ -110,31 +110,31 @@ minutes so a dead host costs one probe, not one per prompt.
 
 ## Tuning files
 
-`iirc tune gather` writes `tune/SESSION.json` in the state dir, one per
+`iirc tune-suggestions gather-suggestion-data` writes `tune/SESSION.json` in the state dir, one per
 session, from the log, the `eval-*.jsonl` candidate rows, the
 `prompts/SESSION.jsonl` excerpts, and the transcript when Claude Code
-still keeps it. A recall logged before `recall_id` existed joins its
+still keeps it. A suggestion line logged before `recall_id` existed joins its
 prompt by time, so its prompt can be the wrong one when prompts queue.
-`iirc tune judge` appends to `tune/judgments.jsonl`, one file for every
+`iirc tune-suggestions record-relevance-judgments` appends to `tune/judgments.jsonl`, one file for every
 repository, so each line carries its `repo`; the last line for a
-repository, session, recall, and page wins. Gather logs a `tune_gather`
-row and judge logs a `tune_judge` row. Gather skips the recalls between a
+repository, session, suggestion line, and page wins. gather-suggestion-data logs a `tune_gather`
+row and record-relevance-judgments logs a `tune_judge` row. gather-suggestion-data skips the suggestion lines between a
 session's first `tune_gather` row and its last `tune_judge` row, because
-those recalls were about tuning. `iirc read --for-tune` logs `tune_read`, not `read`, so
-judging does not count as the session's own use of a page. `iirc tune done` logs a `tuned` row whose
+those suggestion lines were about tuning. `iirc read --for-tune` logs `tune_read`, not `read`, so
+judging does not count as the session's own use of a page. `iirc tune-suggestions mark-session-tuned` logs a `tuned` row whose
 `tuned` field names the session, so the row's own `session` stays the
-one that tuned. `gate()` is the one gate that both recall and `iirc tune
-sweep` call.
+one that tuned. `gate()` is the one gate that both `iirc suggest-pages` and
+`iirc tune-suggestions evaluate-suggestion-thresholds` call.
 
 ## Approved checks
 
-`write` and `approve` record the sha256 of a page's check in
-`~/.local/state/dokidlc-iirc/checks.json`. `suspect-pages` runs only approved
+`write` and `approve-page-check` record the sha256 of a page's check in
+`~/.local/state/dokidlc-iirc/checks.json`. `find-suspect-pages` runs only approved
 checks and lists the rest; `verify` refuses a page whose check is not
-approved or not read-only in form. Only `approve` and `write` grant
+approved or not read-only in form. Only `approve-page-check` and `write` grant
 approval, because those are the two places the creator was asked or the
 command came from this machine's own agent. The PreToolUse guard asks for
-`iirc approve` and `iirc suspect-pages --network`, and the wrapper refuses
+`iirc approve-page-check` and `iirc find-suspect-pages --network`, and the wrapper refuses
 `--network` off a terminal unless `IIRC_ALLOW_NETWORK=1` is set. The
 same guard, registered for Bash and for Read, denies a raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, or `more` in a command

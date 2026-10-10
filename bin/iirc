@@ -2022,7 +2022,7 @@ def url_status(url: str, timeout: float = URL_TIMEOUT) -> tuple[str, str] | None
 
     Network access. Only `find-suspect-pages --network` calls this, and only with the creator's permission.
     """
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "dokidlc-iirc doubt"})
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "dokidlc-iirc find-suspect-pages"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             code = resp.status
@@ -2030,7 +2030,7 @@ def url_status(url: str, timeout: float = URL_TIMEOUT) -> tuple[str, str] | None
         code = e.code
         if code == 405:
             try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "dokidlc-iirc doubt"}), timeout=timeout) as resp:
+                with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "dokidlc-iirc find-suspect-pages"}), timeout=timeout) as resp:
                     code = resp.status
             except urllib.error.HTTPError as e2:
                 code = e2.code
