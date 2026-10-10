@@ -29,7 +29,7 @@ iirc init                               create .iirc/ and the CLAUDE.md paragrap
 iirc stores                             the stores, their page counts, and anything not committed or pushed
 iirc topics                             every topic with its page count
 iirc max-suggested [N]                  how many pages the hook suggests at most (default 3); N sets it on this machine
-iirc knobs                              the recall gate's distances, from [recall] in .claude/iirc.toml
+iirc knobs                              the recall gate's distances, from [recall.MODEL-ID] in .claude/iirc.toml
 iirc tune gather|judge|sweep|done       judge what recall suggested, and propose fixes; see references/tune.md
 iirc sync                               commit, pull, and push the remote stores
 ```

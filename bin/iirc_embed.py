@@ -21,9 +21,37 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple
 
-MODEL = "nomic-embed-text"
-QUERY_PREFIX = "search_query: "
-DOC_PREFIX = "search_document: "
+class Model(NamedTuple):
+    id: str                 # the name the backend knows it by
+    backend: str            # "ollama", "openai" (an OpenAI-compatible URL), or "onnx" (in-process on this CPU)
+    query_prefix: str
+    doc_prefix: str
+    dims: int
+    knobs: dict[str, tuple[float, float, float]]   # recall knob: (default, low, high) on this model's distance scale
+
+
+# The recall knobs differ per model because distances do: relevant pairs sit at a median 0.36 for
+# nomic, 0.53 for qwen3, and 0.64 for embeddinggemma (evidence 6-models.md). MiniLM's defaults keep
+# the share of relevant pairs nomic's keep (evidence 7-cpu-tier.md); the others take nomic's until a sweep.
+_WIDE = {"semantic_only": (0.28, 0.10, 0.90), "both": (0.38, 0.10, 0.90)}
+_QWEN3_QUERY = "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
+MODELS: dict[str, Model] = {m.id: m for m in (
+    Model("nomic-embed-text", "ollama", "search_query: ", "search_document: ", 768,
+          {"semantic_only": (0.28, 0.10, 0.60), "both": (0.38, 0.10, 0.60)}),
+    Model("qwen3-embedding:0.6b", "ollama", _QWEN3_QUERY, "", 1024, dict(_WIDE)),
+    Model("embeddinggemma", "ollama", "task: search result | query: ", "title: none | text: ", 768, dict(_WIDE)),
+    Model("qwen3-embedding", "openai", _QWEN3_QUERY, "", 1024, dict(_WIDE)),
+    Model("all-minilm-l6-v2", "onnx", "", "", 384, {"semantic_only": (0.50, 0.10, 0.90), "both": (0.58, 0.10, 0.90)}),
+)}
+DEFAULT_MODEL = "nomic-embed-text"
+MODEL = DEFAULT_MODEL
+
+
+def table_name(model_id: str) -> str:
+    """The model's [recall.NAME] table in .claude/iirc.toml, and its vector store's file name."""
+    return model_id.replace(":", "-")
+
+
 DOC_BYTES = 8192            # memoryfield-tool cuts the page file here before embedding
 MAX_DISTANCE = 0.45         # memoryfield-tool's default: a page past it never reached the semantic half
 EMBED_TIMEOUT = 30.0        # per request; a cold model load measured 13.6 s, and the recall hook stops at 5 s anyway
@@ -37,11 +65,11 @@ class Vectors(NamedTuple):
 
 
 def doc_text(raw: bytes) -> str:
-    return DOC_PREFIX + raw[:DOC_BYTES].decode("utf-8", errors="ignore")
+    return MODELS[MODEL].doc_prefix + raw[:DOC_BYTES].decode("utf-8", errors="ignore")
 
 
 def query_text(query: str) -> str:
-    return QUERY_PREFIX + query
+    return MODELS[MODEL].query_prefix + query
 
 
 def sha(raw: bytes) -> str:
@@ -49,7 +77,7 @@ def sha(raw: bytes) -> str:
 
 
 def store_path(cache: Path, field: str, model: str = MODEL) -> Path:
-    return cache / "dokidlc-iirc" / "vectors" / field / f"{model.replace(':', '-')}.npz"
+    return cache / "dokidlc-iirc" / "vectors" / field / f"{table_name(model)}.npz"
 
 
 def embed(base_url: str, texts: list[str], model: str = MODEL, timeout: float = EMBED_TIMEOUT):

@@ -102,7 +102,7 @@ def set_root(root: Path) -> None:
         CONFIG_ERROR = None
     except ConfigError as e:
         STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
-        RECALL = {k: v[0] for k, v in KNOBS.items()}
+        RECALL = {k: v[0] for k, v in knob_spec().items()}
 
 
 def plugin_commit() -> str:
@@ -243,17 +243,45 @@ WRITE_DEFAULT: str | None = None
 CONFIG_ERROR: str | None = None
 SHOW_HOOKS = False   # show_hooks in .claude/iirc.toml: the user also sees what the hooks tell the model
 
-# The recall gate's knobs, [recall] in .claude/iirc.toml: per repository, because the right
-# distance depends on the pages in the field. name: (default, low, high, what it sets)
-KNOBS: dict[str, tuple[float, float, float, str]] = {
-    "semantic_only": (0.28, 0.10, 0.60, "how close, as cosine distance, a semantic hit must be with no strong term"),
-    "both": (0.38, 0.10, 0.60, "how close a semantic hit backed by an identifier or a rare page word must be"),
+# The recall gate's knobs, [recall.MODEL-ID] in .claude/iirc.toml: per repository, because the right
+# distance depends on the pages in the field, and per model, because each model has its own distance
+# scale. Each model's defaults and ranges are in iirc_embed.MODELS. name: what it sets
+KNOB_TEXT: dict[str, str] = {
+    "semantic_only": "how close, as cosine distance, a semantic hit must be with no strong term",
+    "both": "how close a semantic hit backed by an identifier or a rare page word must be",
 }
-RECALL: dict[str, float] = {k: v[0] for k, v in KNOBS.items()}
+# a flat [recall] table predates the model tables, when nomic was the only model, so its knobs are nomic's
+FLAT_TABLE = iirc_embed.table_name(iirc_embed.DEFAULT_MODEL)
+TABLE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def active_model() -> iirc_embed.Model:
+    """The embedding model this machine uses: `embedding.model` in the setup file, else nomic-embed-text."""
+    emb = read_config().get("embedding")
+    model = emb.get("model") if isinstance(emb, dict) else None
+    return iirc_embed.MODELS.get(model) or iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL]
+
+
+def knob_spec() -> dict[str, tuple[float, float, float, str]]:
+    """The active model's knobs. name: (default, low, high, what it sets)"""
+    knobs = active_model().knobs
+    return {name: (*knobs[name], what) for name, what in KNOB_TEXT.items()}
+
+
+def recall_table() -> str:
+    return iirc_embed.table_name(active_model().id)
+
+
+def table_header(table: str) -> str:
+    """recall.NAME as a TOML table header names it; a name with a dot is quoted, or TOML reads the dot as nesting."""
+    return f"recall.{table}" if TABLE_KEY_RE.fullmatch(table) else f'recall."{table}"'
+
+
+RECALL: dict[str, float] = {k: v[0] for k, v in knob_spec().items()}
 
 
 def knob_error_only() -> bool:
-    """True when .claude/iirc.toml fails only on its [recall] knobs, which `doctor --fix` can reset."""
+    """True when .claude/iirc.toml fails only on its recall knobs, which `doctor --fix` can move or reset."""
     try:
         cfg = read_store_config(ROOT)
         load_stores(ROOT)
@@ -261,58 +289,114 @@ def knob_error_only() -> bool:
         return False
     try:
         load_knobs(cfg)
+        return False
     except ConfigError:
-        return isinstance(cfg.get("recall"), dict)
-    return False
+        pass
+    try:
+        load_knobs(tomllib.loads(fixed_knob_text((ROOT / STORE_CONFIG).read_text())[0]))
+    except (ConfigError, tomllib.TOMLDecodeError, OSError):
+        return False
+    return True
 
 
 def bad_knobs(sec: dict) -> dict[str, str]:
-    """Each [recall] key that fails, with why."""
-    bad = {k: "no such knob" for k in sec if k not in KNOBS}
-    for name, (_, low, high, _) in KNOBS.items():
+    """Each key of the active model's table that fails, with why."""
+    spec = knob_spec()
+    bad = {k: "no such knob" for k in sec if k not in spec}
+    for name, (_, low, high, _) in spec.items():
         v = sec.get(name)
         if name in sec and (isinstance(v, bool) or not isinstance(v, (int, float)) or not low <= v <= high):
             bad[name] = f"must be a number from {low} to {high}"
-    good = {k: sec[k] for k in KNOBS if k in sec and k not in bad}
-    if good.get("both", KNOBS["both"][0]) < good.get("semantic_only", KNOBS["semantic_only"][0]):
+    good = {k: sec[k] for k in spec if k in sec and k not in bad}
+    if good.get("both", spec["both"][0]) < good.get("semantic_only", spec["semantic_only"][0]):
         bad["both" if "both" in good else "semantic_only"] = "both must be at least semantic_only"
     return bad
 
 
-def reset_bad_knobs() -> list[str]:
-    """Comment out each failing knob line in the [recall] table, so its default applies; the lines it changed."""
-    path = ROOT / STORE_CONFIG
-    bad = bad_knobs(read_store_config(ROOT).get("recall", {}))
-    out, changed, table = [], [], None
-    for line in path.read_text().splitlines(keepends=True):
-        head = re.match(r"\s*\[([^\]]+)\]", line)
-        if head:
-            table = head[1].strip()
+def move_flat_knobs(text: str) -> tuple[str, list[str]]:
+    """The config text with flat [recall] keys moved into [recall.nomic-embed-text], and what moved.
+
+    With no nomic table yet, the [recall] header is renamed, so its comments stay. Beside
+    an existing nomic table, each flat key moves on its own and the table's value wins.
+    """
+    lines = text.splitlines()
+    heads = [i for i, line in enumerate(lines) if recall_table_of(line) == ""]
+    if not heads:
+        return text, []
+    if len(heads) == 1 and not any(recall_table_of(line) == FLAT_TABLE for line in lines):
+        lines[heads[0]] = re.sub(r"\[\s*recall\s*\]", f"[{table_header(FLAT_TABLE)}]", lines[heads[0]], count=1)
+        return "\n".join(lines) + "\n", [f"moved [recall] to [{table_header(FLAT_TABLE)}]"]
+    flat = tomllib.loads(text).get("recall", {})
+    have = flat.get(FLAT_TABLE, {})
+    out, notes, table = [], [], None
+    for line in lines:
+        if re.match(r"\s*\[", line):
+            table = recall_table_of(line)
         key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
-        if table == "recall" and key and key[1] in bad:
-            changed.append(line.strip())
+        if table == "" and key and key[1] in flat and not isinstance(flat[key[1]], dict):
+            why = f"[{table_header(FLAT_TABLE)}] has its own" if key[1] in have else f"moved to [{table_header(FLAT_TABLE)}]"
+            notes.append(f"{why}: `{line.strip()}`")
+            line = f"# {line.rstrip()}  # iirc doctor --fix: {why}"
+        out.append(line)
+    text = "\n".join(out) + "\n"
+    for name, value in flat.items():
+        if not isinstance(value, dict) and name not in have and isinstance(value, (int, float)) and not isinstance(value, bool):
+            text = set_knob_text(text, FLAT_TABLE, name, value)
+    return text, notes
+
+
+def fixed_knob_text(text: str) -> tuple[str, list[str]]:
+    """The config text after `doctor --fix`: flat keys moved, then each failing knob of the active table commented out."""
+    text, notes = move_flat_knobs(text)
+    table = recall_table()
+    bad = bad_knobs(tomllib.loads(text).get("recall", {}).get(table, {}))
+    out, current = [], None
+    for line in text.splitlines(keepends=True):
+        if re.match(r"\s*\[", line):
+            current = recall_table_of(line)
+        key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
+        if current == table and key and key[1] in bad:
+            notes.append(f"commented out `{line.strip()}`; the knob takes its default")
             line = f"# {line.rstrip()}  # iirc doctor --fix: {bad[key[1]]}\n"
         out.append(line)
-    path.write_text("".join(out))
-    return changed
+    return "".join(out), notes
+
+
+def fix_knobs() -> list[str]:
+    """Write fixed_knob_text to .claude/iirc.toml; what it changed."""
+    path = ROOT / STORE_CONFIG
+    text, notes = fixed_knob_text(path.read_text())
+    path.write_text(text)
+    return notes
 
 
 def load_knobs(cfg: dict) -> dict[str, float]:
-    """The [recall] table, each knob checked against its range; a missing knob takes its default."""
+    """The active model's [recall.MODEL-ID] table, each knob checked against its range; a missing knob takes its default."""
     sec = cfg.get("recall", {})
+    fix = f"`iirc doctor --fix` moves them to [{table_header(FLAT_TABLE)}]"
     if not isinstance(sec, dict):
-        raise ConfigError(f"{STORE_CONFIG}: [recall] must be a table")
-    unknown = sorted(set(sec) - set(KNOBS))
+        raise ConfigError(f"{STORE_CONFIG}: recall must be a table of model tables, like [{table_header(FLAT_TABLE)}]")
+    flat = [k for k, v in sec.items() if not isinstance(v, dict)]
+    if flat:
+        raise ConfigError(f"{STORE_CONFIG}: [recall] {flat[0]} is a flat key; knobs live in a model's table; {fix}")
+    tables = {iirc_embed.table_name(m) for m in iirc_embed.MODELS}
+    unknown = sorted(set(sec) - tables)
     if unknown:
-        raise ConfigError(f"{STORE_CONFIG}: [recall] has no knob {unknown[0]!r}; the knobs are {', '.join(KNOBS)}")
+        raise ConfigError(f"{STORE_CONFIG}: [{table_header(unknown[0])}] names no embedding model; the tables are {', '.join(sorted(tables))}")
+    table = recall_table()
+    head = f"{STORE_CONFIG}: [{table_header(table)}]"
+    knobs, spec = sec.get(table, {}), knob_spec()
+    extra = sorted(set(knobs) - set(spec))
+    if extra:
+        raise ConfigError(f"{head} has no knob {extra[0]!r}; the knobs are {', '.join(spec)}")
     out: dict[str, float] = {}
-    for name, (default, low, high, _) in KNOBS.items():
-        v = sec.get(name, default)
+    for name, (default, low, high, _) in spec.items():
+        v = knobs.get(name, default)
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not low <= v <= high:
-            raise ConfigError(f"{STORE_CONFIG}: [recall] {name} must be a number from {low} to {high}")
+            raise ConfigError(f"{head} {name} must be a number from {low} to {high}")
         out[name] = float(v)
     if out["both"] < out["semantic_only"]:
-        raise ConfigError(f"{STORE_CONFIG}: [recall] both must be at least semantic_only; a term backs the looser gate")
+        raise ConfigError(f"{head} both must be at least semantic_only; a term backs the looser gate")
     return out
 
 
@@ -1007,29 +1091,36 @@ def recall_max_bytes() -> int:
 
 
 def cmd_knobs(args: argparse.Namespace) -> None:
-    """The recall gate's knobs: each value, its default and range, and what it sets. `set` writes one."""
+    """The recall gate's knobs for the active model: each value, its default and range, and what it sets. `set` writes one."""
     if args.action == "set":
         if args.name is None or args.value is None:
             die("usage: iirc knobs set NAME VALUE")
         knobs_set(args.name, args.value)
         return
-    print(f"[recall] in {STORE_CONFIG}; a knob left out takes its default")
-    for name, (default, low, high, what) in KNOBS.items():
+    print(f"[{table_header(recall_table())}] in {STORE_CONFIG}, for the embedding model {active_model().id}; a knob left out takes its default")
+    for name, (default, low, high, what) in knob_spec().items():
         mark = "" if RECALL[name] == default else f"  (default {default})"
         print(f"{name} = {RECALL[name]:g}{mark}  {low:g} to {high:g}: {what}")
 
 
-RECALL_HEADER_RE = re.compile(r"^\s*\[\s*recall\s*\]\s*(#.*)?$")
+# [recall] (flat), [recall.NAME], or [recall."NAME"], spaces allowed inside the brackets
+RECALL_HEADER_RE = re.compile(r'^\s*\[\s*recall\s*(?:\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*)?\]\s*(#.*)?$')
 
 
-def set_knob_text(text: str, name: str, value: float) -> str:
-    """The config text with one knob set in its [recall] table. Edits lines, so every other line and comment stays."""
+def recall_table_of(line: str) -> str | None:
+    """The model table a [recall...] header line opens: "" for the flat [recall], None for any other line."""
+    m = RECALL_HEADER_RE.match(line)
+    return None if m is None else (m[1] or m[2] or "")
+
+
+def set_knob_text(text: str, table: str, name: str, value: float) -> str:
+    """The config text with one knob set in its [recall.TABLE] table. Edits lines, so every other line and comment stays."""
     entry = f"{name} = {value:g}"
     lines = text.splitlines()
-    head = next((i for i, line in enumerate(lines) if RECALL_HEADER_RE.match(line)), None)
+    head = next((i for i, line in enumerate(lines) if recall_table_of(line) == table), None)
     if head is None:
         body = text if not text or text.endswith("\n") else text + "\n"
-        return body + ("\n" if body.strip() else "") + f"[recall]\n{entry}\n"
+        return body + ("\n" if body.strip() else "") + f"[{table_header(table)}]\n{entry}\n"
     end = next((i for i in range(head + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
     key_re = re.compile(rf"^\s*{re.escape(name)}\s*=\s*[^#]*?(\s*#.*)?$")
     at = next((i for i in range(head + 1, end) if key_re.match(lines[i])), None)
@@ -1042,25 +1133,26 @@ def set_knob_text(text: str, name: str, value: float) -> str:
 
 
 def knobs_set(name: str, value: float) -> None:
-    """Write one knob into .claude/iirc.toml after the same checks set_root applies when it reads the file."""
-    default, low, high, _ = KNOBS[name]
+    """Write one knob into the active model's table in .claude/iirc.toml after the checks set_root applies when it reads the file."""
+    default, low, high, _ = knob_spec()[name]
     if not low <= value <= high:
-        die(f"{name} must be a number from {low:g} to {high:g}")
+        die(f"{name} must be a number from {low:g} to {high:g} for {active_model().id}")
     knobs = {**RECALL, name: value}
     if knobs["both"] < knobs["semantic_only"]:
         first = "both" if name == "semantic_only" else "semantic_only"
         die(f"both must be at least semantic_only; set {first} first (now semantic_only {knobs['semantic_only']:g}, both {knobs['both']:g})")
     path = ROOT / STORE_CONFIG
     old = path.read_text() if path.is_file() else ""
-    new = set_knob_text(old, name, value)
+    table = recall_table()
+    new = set_knob_text(old, table, name, value)
     try:
         if load_knobs(tomllib.loads(new))[name] != value:
-            raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [recall]")
+            raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [{table_header(table)}]")
     except (tomllib.TOMLDecodeError, ConfigError) as e:
         die(f"knobs set: {STORE_CONFIG} would not read back, so nothing was written: {e}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new)
-    print(f"{name} = {value:g} in {path}; commit it, it is the repository's config")
+    print(f"{name} = {value:g} in [{table_header(table)}] of {path}; commit it, it is the repository's config")
 
 
 def cmd_max_suggested(args: argparse.Namespace) -> None:
@@ -3124,13 +3216,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         return good
 
     if CONFIG_ERROR and args.fix and knob_error_only():
-        for line in reset_bad_knobs():
-            print(f"iirc: {STORE_CONFIG}: commented out `{line}`; the knob takes its default")
+        for note in fix_knobs():
+            print(f"iirc: {STORE_CONFIG}: {note}")
         set_root(ROOT)
     if CONFIG_ERROR:
         # nothing else can be checked: the stores are unknown, and every hook is quiet
         report(f"{STORE_CONFIG} loads, so the hooks run", False,
-               "iirc doctor --fix comments out the bad [recall] knob" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
+               "iirc doctor --fix moves flat [recall] keys into a model table and comments out a bad knob" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
         sys.exit(1)
     report(f"{STORE_CONFIG} loads, so the hooks run", True)
     timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
@@ -3686,8 +3778,12 @@ def judgments() -> dict[tuple[str, str, str, str], dict]:
 
 
 def knob_grid() -> list[dict[str, float]]:
-    """semantic_only 0.20 to 0.40 and both 0.26 to 0.46, in steps of 0.02, with both never below semantic_only."""
-    return [{"semantic_only": so / 100, "both": b / 100} for so in range(20, 41, 2) for b in range(26, 47, 2) if b >= so]
+    """Each knob over the active model's range in steps of 0.02, with both never below semantic_only."""
+    spec = knob_spec()
+
+    def steps(name: str) -> range:
+        return range(round(spec[name][1] * 100), round(spec[name][2] * 100) + 1, 2)
+    return [{"semantic_only": so / 100, "both": b / 100} for so in steps("semantic_only") for b in steps("both") if b >= so]
 
 
 def sweep_counts(pairs: list[tuple[dict, bool]], knobs: dict[str, float]) -> dict:
@@ -3999,7 +4095,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("knobs", help="the recall gate's knobs in .claude/iirc.toml, with their ranges; `knobs set NAME VALUE` changes one")
     p.add_argument("action", nargs="?", choices=["set"])
-    p.add_argument("name", nargs="?", choices=list(KNOBS))
+    p.add_argument("name", nargs="?", choices=list(KNOB_TEXT))
     p.add_argument("value", nargs="?", type=float)
     p.set_defaults(func=cmd_knobs)
 

@@ -1105,7 +1105,7 @@ def test_doctor_fix_comments_out_a_bad_knob(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     (tmp_path / ".claude").mkdir()
     toml = tmp_path / ".claude" / "iirc.toml"
-    toml.write_text("ui = true\n\n[recall]\nsemantic_only = 0.9   # too loose\nboth = 0.34\n")
+    toml.write_text("ui = true\n\n[recall.nomic-embed-text]\nsemantic_only = 0.9   # too loose\nboth = 0.34\n")
     iirc.main(["doctor", "--brief"])
     assert "`iirc doctor --fix`" in capsys.readouterr().out
     monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks
@@ -1915,13 +1915,13 @@ def test_recall_verdicts_say_why_each_candidate_was_left_out(monkeypatch):
 def test_recall_knobs_come_from_iirc_toml(tmp_path):
     (tmp_path / ".claude").mkdir()
     toml = tmp_path / ".claude" / "iirc.toml"
-    toml.write_text("[recall]\nsemantic_only = 0.3\n")
+    toml.write_text("[recall.nomic-embed-text]\nsemantic_only = 0.3\n")
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.38} and iirc.CONFIG_ERROR is None
     near = [{"filename": "a.md", "via": ["semantic"], "distance": 0.29}]
     assert [r["rule"] for r in iirc.recall_filter(near)] == ["meaning"]
     for bad, says in (("semantic_only = 0.9", "from 0.1 to 0.6"), ("semantic_only = 0.4", "at least semantic_only"), ("loose = 0.3", "no knob 'loose'")):
-        toml.write_text(f"[recall]\n{bad}\n")
+        toml.write_text(f"[recall.nomic-embed-text]\n{bad}\n")
         iirc.set_root(tmp_path)
         assert says in iirc.CONFIG_ERROR and iirc.RECALL == {"semantic_only": 0.28, "both": 0.38}
     toml.unlink(); iirc.set_root(tmp_path)
@@ -2114,7 +2114,7 @@ def test_tune_sweep_says_when_too_few_pairs_were_judged(tmp_path, monkeypatch, c
 
 
 def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, capsys):
-    monkeypatch.setitem(iirc.KNOBS, "both", (0.34,) + iirc.KNOBS["both"][1:])   # the fixtures sit around this knob, not the default
+    monkeypatch.setitem(iirc.iirc_embed.MODELS["nomic-embed-text"].knobs, "both", (0.34, 0.10, 0.60))   # the fixtures sit around this knob, not the default
     monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.30, "relevant"), ("p3.md", 0.33, "noise")])
     iirc.main(["tune", "sweep"])
@@ -2132,14 +2132,14 @@ def test_knobs_set_writes_only_its_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"
     iirc.main(["knobs", "set", "both", "0.36"])   # no file yet
-    assert toml.read_text() == "[recall]\nboth = 0.36\n"
+    assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.36\n"
     toml.write_text("# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n")
-    iirc.main(["knobs", "set", "semantic_only", "0.3"])   # [stores.recall] is not the [recall] table
-    assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n\n[recall]\nsemantic_only = 0.3\n"
-    toml.write_text("[recall]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
+    iirc.main(["knobs", "set", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
+    assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n"
+    toml.write_text("[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
     iirc.main(["knobs", "set", "semantic_only", "0.3"])
     iirc.main(["knobs", "set", "both", "0.4"])
-    assert toml.read_text() == "[recall]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
+    assert toml.read_text() == "[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     capsys.readouterr()
@@ -2225,9 +2225,9 @@ def test_read_for_tune_logs_apart_from_the_sessions_reads(tmp_path, monkeypatch,
 def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
-    toml.write_text("[ recall ]\nboth = 0.36\n")
+    toml.write_text('[ recall . "nomic-embed-text" ]\nboth = 0.36\n')
     iirc.main(["knobs", "set", "both", "0.38"])
-    assert toml.read_text() == "[ recall ]\nboth = 0.38\n"
+    assert toml.read_text() == '[ recall . "nomic-embed-text" ]\nboth = 0.38\n'
     toml.unlink(); iirc.set_root(tmp_path)
 
 
@@ -2265,7 +2265,7 @@ def test_skill_names_the_writing_rules():
 # p5 step 1
 
 def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
-    monkeypatch.setitem(iirc.KNOBS, "both", (0.34,) + iirc.KNOBS["both"][1:])   # the fixtures sit around this knob, not the default
+    monkeypatch.setitem(iirc.iirc_embed.MODELS["nomic-embed-text"].knobs, "both", (0.34, 0.10, 0.60))   # the fixtures sit around this knob, not the default
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)
@@ -3004,3 +3004,77 @@ def test_hybrid_search_in_process(tmp_path, monkeypatch):
         assert abs(r["distance"] - (1 - cos)) < 1e-6 and r["store"] == "project" and r["summary"] == "about alpha"
         assert iirc.tool_env()["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST    # the tool's own reindex never reaches the host
     assert calls == []
+
+
+# p5 step 24
+
+def _machine_model(model):
+    """The setup file names this embedding model, as `iirc setup` writes it."""
+    path = iirc.config_file(); path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f'embedding = {{backend = "{iirc.iirc_embed.MODELS[model].backend}", model = "{model}"}}\n')
+    iirc._CONFIG = None
+
+
+def test_knobs_per_model(tmp_path, monkeypatch, capsys):
+    """Each model has a [recall.MODEL-ID] table with its own defaults and ranges; only the active model's table is checked."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text('[recall.nomic-embed-text]\nsemantic_only = 0.3\n\n[recall."qwen3-embedding-0.6b"]\nsemantic_only = 0.5\nboth = 0.7\n\n'
+                    '[recall.all-minilm-l6-v2]\nboth = 0.95\n')
+    iirc.set_root(tmp_path)   # no embedding in the setup file: nomic-embed-text
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}   # minilm's 0.95 is not checked
+    _machine_model("qwen3-embedding:0.6b")
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}    # past nomic's 0.60, inside qwen3's range
+    iirc.main(["knobs"])
+    assert '[recall."qwen3-embedding-0.6b"]' in capsys.readouterr().out
+    iirc.main(["knobs", "set", "both", "0.8"])
+    assert 'semantic_only = 0.5\nboth = 0.8\n' in toml.read_text() and "[recall.nomic-embed-text]\nsemantic_only = 0.3\n" in toml.read_text()
+    _machine_model("all-minilm-l6-v2")
+    iirc.set_root(tmp_path)
+    assert "[recall.all-minilm-l6-v2] both must be a number from 0.1 to 0.9" in iirc.CONFIG_ERROR
+    toml.write_text("[recall.nomic-embed-text]\nboth = 0.4\n")
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.58}   # minilm's own defaults
+    grid = iirc.knob_grid()
+    assert min(k["semantic_only"] for k in grid) == 0.1 and max(k["both"] for k in grid) == 0.9 and all(k["both"] >= k["semantic_only"] for k in grid)
+    iirc.main(["knobs", "set", "semantic_only", "0.55"])   # a new table for the active model, after the others
+    assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.4\n\n[recall.all-minilm-l6-v2]\nsemantic_only = 0.55\n"
+    toml.write_text("[recall.nomic]\nboth = 0.4\n")
+    iirc.set_root(tmp_path)
+    assert "[recall.nomic] names no embedding model" in iirc.CONFIG_ERROR and "nomic-embed-text" in iirc.CONFIG_ERROR
+    toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_flat_recall_moves_on_doctor_fix(tmp_path, monkeypatch, capsys):
+    """A flat [recall] key fails with the fix named; doctor --fix moves it into nomic's table, where every flat knob was measured."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text("ui = true\n\n[recall]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.9\n")
+    iirc.set_root(tmp_path)
+    assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[recall.nomic-embed-text]" in iirc.CONFIG_ERROR
+    assert iirc.knob_error_only()
+    iirc.main(["doctor", "--health"])   # the /iirc card still gets its JSON
+    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores"}
+    iirc.main(["doctor", "--brief"])
+    assert "hooks off" in (out := capsys.readouterr().out) and "`iirc doctor --fix`" in out
+    monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor", "--fix"])
+    out = capsys.readouterr().out
+    assert "moved [recall] to [recall.nomic-embed-text]" in out and "commented out `both = 0.9`" in out and "ok  .claude/iirc.toml loads" in out
+    assert toml.read_text() == ("ui = true\n\n[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\n"
+                                "# both = 0.9  # iirc doctor --fix: must be a number from 0.1 to 0.6\n")
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}
+    # beside an existing nomic table, each flat key moves on its own, and the table's own value stays
+    toml.write_text("[recall]\nsemantic_only = 0.26\nboth = 0.4\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n")
+    iirc.set_root(tmp_path)
+    assert iirc.knob_error_only()
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor", "--fix"])
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
+    assert "# semantic_only = 0.26  # iirc doctor --fix: [recall.nomic-embed-text] has its own" in toml.read_text()
+    toml.unlink(); iirc.set_root(tmp_path)
