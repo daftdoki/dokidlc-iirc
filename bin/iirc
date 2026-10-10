@@ -904,8 +904,8 @@ def string_search(terms: list[str]) -> list[dict]:
 def hybrid_search(query: str) -> list[dict]:
     """Semantic results for the whole query, plus string hits for its terms, fused.
 
-    Ranking: found by both paths first, then semantic by distance, then string-only
-    by how many terms matched. Each row says how it was found under 'via'.
+    Ranking: found by both paths with a rare term first, then semantic by distance, then
+    string-only by how many rare terms matched. Each row says how it was found under 'via'.
     """
     semantic = search_json(query) if semantic_enabled() else []
     strings = string_search(query_terms(query))
@@ -915,7 +915,9 @@ def hybrid_search(query: str) -> list[dict]:
     for r in strings:
         row = merged.setdefault((row_store(r), r["filename"]), {**r, "store": row_store(r), "via": [], "hits": 0})
         row["via"] = row["via"] + r["matched"]
-        row["hits"] = len(r["matched"]) + len(r.get("head_terms", []))
+        # only rare terms rank: a common word shared with the query says nothing about this page
+        rare = r.get("rare_terms", [])
+        row["hits"] = len(rare) + len([t for t in r.get("head_terms", []) if t in rare])
         row["head_terms"] = r.get("head_terms", [])
         row["rare_terms"] = r.get("rare_terms", [])
         row["fm"] = r.get("fm")

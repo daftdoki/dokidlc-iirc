@@ -482,6 +482,16 @@ def test_string_search_and_hybrid_ranking(tmp_path, monkeypatch):
     monkeypatch.setattr(iirc, "semantic_enabled", lambda: False)
     rows = iirc.hybrid_search("hang")
     assert [r["filename"] for r in rows] == ["ollama-host-silent-hang.md"] and rows[0]["via"] == ["hang"]
+    # p5 step 7: four of nine pages say "config", so it is common and lifts no page into the first class
+    for n in "abcd":
+        (field / f"config-{n}.md").write_text(f"---\ntitle: Config note {n}\nsummary: x\n---\nthe config\n")
+    monkeypatch.setattr(iirc, "semantic_enabled", lambda: True)
+    monkeypatch.setattr(iirc, "search_json", lambda q: [
+        {"filename": "config-a.md", "summary": "x", "distance": 0.35},
+        {"filename": "unrelated.md", "summary": "nothing here", "distance": 0.20},
+    ])
+    rows = iirc.hybrid_search("change the config")
+    assert [r["filename"] for r in rows][:2] == ["unrelated.md", "config-a.md"]   # closer meaning beats a shared common word
 
 
 def test_url_refs_are_kept_and_never_checked_in_search(tmp_path):
