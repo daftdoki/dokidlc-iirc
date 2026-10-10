@@ -43,7 +43,7 @@ const PANE = 'iirc'
 const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 // Before compaction: past this share of the auto-compact threshold (of the window when auto-compaction
-// is off), ask `iirc nudge --compact` once for its line, and hand it to the model with the next tool
+// is off), ask `iirc remind-to-write --at compaction` once for its line, and hand it to the model with the next tool
 // result or prompt, whichever comes first. A fifth of the way short leaves room for the turns that write.
 const COMPACT_NEAR = 0.8
 const compactAsked = atom({ plugin: 'iirc', key: 'compactAsked' } as const, false)
@@ -73,7 +73,7 @@ const COUNTS_RE = /\biirc\s+(read|read-matching-pages|write)\b/
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const STATUS_LINE_ARGS_RE = /^\s*status-line(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
-const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|thresholds|search\s+\S.*|read(?:\s+\S+)+)$/s
+const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|show-page-stores|sync|summarize-page-usage(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|show-suggestion-thresholds|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested-pages(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
@@ -101,10 +101,10 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['find-suspect-pages', 'pages that may be wrong', 'MAINTENANCE'],
   ['audit-page-findability', 'pages search shows badly, each with its fix', 'MAINTENANCE'],
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
-  ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
-  ['stats', 'how the pages are being used', 'MAINTENANCE'],
+  ['show-page-stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
+  ['summarize-page-usage', 'how the pages are being used', 'MAINTENANCE'],
   ['rebuild-search-index', 'rebuild the search index', 'MAINTENANCE'],
-  ['thresholds', "the recall gate's distances and ranges", 'MAINTENANCE'],
+  ['show-suggestion-thresholds', "the recall gate's distances and ranges", 'MAINTENANCE'],
   ['tune-suggestions', 'judge recall, evaluate the thresholds, then audit', 'MAINTENANCE'],
   ['estimate-context-tokens', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
@@ -127,8 +127,8 @@ const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
-// the help card's command column: the longest command, /iirc estimate-context-tokens, is 29, plus a gap
-const CMD_COL = 31
+// the help card's command column: the longest command, /iirc show-suggestion-thresholds, is 32, plus a gap
+const CMD_COL = 34
 // one row of the text help: the command in the card's column, then what it does
 const row = (cmd: string, what: string) => `${cmd.padEnd(CMD_COL)}${what}`
 const KEEP = 200
@@ -510,10 +510,10 @@ function refreshCounts($: EngineInterface) {
   $.clock.after(0, () => void loadCounts($).catch(() => {}))
 }
 
-/** This session's counts and page lists from `iirc stats --session`, awaited. */
+/** This session's counts and page lists from `iirc summarize-session-usage`, awaited. */
 async function loadCounts($: EngineInterface) {
       if (!(await uiEnabled($))) return
-      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'stats', '--session', await $.session.id()], {
+      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'summarize-session-usage', await $.session.id()], {
         cwd: await $.session.root(),
         timeoutMs: 15000,
       })
@@ -559,7 +559,7 @@ async function askCompactNudge($: EngineInterface) {
   const limit = b?.isAutoCompactEnabled && b.autoCompactThreshold ? b.autoCompactThreshold : context.window
   if (context.tokens === undefined || context.tokens < COMPACT_NEAR * limit) return
   await update($, compactAsked, () => true)
-  const line = await iircLine($, ['nudge', '--compact'])
+  const line = await iircLine($, ['remind-to-write', '--at', 'compaction'])
   if (line) await update($, compactNudge, () => line)
 }
 
@@ -627,7 +627,7 @@ export const register: Register = on => {
   // the summary keeps what no page holds yet, so the session can write it after compaction;
   // a compaction that stands starts a new window for the nudge
   on('session.compact', async ($, e, next) => {
-    const keep = await iircLine($, ['nudge', '--summary']).catch(() => '')
+    const keep = await iircLine($, ['show-compaction-instructions']).catch(() => '')
     const result = await next(keep ? { ...e, instructions: e.instructions ? `${e.instructions}\n\n${keep}` : keep } : e)
     if (e.trigger !== 'precompute' && e.agentId === undefined && result.skip === undefined) {
       await update($, compactAsked, () => false)

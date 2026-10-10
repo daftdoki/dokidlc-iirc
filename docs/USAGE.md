@@ -132,7 +132,7 @@ other with `[[name]]`, and the pair stops counting.
 A remote store is a separate git repository that several projects and
 machines name. Create an empty repository, then say "add the shared
 store at URL as the default". The agent runs
-`iirc stores add NAME URL --default`. That writes `.claude/iirc.toml`
+`iirc add-remote-store NAME URL --default`. That writes `.claude/iirc.toml`
 with the project store and the new one, clones the repository, and
 commits the config. The agent then writes facts that hold in any
 project to the remote store; each write commits and pushes, and each
@@ -201,11 +201,11 @@ The `command.run` handler in
 | `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails, then rebuilds the index. |
 | `/iirc find-suspect-pages`, `/iirc find-suspect-pages --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
 | `/iirc sync` | Commits, pulls, and pushes every remote store. |
-| `/iirc stores` | The stores, their page counts, and anything not committed or pushed. |
-| `/iirc stats`, `/iirc stats --days N` | Recall and page use over the last 7 days, or N days. |
+| `/iirc show-page-stores` | The stores, their page counts, and anything not committed or pushed. |
+| `/iirc summarize-page-usage`, `/iirc summarize-page-usage --days N` | Recall and page use over the last 7 days, or N days. |
 | `/iirc rebuild-search-index` | Rebuilds the search index. |
 | `/iirc estimate-context-tokens` | Bytes and tokens of `index.md` and of a sample search. |
-| `/iirc thresholds` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
+| `/iirc show-suggestion-thresholds` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
 | `/iirc show-page-topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
@@ -220,8 +220,8 @@ The direct commands print what the `iirc` command prints. `doctor --fix`,
 `sync`, and `rebuild-search-index` may run for up to ten minutes; the rest stop after
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
-`stores add`, `set-search-backend`, `init`, `write`, `delete`, `approve-page-check`,
-`thresholds set`, and `find-suspect-pages --network`.
+`add-remote-store`, `set-search-backend`, `init`, `write`, `delete`, `approve-page-check`,
+`set-suggestion-threshold`, and `find-suspect-pages --network`.
 
 ### The agent's commands
 
@@ -235,7 +235,8 @@ describes each one.
 | `iirc audit-page-findability [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
 | `iirc set-search-backend`, `iirc init`, `iirc migrate`, `iirc max-suggested-pages N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
 | `iirc tune-suggestions gather-suggestion-data`, `judge`, `sweep`, `done` | The tune steps. `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` replays judged prompts through today's search and gate. |
-| `iirc recall`, `iirc nudge` | Hook entries: `recall` names pages for a prompt or a failed command; `nudge --stop` asks for a page at the end of a turn, and the hooks module runs `nudge --compact` near compaction and `nudge --summary` as it runs. |
+| `iirc suggest-pages`, `iirc record-command-success`, `iirc remind-to-write`, `iirc record-session-summary` | Hook entries: `suggest-pages` names pages for a prompt or a failed command; `record-command-success` logs a command that worked and asks for a page when it had failed twice before; `remind-to-write --at stop` asks for a page at the end of a turn; `record-session-summary --hook` logs the session's numbers before compaction and at its end. |
+| `iirc summarize-session-usage [ID]`, `iirc show-compaction-instructions` | Run by the hooks module: one session's pages as JSON for the line under the prompt, and the line compaction's summary keeps. The module also runs `remind-to-write --at compaction` near compaction. |
 
 ## Every setting
 
@@ -246,11 +247,11 @@ describes each one.
 | `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc set-search-backend --host URL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested-pages N`, when the row brings too much or too little. |
 | `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc set-search-backend`, which warns when this is exported. |
-| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune-suggestions` proposes a value, and the agent sets it with `iirc thresholds set` on your yes. |
+| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune-suggestions` proposes a value, and the agent sets it with `iirc set-suggestion-threshold` on your yes. |
 | `[recall.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
-| `write` | `.claude/iirc.toml` | the project store, else the only store | the name of a store | The store `iirc write` uses without `--store`. | `iirc stores add NAME URL --default` sets it. |
+| `write` | `.claude/iirc.toml` | the project store, else the only store | the name of a store | The store `iirc write` uses without `--store`. | `iirc add-remote-store NAME URL --default` sets it. |
 | `[stores.NAME] kind` | `.claude/iirc.toml` | required in each store table | `project` (at most one), `remote` | A directory in the repository, or a clone of a shared repository. | When you add a store. |
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
@@ -273,7 +274,7 @@ records are kept 90 days.
 Each model has its own distance scale, so each has its own table in
 `.claude/iirc.toml`, named after the model with `:` changed to `-`. The
 hooks read the table of this machine's model; a knob left out takes its
-default. `iirc thresholds` prints the table name and the values in force.
+default. `iirc show-suggestion-thresholds` prints the table name and the values in force.
 
 ```toml
 [recall.nomic-embed-text]
@@ -310,7 +311,7 @@ change. `iirc doctor --fix` moves flat `[recall]` knobs into
 `[recall.nomic-embed-text]`, the only model there was, and comments out
 each bad knob, with a note, so its default applies; a broken store table
 is yours to fix.
-Every other command except `set-search-backend`, `stats`, and `max-suggested-pages` stops
+Every other command except `set-search-backend`, `summarize-page-usage`, and `max-suggested-pages` stops
 with the error.
 
 A bad `~/.config/dokidlc-iirc/config.toml` is ignored, and nothing says
@@ -353,7 +354,7 @@ them.
 
 Plugin commits `699d710`, `a16668a`, and `fa1ed37` record what recall
 does. The
-cards and `/iirc stats` show it. Each number has a response:
+cards and `/iirc summarize-page-usage` show it. Each number has a response:
 
 - TRUST is not zero on `/iirc status`: type `/iirc find-suspect-pages`, or ask the
   agent for a doubt pass.
@@ -364,7 +365,7 @@ cards and `/iirc stats` show it. Each number has a response:
 - The recall hit rate on the cards is this session's suggested pages
   that were then read. It is a proxy for precision. One session holds
   too few suggestions to judge; watch it over several sessions, or read
-  "read after a search or recall named it" in `/iirc stats`.
+  "read after a search or recall named it" in `/iirc summarize-page-usage`.
 - The average match for read and unread pages: when the two are close,
   the score does not predict which pages get used. Do not move the
   recall knobs on that alone.
@@ -418,7 +419,7 @@ records](HOW-IT-WORKS.md#what-iirc-records) has every file and field.
 
 ### Known limits of iirc stats
 
-The 7-day view of `/iirc stats` has two known faults:
+The 7-day view of `/iirc summarize-page-usage` has two known faults:
 
 - "Written pages later verified" counts a write whose page has any
   `verify` in the window. It does not check that the verify came after

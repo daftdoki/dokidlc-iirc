@@ -639,7 +639,7 @@ def test_recall_skips_machine_prompts_and_searches_the_person_s_words(tmp_path, 
     iirc.write_config_file({"semantic": False})
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": handback})))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     assert capsys.readouterr().out == ""                  # the hand-back names pysqlite3-binary, and recall stays silent
     assert iirc.read_log()[-1]["reason"] == "machine"
 
@@ -733,7 +733,7 @@ def test_stats_session_counts_suggested_pages_used(tmp_path, monkeypatch, capsys
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s6"); iirc.set_root(tmp_path)
     iirc.log_event("recall", hits=2, pages=["a.md", "b.md"], via="prompt"); iirc.log_event("recall", hits=1, pages=["c.md"], via="failure")
     iirc.log_event("read", pages=["b.md", "z.md"])
-    iirc.main(["stats", "--session", "s6"])
+    iirc.main(["summarize-session-usage", "s6"])
     out = json.loads(capsys.readouterr().out)
     assert out["suggested"] == ["a.md", "b.md", "c.md"] and out["used"] == ["b.md"]
     assert out["missed"] == [["a.md", 1], ["c.md", 1]]
@@ -745,7 +745,7 @@ def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeyp
     for pages in (["a.md", "b.md"], ["b.md"], ["b.md", "c.md"]):
         iirc.log_event("recall", hits=len(pages), pages=pages, via="prompt")
     iirc.log_event("read", pages=["c.md"])
-    iirc.main(["stats", "--session", "s7"])
+    iirc.main(["summarize-session-usage", "s7"])
     assert json.loads(capsys.readouterr().out)["missed"] == [["b.md", 3], ["a.md", 1]]
 
 
@@ -755,7 +755,7 @@ def test_stats_session_averages_match_for_read_and_unread(tmp_path, monkeypatch,
     iirc.log_event("recall", hits=3, pages=["a.md", "b.md", "c.md"], scores=["80% match, meaning", "60% match, meaning+term", "term match"], via="prompt")
     iirc.log_event("recall", hits=1, pages=["b.md"], scores=["70% match, meaning"], via="prompt")
     iirc.log_event("read", pages=["a.md"])
-    iirc.main(["stats", "--session", "s8"])
+    iirc.main(["summarize-session-usage", "s8"])
     assert json.loads(capsys.readouterr().out)["match"] == {"all": 70, "read": 80, "unread": 65}
 
 
@@ -808,19 +808,19 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     iirc.write_config_file({"semantic": False})
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"})))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     out = capsys.readouterr().out
     assert "`iirc read pysqlite3-install-override.md`" in out
     assert "may apply. Read a page whose summary bears on this task; skip the rest: " in out
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "yes"})))
-    iirc.main(["recall"]); assert capsys.readouterr().out == ""
+    iirc.main(["suggest-pages"]); assert capsys.readouterr().out == ""
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s2")   # in s1 the page is a repeat now
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "uv tool install memoryfield-tool"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"})))
-    iirc.main(["recall", "--failure"])
+    iirc.main(["suggest-pages", "--failure"])
     out = json.loads(capsys.readouterr().out)
     assert "pysqlite3-install-override.md" in out["hookSpecificOutput"]["additionalContext"]
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls /nope"}, "error": "Exit code 2"})))
-    iirc.main(["recall", "--failure"])
+    iirc.main(["suggest-pages", "--failure"])
     assert capsys.readouterr().out == ""          # nothing but the exit code: stay silent
     rows = iirc.read_log()
     assert [r["cmd"] for r in rows] == ["recall", "skipped", "failure", "recall", "failure"]
@@ -853,16 +853,16 @@ def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, caps
     iirc.write_config_file({"semantic": False})
     def run(argv, payload):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload))); iirc.main(argv); return capsys.readouterr().out
-    out = json.loads(run(["recall"], {"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"}))
+    out = json.loads(run(["suggest-pages"], {"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"}))
     assert out["systemMessage"] == out["hookSpecificOutput"]["additionalContext"]
     assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit" and "pysqlite3-install-override.md" in out["systemMessage"]
     out = json.loads(run(["doctor", "--brief", "--hook"], {"hook_event_name": "SessionStart", "session_id": "s5"}))
     assert out["systemMessage"].startswith("iirc: 1 page") and out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s6")   # in s5 the page is a repeat now
     fail = {"session_id": "s6", "tool_name": "Bash", "tool_input": {"command": "uv tool install x"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
-    assert "pysqlite3" in json.loads(run(["recall", "--failure"], fail))["systemMessage"]
-    run(["recall", "--failure"], fail)
-    out = json.loads(run(["recall", "--success"], {"session_id": "s6", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}))
+    assert "pysqlite3" in json.loads(run(["suggest-pages", "--failure"], fail))["systemMessage"]
+    run(["suggest-pages", "--failure"], fail)
+    out = json.loads(run(["record-command-success"], {"session_id": "s6", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}))
     assert "`uv tool` failed 2 times" in out["systemMessage"]
     assert not run(["doctor", "--brief"], {}).startswith("{")      # a person at the terminal gets plain text
 
@@ -906,16 +906,16 @@ def test_recovery_and_stop_nudges(tmp_path, monkeypatch, capsys):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload))); iirc.main(argv); return capsys.readouterr().out
     fail = {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "uv tool install x"}, "error": "Exit code 1"}
     ok = {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}
-    assert run(["nudge", "--stop"], {"session_id": "s1"}) == ""             # nothing happened yet
-    run(["recall", "--failure"], fail); run(["recall", "--failure"], fail)
-    assert run(["recall", "--success"], {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "ls"}}) == ""   # a different command
-    out = run(["recall", "--success"], ok)
+    assert run(["remind-to-write", "--at", "stop"], {"session_id": "s1"}) == ""             # nothing happened yet
+    run(["suggest-pages", "--failure"], fail); run(["suggest-pages", "--failure"], fail)
+    assert run(["record-command-success"], {"session_id": "s1", "tool_name": "Bash", "tool_input": {"command": "ls"}}) == ""   # a different command
+    out = run(["record-command-success"], ok)
     assert "`uv tool` failed 2 times" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert run(["recall", "--success"], ok) == ""                            # nudged once per command
-    out = run(["nudge", "--stop"], {"session_id": "s1"})
+    assert run(["record-command-success"], ok) == ""                            # nudged once per command
+    out = run(["remind-to-write", "--at", "stop"], {"session_id": "s1"})
     assert out == "" or "additionalContext" in out                            # already nudged at recovery, so stop stays quiet
     iirc.log_event("write", page="a.md", kind="procedure")
-    assert run(["nudge", "--stop"], {"session_id": "s1"}) == ""
+    assert run(["remind-to-write", "--at", "stop"], {"session_id": "s1"}) == ""
 
 
 def test_stop_nudge_fires_when_recovery_was_not_nudged(tmp_path, monkeypatch, capsys):
@@ -925,11 +925,11 @@ def test_stop_nudge_fires_when_recovery_was_not_nudged(tmp_path, monkeypatch, ca
     (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
     iirc.log_event("failure", command="uv tool"); iirc.log_event("failure", command="uv tool"); iirc.log_event("success", command="uv tool")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s2"})))
-    iirc.main(["nudge", "--stop"])
+    iirc.main(["remind-to-write", "--at", "stop"])
     out = json.loads(capsys.readouterr().out)
     assert "say so and stop" in out["hookSpecificOutput"]["additionalContext"]
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s2"})))
-    iirc.main(["nudge", "--stop"]); assert capsys.readouterr().out == ""
+    iirc.main(["remind-to-write", "--at", "stop"]); assert capsys.readouterr().out == ""
 
 
 def test_compact_nudge_speaks_once_per_compaction_window(tmp_path, monkeypatch, capsys):
@@ -939,7 +939,7 @@ def test_compact_nudge_speaks_once_per_compaction_window(tmp_path, monkeypatch, 
     (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
     def run():
         # the hooks module passes the session on stdin, as a command hook's payload does
-        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s9"}))); iirc.main(["nudge", "--compact"]); return capsys.readouterr().out
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s9"}))); iirc.main(["remind-to-write", "--at", "compaction"]); return capsys.readouterr().out
     iirc.log_event("failure", command="uv tool"); iirc.log_event("failure", command="uv tool"); iirc.log_event("success", command="uv tool")
     out = run()
     assert out.startswith("iirc: context compaction is near.") and "`iirc write`" in out
@@ -958,7 +958,7 @@ def test_summary_nudge_asks_the_summary_for_unwritten_findings(tmp_path, monkeyp
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     iirc.set_root(tmp_path)
     def run():
-        monkeypatch.setattr("sys.stdin", io.StringIO("{}")); iirc.main(["nudge", "--summary"]); return capsys.readouterr().out
+        monkeypatch.setattr("sys.stdin", io.StringIO("{}")); iirc.main(["show-compaction-instructions"]); return capsys.readouterr().out
     assert run() == ""                                                        # no store: the summary hears nothing of iirc
     (tmp_path / ".iirc").mkdir()
     out = run()
@@ -970,8 +970,12 @@ def test_commands_carry_their_plain_names():
     out = subprocess.run([str(ROOT / "bin" / "iirc"), "--help"], capture_output=True, text=True).stdout
     names = set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
     new = {"read-matching-pages", "approve-page-check", "rebuild-search-index", "find-suspect-pages", "audit-page-findability",
-           "estimate-context-tokens", "tune-suggestions", "set-search-backend", "show-page-topics", "max-suggested-pages"}
-    old = {"doubt", "cost", "knobs", "pull", "approve", "index", "suspect-pages", "audit", "token-cost", "tune", "setup", "topics", "max-suggested"}
+           "estimate-context-tokens", "tune-suggestions", "set-search-backend", "show-page-topics", "max-suggested-pages",
+           "suggest-pages", "record-command-success", "remind-to-write", "show-compaction-instructions", "summarize-page-usage",
+           "record-session-summary", "summarize-session-usage", "show-suggestion-thresholds", "set-suggestion-threshold",
+           "show-page-stores", "add-remote-store"}
+    old = {"doubt", "cost", "knobs", "pull", "approve", "index", "suspect-pages", "audit", "token-cost", "tune", "setup", "topics", "max-suggested",
+           "recall", "nudge", "stats", "thresholds", "stores"}
     assert new - names == set() and old & names == set()
     out = subprocess.run([str(ROOT / "bin" / "iirc"), "tune-suggestions", "--help"], capture_output=True, text=True).stdout
     assert {"gather-suggestion-data", "record-relevance-judgments", "evaluate-suggestion-thresholds", "mark-session-tuned"} <= set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
@@ -1014,7 +1018,7 @@ def test_snapshot_logs_the_session_with_its_conditions(tmp_path, monkeypatch, ca
     iirc.log_event("recall", hits=2, pages=["a.md", "b.md"], scores=["70% match, meaning", "66% match, meaning"], via="prompt")
     iirc.log_event("read", pages=["a.md", "z.md"]); iirc.log_event("verify", page="a.md"); iirc.log_event("skipped", reason="short")
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionEnd", "reason": "clear", "session_id": "s9", "transcript_path": "/t/s9.jsonl"})))
-    iirc.main(["stats", "--snapshot", "--hook"])
+    iirc.main(["record-session-summary", "--hook"])
     assert capsys.readouterr().out == ""
     row = [r for r in iirc.read_log(session="s9") if r["cmd"] == "session"][-1]
     assert (row["trigger"], row["reason"], row["transcript"]) == ("SessionEnd", "clear", "/t/s9.jsonl")
@@ -1027,7 +1031,7 @@ def test_stats(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s4"); iirc.set_root(tmp_path)
     iirc.log_event("search", query="q", hits=1, pages=["a.md"]); iirc.log_event("read", pages=["a.md"]); iirc.log_event("write", page="a.md", kind="finding")
-    iirc.main(["stats"])
+    iirc.main(["summarize-page-usage"])
     out = capsys.readouterr().out
     assert "1 session" in out and "read after a search or recall named it: 1/1" in out
 
@@ -1039,9 +1043,9 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("search", query="q", hits=1, pages=["d.md"])
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
-    iirc.main(["stats", "--session", "s5"])
+    iirc.main(["summarize-session-usage", "s5"])
     assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "gone": ["f.md"]}
-    iirc.main(["stats", "--session"])
+    iirc.main(["summarize-session-usage"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 
 
@@ -1141,7 +1145,7 @@ def test_config_error_kills_commands_and_silences_hooks(tmp_path, monkeypatch, c
         iirc.main(["search", "x"])
     assert ".claude/iirc.toml" in capsys.readouterr().err
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "a prompt long enough to be worth a recall search here"})))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     assert capsys.readouterr() == ("", "")
     # the brief says the hooks are off and names the fix, so the hint row turns red
     iirc.main(["doctor", "--brief"])
@@ -1553,7 +1557,7 @@ def test_stores_add_writes_config_and_clones(tmp_path, monkeypatch):
     _project(proj, monkeypatch)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     bare = tmp_path / "remote.git"; _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
-    iirc.main(["stores", "add", "agent", str(bare), "--default"])
+    iirc.main(["add-remote-store", "agent", str(bare), "--default"])
     text = (proj / ".claude" / "iirc.toml").read_text()
     assert 'write = "agent"' in text and "[stores.project]" in text and f'url = "{bare}"' in text
     agent = iirc.store_named("agent")
@@ -1858,7 +1862,7 @@ def _old_layout(root):
     """A repository as the memory plugin left it: store, config, CLAUDE.md section, and settings."""
     (root / ".memory").mkdir()
     (root / ".memory" / "index.md").write_text("---\ntitle: Memory\n---\n\n<!-- memory format 1, written by memory abc1234 on 2026-10-01 -->\n")
-    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`, `memory pull x`, `memory approve p.md`, `memory index`, and `memory setup --local`; memory as a word stays.\n")
+    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`, `memory pull x`, `memory approve p.md`, `memory index`, `memory setup --local`, `memory stores`, `memory stats`, `memory recall`, and `memory nudge`; memory as a word stays.\n")
     (root / ".claude").mkdir()
     (root / ".claude" / "memory.toml").write_text('ui = true\n\n[stores.project]\nkind = "project"\npath = ".memory"\n')
     (root / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"memory@dokidlc": True, "questlog@dokidlc": True}}, indent=2) + "\n")
@@ -1915,6 +1919,7 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     assert "`iirc read b.md`" in page and "`iirc doctor --fix`" in page and "memory as a word stays" in page
     assert "`iirc find-suspect-pages`" in page and "`iirc estimate-context-tokens`" in page   # renamed since the memory plugin
     assert "`iirc read-matching-pages x`" in page and "`iirc approve-page-check p.md`" in page and "`iirc rebuild-search-index`" in page and "`iirc set-search-backend --local`" in page
+    assert "`iirc show-page-stores`" in page and "`iirc summarize-page-usage`" in page and "`iirc suggest-pages`" in page and "`iirc remind-to-write`" in page
     assert "iirc format" in (repo / ".iirc" / "index.md").read_text() and reindexed
     for b in bases:
         assert not (b / "dokidlc-memory").exists() and (b / "dokidlc-iirc" / "kept.txt").is_file()
@@ -2185,21 +2190,21 @@ def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, ca
 def test_knobs_set_writes_only_its_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"
-    iirc.main(["thresholds", "set", "both", "0.36"])   # no file yet
+    iirc.main(["set-suggestion-threshold", "both", "0.36"])   # no file yet
     assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.36\n"
     toml.write_text("# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n")
-    iirc.main(["thresholds", "set", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
+    iirc.main(["set-suggestion-threshold", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
     assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n"
     toml.write_text("[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
-    iirc.main(["thresholds", "set", "semantic_only", "0.3"])
-    iirc.main(["thresholds", "set", "both", "0.4"])
+    iirc.main(["set-suggestion-threshold", "semantic_only", "0.3"])
+    iirc.main(["set-suggestion-threshold", "both", "0.4"])
     assert toml.read_text() == "[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     capsys.readouterr()
     for argv, says in ((["semantic_only", "0.9"], "from 0.1 to 0.6"), (["semantic_only", "0.45"], "set both first")):
         with pytest.raises(SystemExit):
-            iirc.main(["thresholds", "set", *argv])
+            iirc.main(["set-suggestion-threshold", *argv])
         assert says in capsys.readouterr().err
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     toml.unlink(); iirc.set_root(tmp_path)
@@ -2280,7 +2285,7 @@ def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monk
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
     toml.write_text('[ recall . "nomic-embed-text" ]\nboth = 0.36\n')
-    iirc.main(["thresholds", "set", "both", "0.38"])
+    iirc.main(["set-suggestion-threshold", "both", "0.38"])
     assert toml.read_text() == '[ recall . "nomic-embed-text" ]\nboth = 0.38\n'
     toml.unlink(); iirc.set_root(tmp_path)
 
@@ -2612,7 +2617,7 @@ def test_failure_recall_keeps_its_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
     error = "Exit code 1\nError: Cannot find module 'leftpad' " + "at require " * 60
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "npm test"}, "error": error})))
-    iirc.main(["recall", "--failure"])
+    iirc.main(["suggest-pages", "--failure"])
     # no transcript: the prompts file alone fills the evidence
     iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "f1"])
     failed = json.loads((tmp_path / "st" / "dokidlc-iirc" / "tune" / "f1.json").read_text())["recalls"][0]["failed"]
@@ -3091,9 +3096,9 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
     _machine_model("qwen3-embedding:0.6b")
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}    # past nomic's 0.60, inside qwen3's range
-    iirc.main(["thresholds"])
+    iirc.main(["show-suggestion-thresholds"])
     assert '[recall."qwen3-embedding-0.6b"]' in capsys.readouterr().out
-    iirc.main(["thresholds", "set", "both", "0.8"])
+    iirc.main(["set-suggestion-threshold", "both", "0.8"])
     assert 'semantic_only = 0.5\nboth = 0.8\n' in toml.read_text() and "[recall.nomic-embed-text]\nsemantic_only = 0.3\n" in toml.read_text()
     _machine_model("all-minilm-l6-v2")
     iirc.set_root(tmp_path)
@@ -3103,7 +3108,7 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.6, "both": 0.68}   # minilm's own defaults
     grid = iirc.knob_grid()
     assert min(k["semantic_only"] for k in grid) == 0.1 and max(k["both"] for k in grid) == 0.9 and all(k["both"] >= k["semantic_only"] for k in grid)
-    iirc.main(["thresholds", "set", "semantic_only", "0.55"])   # a new table for the active model, after the others
+    iirc.main(["set-suggestion-threshold", "semantic_only", "0.55"])   # a new table for the active model, after the others
     assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.4\n\n[recall.all-minilm-l6-v2]\nsemantic_only = 0.55\n"
     toml.write_text("[recall.nomic]\nboth = 0.4\n")
     iirc.set_root(tmp_path)
@@ -3524,7 +3529,7 @@ def test_failure_recall_saves_redacted_text(tmp_path, monkeypatch):
     command = f'curl -fsS -H "Authorization: Bearer {token}" https://api.github.com/user'
     error = f"Exit code 22\ncurl: (22) The requested URL returned error: 401 for {token}"
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "error": error})))
-    iirc.main(["recall", "--failure"])
+    iirc.main(["suggest-pages", "--failure"])
     kept = (tmp_path / "st" / "dokidlc-iirc" / "prompts" / "f1.jsonl").read_text()
     assert "[REDACTED]" in kept
     assert token not in kept
@@ -3542,10 +3547,10 @@ def test_failed_recall_is_not_logged_as_timeout(tmp_path, monkeypatch):
         raise ValueError("shapes (1,768) and (1024,) not aligned")
     monkeypatch.setattr(iirc, "hybrid_search", broken)
     monkeypatch.setattr("sys.stdin", io.StringIO(prompt))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
     monkeypatch.setattr("sys.stdin", io.StringIO(prompt))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     assert [r["cmd"] for r in iirc.read_log()] == ["recall"]
 
 
@@ -3562,7 +3567,7 @@ def test_line_pages_counted_from_its_pages(tmp_path, monkeypatch):
     one = len(iirc.recall_line(rows[:1]).encode())
     monkeypatch.setattr(iirc, "recall_max_bytes", lambda: one + 10)   # room for a only
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"})))
-    iirc.main(["recall"])
+    iirc.main(["suggest-pages"])
     assert iirc.read_log()[0]["pages"] == ["a.md"]
     evals = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl") for line in f.read_text().splitlines()]
     assert {e["page"]: e["verdict"] for e in evals} == {"a.md": "passed", "b.md": "line_cut"}
@@ -3582,7 +3587,7 @@ def test_subagent_recall_keeps_its_own_repeat_history(tmp_path, monkeypatch):
                "tool_input": {"command": "uv tool install memoryfield-tool"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
     for event, flag in ((prompt, []), (failure, ["--failure"]), (failure, ["--failure"]), (prompt, [])):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
-        iirc.main(["recall", *flag])
+        iirc.main(["suggest-pages", *flag])
     recalls = [(r.get("agent"), r["pages"]) for r in iirc.read_log() if r["cmd"] == "recall"]
     assert recalls == [(None, ["a.md"]), ("ag1", ["a.md"]), ("ag1", []), (None, [])]
 
@@ -3797,7 +3802,7 @@ def test_saved_prompts_are_redacted(tmp_path, monkeypatch):
     prompts = [f"why does the push fail with my token {token} on the remote? " * 2, f"/login {token}"]
     for prompt in prompts:
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": prompt})))
-        iirc.main(["recall"])
+        iirc.main(["suggest-pages"])
     rows = [json.loads(l) for l in (tmp_path / "st" / "dokidlc-iirc" / "prompts" / "p1.jsonl").read_text().splitlines()]
     assert [("skipped" in r) for r in rows] == [False, True]
     assert all(token not in r["excerpt"] and "[REDACTED]" in r["excerpt"] for r in rows)

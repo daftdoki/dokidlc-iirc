@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc recall",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc suggest-pages",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc recall --failure",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc suggest-pages --failure",
             "timeout": 5
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc nudge --stop",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc remind-to-write --at stop",
             "timeout": 5
           }
         ]
@@ -82,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc recall --success",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc record-command-success",
             "timeout": 5
           }
         ]
@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc stats --snapshot --hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc record-session-summary --hook",
             "timeout": 10
           }
         ]
@@ -104,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc stats --snapshot --hook",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/iirc record-session-summary --hook",
             "timeout": 10
           }
         ]

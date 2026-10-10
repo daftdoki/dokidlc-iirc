@@ -12,29 +12,31 @@ guards the embedding host, embeds and searches pages itself (iirc_embed.py),
 computes suspicion, and records what recall did so it can be tuned.
 
 Usage:
-  iirc search QUERY...       ranked pages; several terms are searched separately and merged
-  iirc read-matching-pages QUERY  full text of matching pages
-  iirc read PAGE...          print pages
-  iirc write PAGE [flags]    body on stdin; see write --help; --store NAME picks the store
+  iirc search QUERY...                      ranked pages; several terms are searched separately and merged
+  iirc read-matching-pages QUERY            full text of matching pages
+  iirc read PAGE...                         print pages
+  iirc write PAGE [flags]                   body on stdin; see write --help; --store NAME picks the store
   iirc delete PAGE
-  iirc verify PAGE           record that the page was re-confirmed
-  iirc find-suspect-pages [--all]  pages with evidence they may be wrong
-  iirc approve-page-check PAGE  run a page's check once and approve it on this machine
-  iirc rebuild-search-index  rebuild the search index
-  iirc audit-page-findability [PAGE]  pages search shows badly, each with its fix
-  iirc show-page-topics      every topic with its page count
-  iirc estimate-context-tokens  bytes and tokens of index.md and a search
-  iirc doctor [--fix|--brief] check or install prerequisites
-  iirc stats [--days N]      how the pages are being used
-  iirc max-suggested-pages [N]  pages recall suggests at most; N sets it on this machine
-  iirc thresholds [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
-  iirc tune-suggestions gather-suggestion-data|record-relevance-judgments|evaluate-suggestion-thresholds|mark-session-tuned
-                             evidence and judgments for tuning recall, and an evaluation of the knobs
-  iirc set-search-backend    the embedding model and where it runs, or string search; once per machine
-  iirc init                  create .iirc/ and the CLAUDE.md paragraph
-  iirc migrate               move a repository and this machine from the memory plugin's layout
-  iirc sync                  commit, pull, and push every remote store
-  iirc stores [add NAME URL] list the stores, or add a remote store (ask the creator first)
+  iirc verify PAGE                          record that the page was re-confirmed
+  iirc find-suspect-pages [--all]           pages with evidence they may be wrong
+  iirc approve-page-check PAGE              run a page's check once and approve it on this machine
+  iirc rebuild-search-index                 rebuild the search index
+  iirc audit-page-findability [PAGE]        pages search shows badly, each with its fix
+  iirc show-page-topics                     every topic with its page count
+  iirc estimate-context-tokens              bytes and tokens of index.md and a search
+  iirc doctor [--fix|--brief]               check or install prerequisites
+  iirc summarize-page-usage [--days N]      how the pages are being used
+  iirc max-suggested-pages [N]              pages recall suggests at most; N sets it on this machine
+  iirc show-suggestion-thresholds           the recall gate's distances
+  iirc set-suggestion-threshold NAME VALUE  write one into .claude/iirc.toml
+  iirc tune-suggestions STEP                gather-suggestion-data, record-relevance-judgments,
+                                            evaluate-suggestion-thresholds, or mark-session-tuned
+  iirc set-search-backend                   the embedding model and where it runs, or string search; once per machine
+  iirc init                                 create .iirc/ and the CLAUDE.md paragraph
+  iirc migrate                              move a repository and this machine from the memory plugin's layout
+  iirc sync                                 commit, pull, and push every remote store
+  iirc show-page-stores                     list the stores
+  iirc add-remote-store NAME URL            add a remote store (ask the creator first)
 """
 
 from __future__ import annotations
@@ -719,7 +721,7 @@ AGENT_ID: str | None = None   # a subagent's hook event carries its agent_id; th
 
 
 def log_event(cmd: str, **fields) -> None:
-    """One JSON line per command, keyed by session, for `iirc stats`. Never raises."""
+    """One JSON line per command, keyed by session, for `iirc summarize-page-usage`. Never raises."""
     try:
         state_dir().mkdir(parents=True, exist_ok=True)
         row = {"ts": now_iso(), "session": session_id(), **({"agent": AGENT_ID} if AGENT_ID else {}), "repo": str(ROOT), "cmd": cmd, **fields}
@@ -1195,13 +1197,8 @@ def recall_max_bytes() -> int:
     return 120 + 200 * max_suggested()
 
 
-def cmd_thresholds(args: argparse.Namespace) -> None:
-    """The recall gate's knobs for the active model: each value, its default and range, and what it sets. `set` writes one."""
-    if args.action == "set":
-        if args.name is None or args.value is None:
-            die("usage: iirc thresholds set NAME VALUE")
-        knobs_set(args.name, args.value)
-        return
+def cmd_show_suggestion_thresholds(args: argparse.Namespace) -> None:
+    """The recall gate's knobs for the active model: each value, its default and range, and what it sets."""
     print(f"[{table_header(recall_table())}] in {STORE_CONFIG}, for the embedding model {active_model().id}; a knob left out takes its default")
     for name, (default, low, high, what) in knob_spec().items():
         mark = "" if RECALL[name] == default else f"  (default {default})"
@@ -1237,6 +1234,10 @@ def set_knob_text(text: str, table: str, name: str, value: float) -> str:
     return "\n".join(lines) + "\n"
 
 
+def cmd_set_suggestion_threshold(args: argparse.Namespace) -> None:
+    knobs_set(args.name, args.value)
+
+
 def knobs_set(name: str, value: float) -> None:
     """Write one knob into the active model's table in .claude/iirc.toml after the checks set_root applies when it reads the file."""
     default, low, high, _ = knob_spec()[name]
@@ -1254,7 +1255,7 @@ def knobs_set(name: str, value: float) -> None:
         if load_knobs(tomllib.loads(new))[name] != value:
             raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [{table_header(table)}]")
     except (tomllib.TOMLDecodeError, ConfigError) as e:
-        die(f"thresholds set: {STORE_CONFIG} would not read back, so nothing was written: {e}")
+        die(f"set-suggestion-threshold: {STORE_CONFIG} would not read back, so nothing was written: {e}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new)
     print(f"{name} = {value:g} in [{table_header(table)}] of {path}; commit it, it is the repository's config")
@@ -1548,23 +1549,33 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
             marker.unlink(missing_ok=True)
 
 
-def cmd_recall(args: argparse.Namespace) -> None:
+def cmd_record_command_success(args: argparse.Namespace) -> None:
+    """PostToolUse hook entry: log the command; nudge to write when it had failed twice before. Never fails the hook."""
+    event = read_event()
+    if not live_stores():
+        return
+    try:
+        cmd = first_token(str((event.get("tool_input") or {}).get("command", "")))
+        if cmd:
+            log_event("success", command=cmd)
+        recovered = recovered_commands()
+        if recovered:
+            for c, _ in recovered:
+                log_event("nudged", command=c)
+            text = " ".join(RECOVERY_NUDGE.format(cmd=c, n=n) for c, n in recovered[:3])
+            print(hook_output("PostToolUse", text))
+    except SystemExit:
+        return
+    except Exception:  # a hook must never fail the tool call
+        return
+
+
+def cmd_suggest_pages(args: argparse.Namespace) -> None:
     """Hook entry. Reads the hook JSON on stdin, prints at most one line. Never fails the hook."""
     event = read_event()
     if not live_stores():
         return
     try:
-        if args.success:
-            cmd = first_token(str((event.get("tool_input") or {}).get("command", "")))
-            if cmd:
-                log_event("success", command=cmd)
-            recovered = recovered_commands()
-            if recovered:
-                for c, _ in recovered:
-                    log_event("nudged", command=c)
-                text = " ".join(RECOVERY_NUDGE.format(cmd=c, n=n) for c, n in recovered[:3])
-                print(hook_output("PostToolUse", text))
-            return
         if args.failure:
             cmd = str((event.get("tool_input") or {}).get("command", ""))
             err = str(event.get("error") or event.get("tool_response") or "")
@@ -2256,7 +2267,7 @@ def resolve_page(ref: str) -> tuple[Store, str]:
         sname, page = ref.split("/", 1)
         s = store_named(sname)
         if not s:
-            die(f"no store named {sname!r}; `iirc stores` lists them")
+            die(f"no store named {sname!r}; `iirc show-page-stores` lists them")
         return s, page
     hits = find_page(ref)
     if len(hits) > 1:
@@ -2339,7 +2350,7 @@ def write_store(flag: str | None) -> Store:
     if name:
         s = store_named(name)
         if not s:
-            die(f"no store named {name!r}; `iirc stores` lists them")
+            die(f"no store named {name!r}; `iirc show-page-stores` lists them")
         return s
     ps = project_store()
     if ps:
@@ -2578,7 +2589,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 OLD_VERBS = "search|pull|read|write|delete|verify|doubt|approve|index|cost|doctor|setup|init|sync|stores|stats|recall|nudge"
 OLD_COMMAND_RE = re.compile(r"`memory (" + OLD_VERBS + r")\b")
 RENAMED_VERBS = {"pull": "read-matching-pages", "doubt": "find-suspect-pages", "approve": "approve-page-check", "index": "rebuild-search-index",
-                 "cost": "estimate-context-tokens", "setup": "set-search-backend"}   # the memory plugin's names that iirc changed
+                 "cost": "estimate-context-tokens", "setup": "set-search-backend", "stores": "show-page-stores",
+                 "stats": "summarize-page-usage", "recall": "suggest-pages", "nudge": "remind-to-write"}   # the memory plugin's names that iirc changed
 OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
 SUGGESTED_COMMIT = 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
 
@@ -3171,32 +3183,34 @@ def write_store_config(root: Path, name: str, url: str, make_default: bool) -> s
     return text
 
 
-def cmd_stores(args: argparse.Namespace) -> None:
-    if args.action == "add":
-        if not args.name or not args.url:
-            die("usage: iirc stores add NAME URL [--default]")
-        if store_named(args.name):
-            die(f"a store named {args.name!r} already exists")
-        if not NAME_RE.match(args.name) or len(args.name) > STORE_NAME_MAX:
-            die(f"store name {args.name!r} must be lowercase letters and digits joined by single hyphens, at most {STORE_NAME_MAX} characters")
-        path = ROOT / STORE_CONFIG
-        new = write_store_config(ROOT, args.name, args.url, args.default)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(new)
-        set_root(ROOT)
-        if CONFIG_ERROR:
-            die(CONFIG_ERROR)
-        store = store_named(args.name)
-        reason = clone_store(store) if not store.dir.is_dir() else create_index(store)
-        if reason:
-            print(f"iirc: {store.name}: {reason}", file=sys.stderr)
-        try:
-            with store_lock(f"config-{field_name(ROOT)}"):
-                reason = commit_paths(ROOT, [STORE_CONFIG], f"iirc: add store {args.name}")
-        except LockTimeout:
-            reason = "another iirc command held the config lock"
-        if reason:
-            print(f"iirc: {STORE_CONFIG} written, not committed: {reason}", file=sys.stderr)
+def cmd_add_remote_store(args: argparse.Namespace) -> None:
+    """Add a remote store to .claude/iirc.toml, clone it, commit the config, then list the stores."""
+    if store_named(args.name):
+        die(f"a store named {args.name!r} already exists")
+    if not NAME_RE.match(args.name) or len(args.name) > STORE_NAME_MAX:
+        die(f"store name {args.name!r} must be lowercase letters and digits joined by single hyphens, at most {STORE_NAME_MAX} characters")
+    path = ROOT / STORE_CONFIG
+    new = write_store_config(ROOT, args.name, args.url, args.default)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new)
+    set_root(ROOT)
+    if CONFIG_ERROR:
+        die(CONFIG_ERROR)
+    store = store_named(args.name)
+    reason = clone_store(store) if not store.dir.is_dir() else create_index(store)
+    if reason:
+        print(f"iirc: {store.name}: {reason}", file=sys.stderr)
+    try:
+        with store_lock(f"config-{field_name(ROOT)}"):
+            reason = commit_paths(ROOT, [STORE_CONFIG], f"iirc: add store {args.name}")
+    except LockTimeout:
+        reason = "another iirc command held the config lock"
+    if reason:
+        print(f"iirc: {STORE_CONFIG} written, not committed: {reason}", file=sys.stderr)
+    cmd_show_page_stores(args)
+
+
+def cmd_show_page_stores(args: argparse.Namespace) -> None:
     for s in STORES:
         where = str(s.dir).replace(str(Path.home()), "~", 1) if s.kind == "remote" else str(s.dir.relative_to(ROOT))
         if not s.dir.is_dir():
@@ -3586,17 +3600,20 @@ SUMMARY_NUDGE = "List each finding of this session that took more than one attem
 COMPACT_NUDGE = "iirc: context compaction is near. Before it runs, write each finding of this session that a future session would otherwise re-derive and that no page holds yet: one `iirc write` page per finding. If there is nothing worth a page, go on with the task."
 
 
-def cmd_nudge(args: argparse.Namespace) -> None:
-    """Stop hook: speak once per session, only when a command failed twice and then worked and nothing was written.
-    --compact, for the hooks module near the auto-compact threshold: speak once per compaction window, as plain text.
-    --summary, for the hooks module as compaction runs: the line it adds to what the summary keeps."""
+def cmd_show_compaction_instructions(args: argparse.Namespace) -> None:
+    """For the hooks module as compaction runs: the line it adds to what the summary keeps."""
+    read_event()
+    if live_stores():
+        print(SUMMARY_NUDGE)
+
+
+def cmd_remind_to_write(args: argparse.Namespace) -> None:
+    """--at stop, the Stop hook: speak once per session, only when a command failed twice and then worked and nothing was written.
+    --at compaction, for the hooks module near the auto-compact threshold: speak once per compaction window, as plain text."""
     read_event()
     if not live_stores():
         return
-    if args.summary:
-        print(SUMMARY_NUDGE)
-        return
-    if args.compact:
+    if args.at == "compaction":
         rows = read_log(session=session_id())
         since = max((i for i, r in enumerate(rows) if compaction(r)), default=-1)
         if any(r["cmd"] == "compact-nudged" for r in rows[since + 1:]):
@@ -3606,7 +3623,7 @@ def cmd_nudge(args: argparse.Namespace) -> None:
         names = ", ".join(f"`{c}` ({n} failures)" for c, n in recovered[:3])
         print(COMPACT_NUDGE + (f" These failed and then worked this session: {names}." if names else ""))
         return
-    if args.stop:
+    if args.at == "stop":
         rows = read_log(session=session_id())
         if any(r["cmd"] == "stop-nudged" for r in rows):
             return
@@ -3658,25 +3675,27 @@ def session_summary(session: str) -> dict:
             "suggested_verified": touched("verify"), "suggested_rewritten": touched("write"), "suggested_deleted": touched("delete")}
 
 
-def cmd_stats(args: argparse.Namespace) -> None:
-    if args.snapshot:
-        # SessionEnd and PreCompact: the session in one row, with the conditions it ran under; the last row per session wins
-        event = read_event() if args.hook else {}
-        note_timeout()
-        pages = sum(len(list_pages(st.dir)) for st in live_stores())
-        summary = session_summary(session_id())
-        log_event("session", trigger=str(event.get("hook_event_name") or "manual"), reason=event.get("reason") or event.get("trigger"),
-                  transcript=event.get("transcript_path"), **conditions("semantic" if semantic_enabled() else "string", pages),
-                  **{k: v for k, v in summary.items() if k != "session"})
-        rotate_logs()
-        return
-    if args.session is not None:
-        # one session, for the line under the prompt
-        summary = session_summary(args.session or session_id())
-        # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
-        gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
-        print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "gone": gone}))
-        return
+def cmd_record_session_summary(args: argparse.Namespace) -> None:
+    # SessionEnd and PreCompact: the session in one row, with the conditions it ran under; the last row per session wins
+    event = read_event() if args.hook else {}
+    note_timeout()
+    pages = sum(len(list_pages(st.dir)) for st in live_stores())
+    summary = session_summary(session_id())
+    log_event("session", trigger=str(event.get("hook_event_name") or "manual"), reason=event.get("reason") or event.get("trigger"),
+              transcript=event.get("transcript_path"), **conditions("semantic" if semantic_enabled() else "string", pages),
+              **{k: v for k, v in summary.items() if k != "session"})
+    rotate_logs()
+
+
+def cmd_summarize_session_usage(args: argparse.Namespace) -> None:
+    # one session, for the line under the prompt
+    summary = session_summary(args.session or session_id())
+    # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
+    gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
+    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "gone": gone}))
+
+
+def cmd_summarize_page_usage(args: argparse.Namespace) -> None:
     rows = [r for r in read_log(days=args.days) if r.get("repo") == str(ROOT)]
     sessions: dict[str, list[dict]] = {}
     for r in rows:
@@ -4323,6 +4342,11 @@ def cmd_audit_page_findability(args: argparse.Namespace) -> None:
 # --- main -------------------------------------------------------------------
 
 
+# the hook entries, which fail open, and the usage commands, which run with a broken config
+HOOK_COMMANDS = ("suggest-pages", "record-command-success", "remind-to-write", "show-compaction-instructions")
+USAGE_COMMANDS = ("summarize-page-usage", "record-session-summary", "summarize-session-usage")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="iirc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -4392,11 +4416,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--query", default="how to install and configure tools")
     p.set_defaults(func=cmd_estimate_context_tokens)
 
-    p = sub.add_parser("thresholds", help="the recall gate's distances in .claude/iirc.toml, with their ranges; `thresholds set NAME VALUE` changes one")
-    p.add_argument("action", nargs="?", choices=["set"])
-    p.add_argument("name", nargs="?", choices=list(KNOB_TEXT))
-    p.add_argument("value", nargs="?", type=float)
-    p.set_defaults(func=cmd_thresholds)
+    p = sub.add_parser("show-suggestion-thresholds", help="the recall gate's distances in .claude/iirc.toml, with their ranges")
+    p.set_defaults(func=cmd_show_suggestion_thresholds)
+
+    p = sub.add_parser("set-suggestion-threshold", help="write one of the recall gate's distances into .claude/iirc.toml")
+    p.add_argument("name", choices=list(KNOB_TEXT))
+    p.add_argument("value", type=float)
+    p.set_defaults(func=cmd_set_suggestion_threshold)
 
     p = sub.add_parser("tune-suggestions", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
     tsub = p.add_subparsers(dest="tune_cmd", required=True)
@@ -4441,42 +4467,53 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("sync", help="commit, pull with rebase, and push every remote store")
     p.set_defaults(func=cmd_sync)
 
-    p = sub.add_parser("stores", help="list the stores; `stores add NAME URL [--default]` adds a remote store (ask the creator first)")
-    p.add_argument("action", nargs="?", choices=["add"])
-    p.add_argument("name", nargs="?")
-    p.add_argument("url", nargs="?")
-    p.add_argument("--default", action="store_true", help="with add: make the new store the write target")
-    p.set_defaults(func=cmd_stores)
+    p = sub.add_parser("show-page-stores", help="list the stores, with their pages and anything not committed or pushed")
+    p.set_defaults(func=cmd_show_page_stores)
 
-    p = sub.add_parser("recall", help="hook entry: name pages that match the prompt (stdin JSON)")
+    p = sub.add_parser("add-remote-store", help="add a remote store, clone it, and commit .claude/iirc.toml (ask the creator first)")
+    p.add_argument("name")
+    p.add_argument("url")
+    p.add_argument("--default", action="store_true", help="make the new store the write target")
+    p.set_defaults(func=cmd_add_remote_store)
+
+    p = sub.add_parser("suggest-pages", help="hook entry: name pages that match the prompt (stdin JSON)")
     p.add_argument("--failure", action="store_true", help="PostToolUseFailure: search the failed command and its error")
-    p.add_argument("--success", action="store_true", help="PostToolUse: log the command; nudge to write when it had failed twice before")
-    p.set_defaults(func=cmd_recall)
+    p.set_defaults(func=cmd_suggest_pages)
 
-    p = sub.add_parser("nudge", help="hook entry: Stop reminder to write, once per session; --compact, before compaction")
-    p.add_argument("--stop", action="store_true")
-    p.add_argument("--compact", action="store_true", help="plain text, once per compaction window: write what this session learned")
-    p.add_argument("--summary", action="store_true", help="plain text: what the compaction summary keeps for iirc")
-    p.set_defaults(func=cmd_nudge)
+    p = sub.add_parser("record-command-success", help="hook entry, PostToolUse: log the command; nudge to write when it had failed twice before")
+    p.set_defaults(func=cmd_record_command_success)
+
+    p = sub.add_parser("remind-to-write", help="hook entry: a reminder to write what this session learned")
+    p.add_argument("--at", required=True, choices=["stop", "compaction"],
+                   help="stop: the Stop hook, once per session; compaction: plain text, once per compaction window")
+    p.set_defaults(func=cmd_remind_to_write)
+
+    p = sub.add_parser("show-compaction-instructions", help="plain text: what the compaction summary keeps for iirc")
+    p.set_defaults(func=cmd_show_compaction_instructions)
 
     p = sub.add_parser("migrate", help="move this repository and machine from the memory plugin's layout; stages, never commits")
     p.set_defaults(func=cmd_migrate)
 
-    p = sub.add_parser("stats", help="how the pages are being used, from the local log")
+    p = sub.add_parser("summarize-page-usage", help="how the pages are being used, from the local log")
     p.add_argument("--days", type=int, default=7)
-    p.add_argument("--snapshot", action="store_true", help="log this session's numbers and conditions as one row, for tuning recall; then rotate the logs")
-    p.add_argument("--hook", action="store_true", help="with --snapshot: read the hook payload on stdin")
-    p.add_argument("--session", nargs="?", const="", metavar="ID", help="JSON: the pages one session read or pulled, and wrote; this session without ID")
-    p.set_defaults(func=cmd_stats)
+    p.set_defaults(func=cmd_summarize_page_usage)
+
+    p = sub.add_parser("record-session-summary", help="log this session's numbers and conditions as one row, for tuning recall; then rotate the logs")
+    p.add_argument("--hook", action="store_true", help="read the hook payload on stdin")
+    p.set_defaults(func=cmd_record_session_summary)
+
+    p = sub.add_parser("summarize-session-usage", help="JSON: the pages one session read or pulled, and wrote")
+    p.add_argument("session", nargs="?", default="", metavar="ID", help="default: this session")
+    p.set_defaults(func=cmd_summarize_session_usage)
 
     args = parser.parse_args(argv)
     set_root(project_root())
     if CONFIG_ERROR:
-        if args.command in ("recall", "nudge"):
+        if args.command in HOOK_COMMANDS:
             return   # hooks fail open; the session-start brief says why they are quiet
-        if args.command not in ("set-search-backend", "stats", "max-suggested-pages", "doctor"):
+        if args.command not in ("set-search-backend", *USAGE_COMMANDS, "max-suggested-pages", "doctor"):
             die(CONFIG_ERROR)
-    if args.command not in ("doctor", "init", "set-search-backend", "recall", "nudge", "stats", "migrate", "max-suggested-pages"):
+    if args.command not in ("doctor", "init", "set-search-backend", *HOOK_COMMANDS, *USAGE_COMMANDS, "migrate", "max-suggested-pages"):
         check_format()
     args.func(args)
 

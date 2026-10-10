@@ -237,7 +237,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   on('session.id', () => ({ value: 's1' }))
   on('process.run', ($, e) => {
     argv.push([...e.argv])
-    return e.argv.includes('stats') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'], written: ['c.md'], suggested: ['a.md', 'd.md', 'e.md'], used: ['a.md'] })) : ran(BRIEF)
+    return e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'], written: ['c.md'], suggested: ['a.md', 'd.md', 'e.md'], used: ['a.md'] })) : ran(BRIEF)
   })
   on('ui.toast', () => ({ value: undefined }))
   await $.tool.call({ tool: 'Bash', command: 'iirc doctor --brief', tool_use_id: 't6' })
@@ -246,7 +246,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
   expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run iirc doctor')).toBe(true)
-  expect(argv.at(-1)?.slice(1)).toEqual(['stats', '--session', 's1'])
+  expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
 })
 
 test('/iirc status-line off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
@@ -275,7 +275,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
   expect(helpText).toContain('status-line on · max-suggested-pages 4')
   expect(helpText).toContain('/iirc max-suggested-pages N')
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'thresholds']) expect(helpText).toContain(`/iirc ${cmd} `)
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
   expect(helpText).toContain('status-line on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune-suggestions .*then audit/)
@@ -365,7 +365,7 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
   expect(await help.find({ text: '/iirc max-suggested-pages N' })).toBeDefined()
   // tune and audit are maintenance; setup is a setting, shown with the search mode in force
   expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'thresholds', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
   expect(await help.find({ text: 'search' })).toBeDefined()
 })
 
@@ -431,7 +431,7 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
     if (e.argv.includes('--health')) {
       return ran(JSON.stringify({ suspect: ['old-fact.md'], stores: [{ name: 'shared', kind: 'remote', pages: 5, uncommitted: 0, unpushed: 2 }] }))
     }
-    if (e.argv.includes('stats')) {
+    if (e.argv.includes('summarize-session-usage')) {
       return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'noisy.md'], used: ['a.md'], missed: [['noisy.md', 4]], match: { all: 62, read: 75, unread: 49 } }))
     }
     return ran(BRIEF)
@@ -492,7 +492,7 @@ test('/iirc reader opens the Session tab; a page name opens the reader tab, a li
       }))
     }
     if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: ['old.md'], stores: [] }))
-    if (e.argv.includes('stats')) {
+    if (e.argv.includes('summarize-session-usage')) {
       return ran(JSON.stringify({ read: ['a.md'], written: ['w.md'], suggested: ['a.md', 'n.md', 'old-name.md'], used: ['a.md'], missed: [['n.md', 3]], match: {}, timeouts: 0, gone: ['old-name.md'] }))
     }
     return ran(BRIEF)
@@ -567,7 +567,7 @@ test('vi keys: the cursor starts on the first page name; j and k move it; g and 
       return ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'A' }, body: 'First.\n\nSecond.', links: ['b.md'], signals: [] }))
     }
     if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
-    if (e.argv.includes('stats')) return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'n.md', 'gone.md'], used: ['a.md'], missed: [['n.md', 2]], match: {}, timeouts: 0, gone: ['gone.md'] }))
+    if (e.argv.includes('summarize-session-usage')) return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'n.md', 'gone.md'], used: ['a.md'], missed: [['n.md', 2]], match: {}, timeouts: 0, gone: ['gone.md'] }))
     return ran(BRIEF)
   })
   await $.command.run({ command: 'iirc', args: 'reader' })
@@ -626,7 +626,7 @@ test('the tab row and the keys stay on top while j scrolls the list under them; 
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', ($, e) => {
     if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
-    if (e.argv.includes('stats')) return ran(JSON.stringify({ read: [], written: [], suggested: names, used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    if (e.argv.includes('summarize-session-usage')) return ran(JSON.stringify({ read: [], written: [], suggested: names, used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
     return ran(BRIEF)
   })
   await $.command.run({ command: 'iirc', args: 'reader' })
@@ -717,7 +717,7 @@ test('/iirc reader opens fresh: no page tab is left from before', async ($: Engi
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', ($, e) => (e.argv.includes('show')
     ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'A' }, body: 'b', links: [], signals: [] }))
-    : e.argv.includes('stats') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    : e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
     : ran('{"suspect": [], "stores": []}')))
   await $.command.run({ command: 'iirc', args: 'reader' })
   await clock.settle()
@@ -738,7 +738,7 @@ test('/iirc reader PAGE opens the reader on that page, over a fresh session tab'
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('process.run', ($, e) => (e.argv.includes('show')
     ? ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: { title: 'Title of a' }, body: 'b', links: [], signals: [] }))
-    : e.argv.includes('stats') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
+    : e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ read: [], written: [], suggested: ['a.md'], used: [], missed: [], match: {}, timeouts: 0, gone: [] }))
     : ran('{"suspect": [], "stores": []}')))
   expect((await $.command.run({ command: 'iirc', args: 'reader a.md' })).text).toBe('iirc reader opened on a.md')
   await clock.settle()
@@ -760,7 +760,7 @@ test('near the auto-compact threshold, hands the model the write nudge once per 
   on('session.id', () => ({ value: 's1' }))
   on('process.run', ($, e) => {
     asked.push({ argv: [...e.argv], stdin: e.init?.stdin })
-    return e.argv.includes('--compact') ? ran(NUDGE + '\n') : e.argv.includes('--summary') ? ran(SUMMARY + '\n') : ran('')
+    return e.argv.includes('compaction') ? ran(NUDGE + '\n') : e.argv.includes('show-compaction-instructions') ? ran(SUMMARY + '\n') : ran('')
   })
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
   // auto-compaction at 160,000 tokens of a 200,000 window
@@ -778,14 +778,14 @@ test('near the auto-compact threshold, hands the model the write nudge once per 
   on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   const prompt = async () => (await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })).context ?? []
-  const nudges = () => asked.filter(a => a.argv.includes('--compact'))
+  const nudges = () => asked.filter(a => a.argv.includes('compaction'))
 
   await measure(100_000)
   expect(nudges()).toHaveLength(0)                     // far from the threshold: iirc is not asked
   expect(await prompt()).toEqual([])
   await measure(130_000)                               // past 80% of the threshold
   expect(nudges()).toHaveLength(1)
-  expect(nudges()[0]?.argv.slice(1)).toEqual(['nudge', '--compact'])
+  expect(nudges()[0]?.argv.slice(1)).toEqual(['remind-to-write', '--at', 'compaction'])
   expect(JSON.parse(nudges()[0]?.stdin ?? '{}')).toEqual({ session_id: 's1' })
   await measure(135_000)
   expect(nudges()).toHaveLength(1)                     // asked once per compaction window
