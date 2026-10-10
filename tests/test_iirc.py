@@ -2756,3 +2756,21 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert ": own-title: " not in out and "hub.md: hub: " in out
     assert out.splitlines()[-1] == "6 findings in 11 pages; no vectors: own-title skipped"
+
+
+# p5 step 18
+
+def test_tune_sweep_prints_audit(tmp_path, monkeypatch, capsys):
+    _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise")])
+    field = tmp_path / "repo" / ".iirc"; field.mkdir()
+    (field / "wordy.md").write_text("---\ntitle: Wombat burrows collapse after heavy rain when the soil holds too much clay underneath\n"
+                                    "summary: Wombat burrows collapse in rain\ntopics: [t]\nkind: finding\n---\nx\n\n## Sources\n\n- y\n")
+    flagged = "wordy.md: title: the title is 85 characters, over 70; shorten it"
+    iirc.main(["tune", "sweep"])
+    out = capsys.readouterr().out
+    assert "\naudit:\n" in out and out.index("\naudit:\n") < out.index(flagged)
+    assert out.rstrip().endswith("1 finding in 1 page; no vectors: own-title skipped")
+    (tmp_path / "empty.jsonl").write_text("")
+    iirc.main(["tune", "sweep", "--replay", str(tmp_path / "empty.jsonl")])
+    out = capsys.readouterr().out
+    assert "\naudit:\n" in out and flagged in out

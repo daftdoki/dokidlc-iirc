@@ -3762,7 +3762,17 @@ def sweep_report(n: int, count) -> None:
 def cmd_tune_sweep(args: argparse.Namespace) -> None:
     if args.replay:
         cmd_tune_sweep_replay(args.replay)
-        return
+    else:
+        cmd_tune_sweep_judged()
+    # the knobs cannot fix a page that search shows badly; references/tune.md has the step for these
+    pages = audit_pages()
+    findings, vectors = audit_findings(pages)
+    print("\naudit:")
+    print_audit(findings, len(pages), vectors)
+
+
+def cmd_tune_sweep_judged() -> None:
+    """The judged pairs of recent sessions, through the gate at their logged distances."""
     evals = eval_rows()
     by_pair = {(c.get("session"), rid, base(c.get("page"))): c for rid, rows in evals.items() for c in rows}
     pairs, unsure, other_repo, no_row, no_distance = [], 0, 0, 0, 0

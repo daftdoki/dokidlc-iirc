@@ -67,13 +67,37 @@ It prints the gate's counts on the judged pairs for the current knobs
 and for a grid of others, with the criterion it ranks by. When it says
 there are too few judged pairs, propose no knob change.
 
-## 4. Propose
+It ends with the audit under `audit:`, one line per finding,
+`PAGE: CHECK: what; fix`, then a count. The pages named there are the
+flagged pages. `iirc audit PAGE` checks one page again.
+
+## 4. Flagged pages
+
+No knob fixes a flagged page; its text has to change. For each flagged
+page:
+
+1. Write two prompts a future session would plausibly type when it needs
+   this page, using none of the title's words.
+2. Run `iirc search "PROMPT"` for each, and note the page's rank.
+3. Choose one fix: rewrite, split, merge, or delete. A page in the top
+   three for both prompts takes the fix its audit line names. A page outside
+   the top three needs a rewrite in the words of the prompts, by the
+   "Write for the search" rules in SKILL.md. A page that holds two
+   findings needs a split, one that repeats another page needs a merge,
+   and one whose fact no longer holds needs a delete.
+
+Done when every flagged page has its two prompts, both ranks, and one
+proposed fix.
+
+## 5. Propose
 
 Present the proposals to the creator. Give each one its evidence: the
 prompt excerpt, the page, the distance, and what the agent did.
 
 Page fixes:
 
+- Each flagged page from step 4: the audit line, the two prompts and
+  their ranks, and the proposed rewrite, split, merge, or delete.
 - A page often suggested and judged noise: narrow the page. Semantic
   search embeds the whole page file, frontmatter and body, so a summary
   edit alone moves its distance little. Split off the part that matches
@@ -94,7 +118,7 @@ Leave prompt text out of this section; it may hold private material.
 
 Done when every proposal is in front of the creator with its evidence.
 
-## 5. Apply
+## 6. Apply
 
 Apply each change only on the creator's yes: page fixes with
 `iirc write` and `iirc delete`, knob changes with `iirc knobs set`.
