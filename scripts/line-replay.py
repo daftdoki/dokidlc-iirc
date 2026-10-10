@@ -73,8 +73,10 @@ def load_replay(path: Path) -> dict[tuple[str, str], dict]:
 
 
 def sample(prompts: dict[tuple[str, str], dict], n: int | None, seed: int) -> list[dict]:
-    """N human prompts with a relevant page and N without; all of them when n is None."""
-    human = [prompts[k] for k in sorted(prompts) if prompts[k]["via"] == "prompt"]
+    """N human prompts with a relevant page and N without; all of them when n is None.
+
+    Only prompts the recall hook would search: a machine prompt or a short answer gets no line."""
+    human = [prompts[k] for k in sorted(prompts) if prompts[k]["via"] == "prompt" and iirc().skip_reason(prompts[k]["prompt"]) is None]
     if n is None:
         return human
     rng = random.Random(seed)
@@ -91,7 +93,7 @@ def passed_pages(repo: str, prompt: str) -> list[dict]:
     m = iirc()
     m.set_root(Path(repo))
     return [{"page": r["filename"], "store": m.row_store(r), "summary": r.get("summary", ""), "distance": r.get("distance"), "rule": r["rule"]}
-            for r in m.recall_verdicts(m.hybrid_search(prompt)) if r["verdict"] == "passed"]
+            for r in m.recall_verdicts(m.hybrid_search(m.person_text(prompt))) if r["verdict"] == "passed"]
 
 
 def page_rows(prompts: list[dict], cache: Path | None) -> dict[str, list[dict]]:

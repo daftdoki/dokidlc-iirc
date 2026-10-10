@@ -2592,3 +2592,16 @@ def test_tests_leave_no_cache_dirs(_real_cache, tmp_path_factory):
             return str(tmp_path_factory.getbasetemp()) in (real / name / "config.toml").read_text()
         return False
     assert [n for n in {p.name for p in real.glob("test-*")} - before if this_run(n)] == []
+
+
+# p5 step 3, supervisor fix: the sample holds only prompts recall would search
+def test_line_replay_samples_only_prompts_recall_searches(tmp_path):
+    lr = _line_replay()
+    replay = tmp_path / "replay.jsonl"
+    rows = [{"repo": str(tmp_path), "qid": q, "prompt": t, "via": "prompt", "page": "a.md", "label": "relevant"}
+            for q, t in [("human", "why does the recall hook time out when ollama unloads the model?"),
+                         ("machine", '<agent-message from="x">a hand-back about the recall hook timing out</agent-message>'),
+                         ("short", "yes")]]
+    replay.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert [p["qid"] for p in lr.sample(lr.load_replay(replay), None, 1)] == ["human"]
+
