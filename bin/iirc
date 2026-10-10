@@ -744,11 +744,12 @@ def eval_event(rows: list[dict]) -> None:
 
 def keep_prompt(prompt: str, **fields) -> None:
     """The first 300 characters of a prompt, in this session's own file, for tuning recall, to read
-    after the transcript is gone. Kept RETAIN_DAYS on this machine; never in the log or in git."""
+    after the transcript is gone. Kept RETAIN_DAYS on this machine; never in the log or in git.
+    The excerpt is redacted; the hash is the raw prompt's, so it still finds the prompt in the transcript."""
     try:
         d = state_dir() / "prompts"
         d.mkdir(parents=True, exist_ok=True)
-        row = {"ts": now_iso(), "prompt_hash": prompt_hash(prompt), "excerpt": clean(prompt, 300), **fields}
+        row = {"ts": now_iso(), "prompt_hash": prompt_hash(prompt), "excerpt": clean(redact(prompt), 300), **fields}
         with (d / f"{re.sub(r'[^A-Za-z0-9-]', '_', session_id())}.jsonl").open("a") as f:
             f.write(json.dumps(row, default=str) + "\n")
     except OSError:

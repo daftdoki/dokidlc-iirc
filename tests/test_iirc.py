@@ -3730,3 +3730,21 @@ def test_openai_host_sets_its_own_width(tmp_path, monkeypatch, capsys):
         iirc.main(["index"])
         assert "index current" in capsys.readouterr().out
         assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
+
+
+def test_saved_prompts_are_redacted(tmp_path, monkeypatch):
+    """A token in a prompt never reaches the prompts file, whether recall searched it or passed it by; the hash stays the raw prompt's, to join the transcript."""
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "p1")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
+    token = "ghp_" + "A1b2C3d4E5" * 4
+    prompts = [f"why does the push fail with my token {token} on the remote? " * 2, f"/login {token}"]
+    for prompt in prompts:
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": prompt})))
+        iirc.main(["recall"])
+    rows = [json.loads(l) for l in (tmp_path / "st" / "dokidlc-iirc" / "prompts" / "p1.jsonl").read_text().splitlines()]
+    assert [("skipped" in r) for r in rows] == [False, True]
+    assert all(token not in r["excerpt"] and "[REDACTED]" in r["excerpt"] for r in rows)
+    assert [r["prompt_hash"] for r in rows] == [iirc.prompt_hash(p) for p in prompts]
