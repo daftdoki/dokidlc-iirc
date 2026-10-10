@@ -3245,7 +3245,7 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
 def test_setup_offers_models(tmp_path, monkeypatch, capsys):
     import hashlib
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, any_status=False: False)
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
     monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
     answers = iter(["1", "1"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
@@ -3380,7 +3380,7 @@ def test_setup_default_order(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or answers.pop(0))
     monkeypatch.setattr(iirc, "model_present", lambda host, model, timeout=2.0: True)
     up = {"http://127.0.0.1:11434"}
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, any_status=False: base in up)
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: base in up)
     answers[:] = ["", ""]                                                   # Enter, Enter: ollama here, its first model
     iirc.main(["setup"])
     out = capsys.readouterr().out
@@ -3610,3 +3610,61 @@ def test_audit_skips_own_title_when_no_host_answers(tmp_path, monkeypatch, capsy
     assert ": own-title: " not in out and "hub.md: hub: " in out
     assert err == ""                                                    # no line per page
     assert out.splitlines()[-1] == "6 findings in 11 pages; 127.0.0.1:11434 does not answer: own-title skipped"
+
+
+# p5 review fixes, R1
+
+@contextlib.contextmanager
+def _refusing_openai(monkeypatch, get_status, post_status=None):
+    """An OpenAI-compatible host that answers GET with get_status and POST with post_status (default: the same)."""
+    import http.server
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def _send(self, status):
+            self.send_response(status); self.end_headers(); self.wfile.write(b'{"error": "refused"}')
+
+        def do_GET(self): self._send(get_status)
+        def do_POST(self): self._send(post_status or get_status)
+        def log_message(self, *a): pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": "qwen3-embedding", "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
+    iirc._RESOLVED = None
+    try:
+        yield f"127.0.0.1:{srv.server_port}"
+    finally:
+        srv.shutdown()
+        iirc._RESOLVED = None
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_openai_host_that_refuses_is_down(tmp_path, monkeypatch, capsys, status):
+    """A refusal or a server fault is not an answer: search and index say so, and doctor names the status."""
+    _vector_project(tmp_path, monkeypatch)
+    with _refusing_openai(monkeypatch, status) as where:
+        assert iirc.resolve_host()[2] is False
+        assert iirc.search_mode() == f"string only ({where} does not answer; `iirc setup` to fix)"
+        capsys.readouterr()
+        assert iirc.semantic_search("alpha") == []
+        assert "no embedding host answers" in capsys.readouterr().err
+        iirc.main(["index"])
+        assert "no embedding host answers" in capsys.readouterr().err
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        out = capsys.readouterr().out
+        assert f"FAIL embedding endpoint http://{where}" in out and f"HTTP {status}" in out
+
+
+def test_openai_host_without_the_model_fails_doctor(tmp_path, monkeypatch, capsys):
+    """A server with no route at / is alive, but doctor's test embed names the 404 it gives for a model it does not serve."""
+    _vector_project(tmp_path, monkeypatch)
+    with _refusing_openai(monkeypatch, 404) as where:
+        assert iirc.resolve_host()[2] is True
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        out = capsys.readouterr().out
+        assert f"FAIL embedding endpoint http://{where}" in out and "HTTP 404" in out
+    with _fake_openai(monkeypatch, "qwen3-embedding"):
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        assert "ok  embedding endpoint http://127.0.0.1:" in capsys.readouterr().out

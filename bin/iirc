@@ -208,8 +208,7 @@ def resolve_host() -> tuple[str, str, bool]:
         cands = host_candidates()
         _RESOLVED = (cands[0][0], cands[0][1], False)
         for url, source in cands:
-            # an OpenAI-compatible server may refuse a GET it has no route for; any answer within the timeout is alive
-            if host_answers(url, any_status=True) if backend == "openai" else host_answers(url):
+            if host_answers(url, no_route=True) if backend == "openai" else host_answers(url):
                 _RESOLVED = (url, source, True)
                 break
     return _RESOLVED
@@ -819,9 +818,12 @@ PROBE_TTL_DEAD = 600     # a dead host is not re-probed on every prompt
 PROBE_TTL_ALIVE = 60     # a live host is re-checked often enough to notice it went down
 
 
-def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = False, any_status: bool = False) -> bool:
+NO_ROUTE = (404, 405)    # an OpenAI-compatible server may have no route at /; a 401, 403, or 5xx is a refusal
+
+
+def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = False, no_route: bool = False) -> bool:
     """One GET with a short timeout, cached per host. A silent host returns False, never hangs. fresh=True skips the cache.
-    any_status=True counts an HTTP error status as an answer, for a server with no route at the URL probed."""
+    no_route=True also counts a NO_ROUTE status as an answer, for an OpenAI-compatible server."""
     data = read_state_json("hosts.json")
     now = datetime.now(UTC).timestamp()
     hit = data.get(base_url)
@@ -829,20 +831,27 @@ def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = Fal
         ttl = PROBE_TTL_ALIVE if hit.get("answers") else PROBE_TTL_DEAD
         if now - float(hit.get("ts", 0)) < ttl:
             return bool(hit.get("answers"))
-    answers = _probe(base_url, timeout, any_status)
-    data[base_url] = {"answers": answers, "ts": now}
+    answers, status = _probe(base_url, timeout, no_route)
+    data[base_url] = {"answers": answers, "status": status, "ts": now}
     write_state_json("hosts.json", data)
     return answers
 
 
-def _probe(base_url: str, timeout: float, any_status: bool = False) -> bool:
+def host_status(base_url: str) -> int | None:
+    """The HTTP status of the host's last probe, or None when nothing answered it."""
+    status = read_state_json("hosts.json").get(base_url, {}).get("status")
+    return status if isinstance(status, int) else None
+
+
+def _probe(base_url: str, timeout: float, no_route: bool = False) -> tuple[bool, int | None]:
+    """(answers, HTTP status or None)."""
     try:
         with urllib.request.urlopen(base_url + "/", timeout=timeout) as resp:
-            return resp.status == 200
-    except urllib.error.HTTPError:
-        return any_status
+            return resp.status == 200, resp.status
+    except urllib.error.HTTPError as e:
+        return no_route and e.code in NO_ROUTE, e.code
     except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, ValueError):
-        return False
+        return False, None
 
 
 def model_present(base_url: str, model: str, timeout: float = HOST_TIMEOUT) -> bool:
@@ -2766,7 +2775,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
         return
     if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
         print("note: OLLAMA_HOST is exported in this shell and wins over the setup file")
-    if not (host_answers(host, fresh=True, any_status=True) if backend == "openai" else host_answers(host, fresh=True)):
+    if not (host_answers(host, fresh=True, no_route=True) if backend == "openai" else host_answers(host, fresh=True)):
         if backend == "openai":
             print(f"{host} does not answer yet. Start the server there, then run `iirc doctor`.")
         else:
@@ -3316,6 +3325,17 @@ def suspect_pages(pages: list[Path]) -> list[str]:
         return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
 
 
+def embed_refusal(base: str, model: iirc_embed.Model) -> str | None:
+    """Why a test embed failed, or None when it worked. The probe's GET cannot see a 404 for a model the server does not serve."""
+    try:
+        iirc_embed._post(base + "/v1/embeddings", {"model": model.id, "input": ["iirc doctor"]}, iirc_embed.EMBED_TIMEOUT)
+    except urllib.error.HTTPError as e:
+        return f"a test embed got HTTP {e.code}"
+    except (urllib.error.URLError, OSError, ValueError):
+        return "a test embed got no embedding back"
+    return None
+
+
 def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     """The ollama host answers and has the model; with --fix, start ollama here and pull the model. True when the host answers."""
     base, source, up = resolve_host()
@@ -3478,8 +3498,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc setup --cpu")
     elif model.backend == "openai":
         base, source, up = resolve_host()
-        report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id})", up,
-               "check the endpoint, run `iirc setup` to choose another, or `iirc setup --substring`")
+        status = host_status(base)
+        why = embed_refusal(base, model) if up else f"it answered HTTP {status}" if status else None
+        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id})", up and why is None,
+                    (f"{why}; " if why else "") + "check the endpoint, run `iirc setup` to choose another, or `iirc setup --substring`")
     else:
         up = doctor_ollama(model, args.fix, report)
 
