@@ -1,14 +1,15 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pyyaml>=6"]
+# dependencies = ["numpy>=2", "pyyaml>=6"]
 # ///
 """The agent's iirc. The only iirc command an agent runs; on PATH as `iirc` while the plugin is enabled.
 
-A thin layer over memoryfield-tool (used as published, at the commit in
-iirc.pin). It generates the tool's per-machine config from the
-repository location, guards the embedding host, computes suspicion, and
-records what recall did so it can be tuned. It never reimplements storage, search, or indexing.
+A layer over memoryfield-tool (used as published, at the commit in
+iirc.pin), which keeps reading, writing, validating, and deleting pages.
+It generates the tool's per-machine config from the repository location,
+guards the embedding host, embeds and searches pages itself (iirc_embed.py),
+computes suspicion, and records what recall did so it can be tuned.
 
 Usage:
   iirc search QUERY...       ranked pages; several terms are searched separately and merged
@@ -47,8 +48,6 @@ import platform
 import re
 import shutil
 import socket
-import sqlite3
-import struct
 import subprocess
 import sys
 import tempfile
@@ -62,6 +61,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import iirc_embed  # noqa: E402  the vector store and the embedding backend, beside this script
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PIN_FILE = PLUGIN_ROOT / "iirc.pin"
@@ -435,10 +437,6 @@ def store_named(name: str) -> Store | None:
     return next((s for s in STORES if s.name == name), None)
 
 
-def store_by_field(field: str | None) -> Store | None:
-    return next((s for s in STORES if s.field == field), None)
-
-
 def live_stores() -> list[Store]:
     """Stores whose directory exists on this machine."""
     return [s for s in STORES if s.dir.is_dir()]
@@ -766,7 +764,8 @@ def tool_env(root: Path | None = None) -> dict[str, str]:
     root = root or ROOT
     env = dict(os.environ)
     env["MEMORYFIELD_TOOL_CONFIG"] = str(write_config(root))
-    env["OLLAMA_HOST"] = embedding_host()[0] if semantic_enabled() else NO_EMBEDDING_HOST
+    # iirc embeds and searches itself; the tool's background reindex after a write must fail, not embed
+    env["OLLAMA_HOST"] = NO_EMBEDDING_HOST
     return env
 
 
@@ -816,41 +815,48 @@ def require_stores() -> None:
 # --- search-side commands ---------------------------------------------------
 
 
-def filter_results(results: list[dict]) -> list[dict]:
-    """Drop index.md: its introduction text outranks real pages for generic queries."""
-    return [r for r in results if r.get("filename") != "index.md"]
-
-
 def distance_text(r: dict) -> str:
     """Substring fallback results carry no distance."""
     d = r.get("distance")
     return f"distance {d:.3f}" if isinstance(d, (int, float)) else "string match"
 
 
-def search_json(query: str) -> list[dict]:
-    """Semantic results from the tool, or nothing when no embedding host answers. Never calls the tool against a dead host."""
+SEARCH_REEMBED = 5     # changed pages a search embeds before it runs; more wait for the next index
+
+
+def vector_path(store: Store) -> Path:
+    return iirc_embed.store_path(cache_dir(), store.field)
+
+
+def store_pages(store: Store) -> dict[str, bytes]:
+    return {p.name: p.read_bytes() for p in list_pages(store.dir)}
+
+
+def update_vectors(store: Store, limit: int | None = None, full: bool = False):
+    """The store's vectors after embedding its new and changed pages (see iirc_embed.refresh)."""
+    return iirc_embed.refresh(vector_path(store), store_pages(store), embedding_host()[0], limit=limit, full=full)
+
+
+def semantic_search(query: str) -> list[dict]:
+    """Pages within the tool's 0.45 of the query, nearest first, or nothing when no embedding host answers.
+
+    A page changed since the last index is embedded first when at most
+    SEARCH_REEMBED changed: on a warm model the five largest agent-builder
+    pages took about 0.2 s in one request (2026-10-09). More than that came
+    from a pull, and they stay out until `iirc index`, so a recall never
+    spends the hook's 5 s limit on a batch of pages.
+    """
     if not require_host():
         return []
-    proc = tool("search", "--json", query, check=False)
-    if proc.returncode not in (0, 1):
-        die(proc.stderr.strip() or "search failed")
-    rows = filter_results(parse_results(proc.stdout))
-    for r in rows:
-        s = store_by_field(r.get("field"))
-        r["store"] = s.name if s else default_store_name()
+    qvec = iirc_embed.embed(embedding_host()[0], [iirc_embed.query_text(query)])
+    if qvec is None:
+        return []
+    rows = []
+    for store in live_stores():
+        for d, name in iirc_embed.distances(update_vectors(store, limit=SEARCH_REEMBED), qvec[0]):
+            fm, _ = parse_page((store.dir / name).read_text())
+            rows.append({"field": store.field, "filename": name, "summary": fm.get("summary", ""), "distance": d, "store": store.name, "fm": fm})
     return rows
-
-
-def parse_results(stdout: str) -> list[dict]:
-    """The tool prints 'embedding failed: ...' on stdout before the JSON when it falls back."""
-    start = stdout.find("[")
-    if start < 0:
-        return []
-    try:
-        results = json.loads(stdout[start:])
-    except json.JSONDecodeError:
-        return []
-    return results if isinstance(results, list) else []
 
 
 STOPWORDS = set("the a an and or of to in on for with from by at is are was were be been it its this that these those how why what when where which who does do did can could should would will not no yes my our your their his her".split())
@@ -907,7 +913,7 @@ def hybrid_search(query: str) -> list[dict]:
     Ranking: found by both paths with a rare term first, then semantic by distance, then
     string-only by how many rare terms matched. Each row says how it was found under 'via'.
     """
-    semantic = search_json(query) if semantic_enabled() else []
+    semantic = semantic_search(query) if semantic_enabled() else []
     strings = string_search(query_terms(query))
     merged: dict[tuple[str, str], dict] = {}
     for r in semantic:
@@ -2086,15 +2092,15 @@ def cmd_doubt(args: argparse.Namespace) -> None:
 # --- write-side commands ----------------------------------------------------
 
 
-def reindex() -> None:
-    """Synchronous index so the next search sees the change. Nothing to do in substring mode."""
+def reindex(full: bool = False) -> None:
+    """Embed new and changed pages so the next search sees them; `full` embeds every page. Nothing to do in substring mode.
+    A failed embed is silent, as the tool's index was: those pages stay out of search until the next index."""
     if not semantic_enabled():
         return
     if not require_host():
         return
-    proc = tool("index", check=False)
-    if proc.returncode:
-        die(proc.stderr.strip() or "index failed")
+    for store in live_stores():
+        update_vectors(store, full=full)
 
 
 def write_store(flag: str | None) -> Store:
@@ -2234,7 +2240,7 @@ def cmd_index(args: argparse.Namespace) -> None:
     require_stores()
     for store in live_stores():
         stamp_index(store.dir)
-    reindex()
+    reindex(full=True)
     for store in live_stores():
         save(store, "iirc: index")
     print("index current")
@@ -2870,43 +2876,29 @@ PAIR_BUDGET = 2.0        # seconds the session-start line may spend comparing pa
 NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
 DUPLICATE = 0.07         # a pair this close turns the brief yellow; a reworded copy of one finding measured 0.047,
                          # two findings on one topic 0.088 (2026-10-08); pairs between are doctor notes only
-VECTOR_FLOATS = 768
 
 
-def index_rows(columns: tuple[str, ...]) -> list[tuple]:
-    """(label, *columns) for each indexed page of each live store, from memoryfield-tool's own index.
+def index_rows() -> list[tuple[str, str, object]]:
+    """(label, sha256, vector) for each embedded page of each live store, from the vector store.
 
-    iirc.pin fixes the layout. A missing file, a missing table, or a locked
-    database gives no rows for that store, so a hook stays silent.
+    A missing or unreadable store gives no rows for that store, so a hook stays silent.
     """
-    rows: list[tuple] = []
-    code = read_pin().get("model_code", "")
+    rows: list[tuple[str, str, object]] = []
     for store in live_stores():
-        path = cache_dir() / "memoryfield-tool" / "indexes" / store.field / f"{code}.sqlite3"
-        if not path.is_file():
-            continue
-        try:
-            con = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=0.2)
-            try:
-                found = con.execute(f"SELECT filename, {', '.join(columns)} FROM pages").fetchall()
-            finally:
-                con.close()
-        except sqlite3.Error:
-            continue
-        rows += [(page_label(store.name, r[0]), *r[1:]) for r in found if r[0] != "index.md"]
+        v = iirc_embed.load(vector_path(store))
+        if v is not None:
+            rows += [(page_label(store.name, n), h, vec) for n, h, vec in zip(v.names, v.sha, v.vecs)]
     return rows
 
 
 def page_vectors() -> dict[str, list[float]]:
-    """Unit vector per page label. A blob of another size is left out."""
+    """Unit vector per page label."""
     vectors: dict[str, list[float]] = {}
-    for label, blob in index_rows(("embedding",)):
-        if not isinstance(blob, bytes) or len(blob) != VECTOR_FLOATS * 4:
-            continue
-        v = struct.unpack(f"<{VECTOR_FLOATS}f", blob)
-        norm = math.sqrt(sum(x * x for x in v))
+    for label, _, v in index_rows():
+        vals = v.tolist()
+        norm = math.sqrt(sum(x * x for x in vals))
         if norm:
-            vectors[label] = [x / norm for x in v]
+            vectors[label] = [x / norm for x in vals]
     return vectors
 
 
@@ -2919,7 +2911,7 @@ def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]
     with no pairs and keeps nothing; a run with no budget fills the cache.
     """
     start = time.monotonic()
-    hashes = sorted((label, h.hex() if isinstance(h, bytes) else str(h)) for label, h in index_rows(("sha256_hash",)))
+    hashes = sorted((label, h) for label, h, _ in index_rows())
     if not hashes:
         return []
     digest = hashlib.sha256(json.dumps([NEAR_DUPLICATE, hashes]).encode()).hexdigest()
@@ -3069,7 +3061,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         pin = read_pin()
         if shutil.which("memoryfield-tool") is not None and not pin_matches(pin, installed_rev()):
             # every tool call refuses until the pin matches, and the hooks swallow that; name the fix here
-            parts.append(f"memoryfield-tool is not at the pin {pin['tool_rev'][:7]}; every write and semantic search refuses until `iirc doctor --fix` runs.")
+            parts.append(f"memoryfield-tool is not at the pin {pin['tool_rev'][:7]}; every write refuses until `iirc doctor --fix` runs.")
         if top:
             parts.append(f"Topics: {top}.")
         if suspects:
@@ -3189,7 +3181,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         for d, first, second in flagged_pairs():
             what = "near-duplicate pages" if d <= DUPLICATE else "similar pages, below the warning"
             print(f"note {what} (distance {d:.3f}): {first} | {second}")
-        if live_stores() and not index_rows(("filename",)):
+        if live_stores() and not index_rows():
             print("note no index to compare pages with (iirc index builds it)")
 
     claude_md = ROOT / "CLAUDE.md"
@@ -3202,7 +3194,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         report("field validates", proc.returncode == 0, (proc.stdout + proc.stderr).strip().replace("\n", " "))
         if args.fix and up:
             reindex()
-    idx = cache_dir() / "memoryfield-tool" / "indexes"
+    idx = cache_dir() / "dokidlc-iirc" / "vectors"
     print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc index`)")
     if not ok and not args.fix:
         print(FIX_HINT)

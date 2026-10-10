@@ -109,11 +109,6 @@ def test_pin_matches_prefix_either_way():
     assert not iirc.pin_matches(pin, None)
 
 
-def test_filter_results_drops_index_md():
-    rows = [{"filename": "index.md"}, {"filename": "a.md"}]
-    assert iirc.filter_results(rows) == [{"filename": "a.md"}]
-
-
 def test_tokens_estimate():
     assert iirc.tokens(0) == 0
     assert iirc.tokens(4) == 1
@@ -391,14 +386,15 @@ def test_resolve_host_skips_a_dead_env_host(tmp_path, monkeypatch):
     iirc._RESOLVED = None
 
 
-def test_search_json_never_calls_the_tool_on_a_dead_host(tmp_path, monkeypatch):
+def test_semantic_search_never_embeds_on_a_dead_host(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: False)
     iirc._RESOLVED = None
     called = []
     monkeypatch.setattr(iirc, "tool", lambda *a, **k: called.append(a))
-    assert iirc.search_json("anything") == []
+    monkeypatch.setattr(iirc.iirc_embed, "embed", lambda *a, **k: called.append(a))
+    assert iirc.semantic_search("anything") == []
     assert called == []
     iirc._RESOLVED = None
 
@@ -441,13 +437,6 @@ def test_merge_results_unions_and_ranks():
     assert rows[0]["matched"] == ["one", "two"]
 
 
-def test_parse_results_skips_the_fallback_notice():
-    noisy = 'embedding failed: Failed to connect to Ollama.\n[\n  {"filename": "a.md", "summary": "A", "distance": null}\n]\n'
-    assert iirc.parse_results(noisy) == [{"filename": "a.md", "summary": "A", "distance": None}]
-    assert iirc.parse_results("") == []
-    assert iirc.parse_results("garbage") == []
-
-
 def test_query_terms_keeps_identifiers_and_parts():
     assert iirc.query_terms("Why does install fail on a mac with pysqlite3-binary?") == ["install", "fail", "mac", "pysqlite3-binary", "pysqlite3", "binary"]
     assert iirc.query_terms("the memoryfield-tool wrapper") == ["memoryfield-tool", "memoryfield", "tool", "wrapper"]
@@ -472,7 +461,7 @@ def test_string_search_and_hybrid_ranking(tmp_path, monkeypatch):
     body = iirc.string_search(["i113"])
     assert [r["filename"] for r in body] == ["body-only.md"] and body[0]["head_terms"] == []
     monkeypatch.setattr(iirc, "semantic_enabled", lambda: True)
-    monkeypatch.setattr(iirc, "search_json", lambda q: [
+    monkeypatch.setattr(iirc, "semantic_search", lambda q: [
         {"filename": "unrelated.md", "summary": "nothing here", "distance": 0.30},
         {"filename": "pysqlite3-install-override.md", "summary": "the uv override", "distance": 0.40},
     ])
@@ -486,7 +475,7 @@ def test_string_search_and_hybrid_ranking(tmp_path, monkeypatch):
     for n in "abcd":
         (field / f"config-{n}.md").write_text(f"---\ntitle: Config note {n}\nsummary: x\n---\nthe config\n")
     monkeypatch.setattr(iirc, "semantic_enabled", lambda: True)
-    monkeypatch.setattr(iirc, "search_json", lambda q: [
+    monkeypatch.setattr(iirc, "semantic_search", lambda q: [
         {"filename": "config-a.md", "summary": "x", "distance": 0.35},
         {"filename": "unrelated.md", "summary": "nothing here", "distance": 0.20},
     ])
@@ -563,7 +552,7 @@ def test_verify_clears_a_changed_ref(tmp_path, monkeypatch, capsys):
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-qam", "two"], check=True)
     assert [s for s, _ in iirc.suspicion(iirc.page_frontmatter("cited.md"), tmp_path)] == ["ref"]
     monkeypatch.setattr(iirc, "tool", _fake_tool(field))
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     iirc.main(["verify", "cited.md"])
     assert "verified cited.md" in capsys.readouterr().out
     fm = iirc.page_frontmatter("cited.md")
@@ -1183,7 +1172,7 @@ def test_write_refuses_a_name_in_another_store(tmp_path, monkeypatch, capsys):
     project, agent = _two_stores(tmp_path, monkeypatch)
     _page(agent.dir, "taken.md")
     monkeypatch.setattr(iirc, "tool", _fake_tool(project.dir))
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     argv = ["write", "taken.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding"]
     monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
     with pytest.raises(SystemExit):
@@ -1248,7 +1237,7 @@ def _project(tmp_path, monkeypatch):
     _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "iirc")
     iirc.set_root(tmp_path)
     monkeypatch.setattr(iirc, "tool", _fake_tool(field))
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     return field
 
 
@@ -1354,23 +1343,20 @@ def test_brief_does_not_warn_on_page_count(tmp_path, monkeypatch, capsys):
     assert out.startswith("iirc: 51 pages") and "is a lot" not in out
 
 
-def _index(tmp_path, monkeypatch, vectors, table="pages", root=None):
-    """memoryfield-tool's index for the project store: one row per page, 768 float32 values each."""
-    import sqlite3, struct
+def _index(tmp_path, monkeypatch, vectors, root=None):
+    """The vector store for the project store: one row per page, 768 float32 values each."""
+    import numpy as np
     monkeypatch.setattr(iirc, "cache_dir", lambda: tmp_path / "cache")
-    path = tmp_path / "cache" / "memoryfield-tool" / "indexes" / iirc.field_name(root or tmp_path) / f"{iirc.read_pin()['model_code']}.sqlite3"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path)
-    con.execute(f"CREATE TABLE {table} (filename TEXT PRIMARY KEY, frontmatter JSON NOT NULL, last_modified DATETIME NOT NULL, sha256_hash BLOB NOT NULL, embedding BLOB NOT NULL)")
-    for name, head in vectors.items():
-        blob = struct.pack("<768f", *(list(head) + [0.0] * (768 - len(head))))
-        con.execute(f"INSERT INTO {table} VALUES (?, '{{}}', '2026-10-03', ?, ?)", (name, name.encode(), blob))
-    con.commit(); con.close()
+    path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(root or tmp_path))
+    rows = np.zeros((len(vectors), 768), dtype=np.float32)
+    for i, head in enumerate(vectors.values()):
+        rows[i, :len(head)] = head
+    iirc.iirc_embed.save(path, iirc.iirc_embed.Vectors(list(vectors), [f"sha-{n}" for n in vectors], rows))
     return path
 
 
-# a.md and b.md are 0.05 apart; far.md is at distance 1 from both; index.md never counts
-_CLOSE = {"a.md": (1.0, 0.0), "b.md": (0.95, 0.3122499), "far.md": (0.0, 0.0, 1.0), "index.md": (1.0, 0.0)}
+# a.md and b.md are 0.05 apart; far.md is at distance 1 from both
+_CLOSE = {"a.md": (1.0, 0.0), "b.md": (0.95, 0.3122499), "far.md": (0.0, 0.0, 1.0)}
 
 
 def test_near_duplicates_names_the_close_pair(tmp_path, monkeypatch):
@@ -1397,8 +1383,10 @@ def test_near_duplicates_without_an_index_is_empty(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "cache_dir", lambda: tmp_path / "cache")
     assert iirc.near_duplicates() == []                      # no index file
-    _index(tmp_path, monkeypatch, _CLOSE, table="other")
-    assert iirc.near_duplicates() == []                      # a layout the pinned tool does not write
+    path = _index(tmp_path, monkeypatch, _CLOSE)
+    import numpy as np
+    np.savez(path, names=np.asarray(["a.md"]), vecs=np.zeros((1, 768), dtype=np.float32))
+    assert iirc.near_duplicates() == []                      # a file this version did not write
 
 
 def test_near_duplicates_reuses_the_cached_result(tmp_path, monkeypatch):
@@ -1546,7 +1534,7 @@ def test_push_store_conflict_keeps_the_commit(tmp_path, monkeypatch, capsys):
 
 def test_sync_commits_pulls_and_pushes(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     _page(agent.dir, "loose.md")
     _push_page(_other_clone(tmp_path, bare), "theirs.md")
     iirc.main(["sync"])
@@ -1855,7 +1843,7 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
         (b / "dokidlc-memory").mkdir(parents=True); (b / "dokidlc-memory" / "kept.txt").write_text("x\n")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
     reindexed = []
-    monkeypatch.setattr(iirc, "reindex", lambda: reindexed.append(1))
+    monkeypatch.setattr(iirc, "reindex", lambda **k: reindexed.append(1))
     commits = _git(repo, "rev-list", "--count", "HEAD")
     assert MIGRATION_LINE in _brief(["doctor", "--brief"], monkeypatch, capsys)
 
@@ -1902,7 +1890,7 @@ def test_migrate_never_stages_machine_dirs(tmp_path, monkeypatch, capsys):
     for var, sub in (("XDG_CONFIG_HOME", ".config"), ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state")):
         monkeypatch.setenv(var, str(repo / sub)); (repo / sub / "dokidlc-memory").mkdir(parents=True); (repo / sub / "dokidlc-memory" / "f.txt").write_text("x\n")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo))
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     iirc.main(["migrate"]); capsys.readouterr()
     assert (repo / ".local" / "share" / "dokidlc-iirc").is_dir()
     assert "dokidlc" not in _git(repo, "diff", "--cached", "--name-only")
@@ -2440,7 +2428,7 @@ def _write_page(monkeypatch, tmp_path, name, title, summary, body):
     import io
     project, _ = _two_stores(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "tool", _fake_tool(project.dir))
-    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr(iirc, "reindex", lambda **k: None)
     monkeypatch.setattr("sys.stdin", io.StringIO(body))
     iirc.main(["write", name, "--title", title, "--summary", summary, "--topics", "t", "--kind", "finding"])
     return project.dir / name
@@ -2882,3 +2870,120 @@ def test_recall_names_a_page_once_per_session(tmp_path, monkeypatch):
     # the replay sweep sees no history
     hit("a")
     assert [r["verdict"] for r in iirc.recall_verdicts(iirc.hybrid_search(""), cap=1)] == ["passed"]
+
+
+# p5 step 23
+
+_REAL_REINDEX = iirc.reindex
+_WORDS = ("alpha", "beta", "gamma")
+
+
+@contextlib.contextmanager
+def _fake_ollama(monkeypatch):
+    """An ollama that answers / and /api/embed: each text's vector counts the _WORDS in it. Yields the inputs it embedded."""
+    import http.server
+    seen: list[str] = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(b"Ollama is running")
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            assert self.path == "/api/embed" and body["model"] == "nomic-embed-text" and body["truncate"] is True
+            seen.extend(body["input"])
+            vecs = [[t.count(w) + 0.0 for w in _WORDS] + [0.01] for t in body["input"]]
+            out = json.dumps({"embeddings": vecs}).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+
+        def log_message(self, *a): pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{srv.server_port}")
+    iirc._RESOLVED = None
+    try:
+        yield seen
+    finally:
+        srv.shutdown()
+        iirc._RESOLVED = None
+
+
+def _vector_project(tmp_path, monkeypatch):
+    field = _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "reindex", _REAL_REINDEX)
+    monkeypatch.setenv("IIRC_CACHE_DIR", str(tmp_path / "cache"))
+    (field / "alpha-notes.md").write_text("---\ntitle: Alpha notes\nsummary: about alpha\n---\nalpha alpha\n")
+    (field / "beta-notes.md").write_text("---\ntitle: Beta notes\nsummary: about beta\n---\nbeta\n")
+    return field
+
+
+def test_vector_store_round_trip(tmp_path, monkeypatch):
+    import hashlib
+    import numpy as np
+    field = _vector_project(tmp_path, monkeypatch)
+    with _fake_ollama(monkeypatch) as seen:
+        iirc.reindex()
+    store = iirc.STORES[0]
+    path = iirc.vector_path(store)
+    assert path == tmp_path / "cache" / "dokidlc-iirc" / "vectors" / store.field / "nomic-embed-text.npz"
+    v = iirc.iirc_embed.load(path)
+    assert list(v.names) == ["alpha-notes.md", "beta-notes.md"]           # index.md is never a page
+    assert list(v.sha) == [hashlib.sha256((field / n).read_bytes()).hexdigest() for n in v.names]
+    assert v.vecs.dtype == np.float32 and v.vecs.shape == (2, 4)
+    assert sorted(seen) == sorted("search_document: " + (field / n).read_text() for n in v.names)
+    # the page text is cut at 8,192 bytes, as memoryfield-tool cuts it
+    assert iirc.iirc_embed.doc_text(b"x" * 9000) == "search_document: " + "x" * 8192
+    iirc.iirc_embed.save(path, v._replace(names=v.names[:1], sha=v.sha[:1], vecs=v.vecs[:1]))
+    back = iirc.iirc_embed.load(path)
+    assert list(back.names) == ["alpha-notes.md"] and (back.vecs == v.vecs[:1]).all()
+
+
+def test_changed_page_reembeds(tmp_path, monkeypatch):
+    field = _vector_project(tmp_path, monkeypatch)
+    with _fake_ollama(monkeypatch) as seen:
+        iirc.reindex()
+        seen.clear()
+        iirc.reindex()
+        assert seen == []                                                  # nothing changed, nothing embedded
+        (field / "beta-notes.md").write_text("---\ntitle: Beta notes\nsummary: about beta\n---\nbeta gamma gamma\n")
+        (field / "alpha-notes.md").unlink()
+        iirc.reindex()
+        assert seen == ["search_document: " + (field / "beta-notes.md").read_text()]
+        v = iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0]))
+        assert list(v.names) == ["beta-notes.md"] and list(v.vecs[0][:3]) == [0.0, 2.0, 2.0]
+        # a page changed since the last index is embedded before a search uses it
+        (field / "gamma-notes.md").write_text("---\ntitle: Gamma notes\nsummary: about gamma\n---\ngamma\n")
+        seen.clear()
+        rows = iirc.hybrid_search("gamma")
+        assert seen == ["search_query: gamma", "search_document: " + (field / "gamma-notes.md").read_text()] or \
+            seen == ["search_document: " + (field / "gamma-notes.md").read_text(), "search_query: gamma"]
+        assert "gamma-notes.md" in [r["filename"] for r in rows if "semantic" in r["via"]]
+        assert "gamma-notes.md" in iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0])).names
+        # more changed pages than SEARCH_REEMBED wait for the next index, so a recall stays inside the hook's limit
+        for i in range(iirc.SEARCH_REEMBED + 1):
+            (field / f"gamma-{i}.md").write_text(f"---\ntitle: Gamma {i}\nsummary: g\n---\ngamma\n")
+        seen.clear()
+        rows = iirc.hybrid_search("gamma")
+        assert seen == ["search_query: gamma"]
+        assert not [r for r in rows if "semantic" in r["via"] and r["filename"].startswith("gamma-") and r["filename"] != "gamma-notes.md"]
+
+
+def test_hybrid_search_in_process(tmp_path, monkeypatch):
+    import math
+    _vector_project(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(iirc, "tool", lambda *a, **k: calls.append(a) or pytest.fail("search never calls memoryfield-tool"))
+    with _fake_ollama(monkeypatch) as seen:
+        iirc.reindex()
+        seen.clear()
+        rows = iirc.hybrid_search("alpha")
+        assert seen == ["search_query: alpha"]
+        semantic = [r for r in rows if "semantic" in r["via"]]
+        # beta-notes is at distance near 1, past the 0.45 the tool returned at most
+        assert [r["filename"] for r in semantic] == ["alpha-notes.md"]
+        q, p = [1, 0, 0, 0.01], [3, 0, 0, 0.01]                                # "alpha" once; the page says it three times
+        cos = sum(a * b for a, b in zip(q, p)) / math.sqrt(sum(a * a for a in q) * sum(b * b for b in p))
+        r = semantic[0]
+        assert abs(r["distance"] - (1 - cos)) < 1e-6 and r["store"] == "project" and r["summary"] == "about alpha"
+        assert iirc.tool_env()["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST    # the tool's own reindex never reaches the host
+    assert calls == []
