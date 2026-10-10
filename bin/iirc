@@ -2634,7 +2634,8 @@ OLD_INVOCATIONS = {
     "nudge": "remind-to-write", "nudge --stop": "remind-to-write --at stop", "nudge --compact": "remind-to-write --at compaction",
     "nudge --summary": "show-compaction-instructions",
 }
-OLD_COMMAND_RE = re.compile(r"`memory (" + "|".join(re.escape(k) for k in sorted(OLD_INVOCATIONS, key=len, reverse=True)) + r")(?![\w-])")
+# any run of spaces between the tokens; the match is looked up with single spaces
+OLD_COMMAND_RE = re.compile(r"`memory\s+(" + "|".join(r"\s+".join(map(re.escape, k.split())) for k in sorted(OLD_INVOCATIONS, key=len, reverse=True)) + r")(?![\w-])")
 OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
 SUGGESTED_COMMIT = 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
 
@@ -2690,7 +2691,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         rewritten = 0
         for page in list_pages(store.dir):
             text = page.read_text()
-            new_text = OLD_COMMAND_RE.sub(lambda m: "`iirc " + OLD_INVOCATIONS[m.group(1)], text)
+            new_text = OLD_COMMAND_RE.sub(lambda m: "`iirc " + OLD_INVOCATIONS[" ".join(m.group(1).split())], text)
             if new_text != text:
                 page.write_text(new_text)
                 rewritten += 1

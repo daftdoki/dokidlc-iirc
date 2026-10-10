@@ -1865,7 +1865,7 @@ def _old_layout(root):
     (root / ".memory" / "index.md").write_text("---\ntitle: Memory\n---\n\n<!-- memory format 1, written by memory abc1234 on 2026-10-01 -->\n")
     (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`, `memory pull x`, `memory approve p.md`, `memory index`, `memory setup --local`, `memory stores`, `memory stats`, `memory recall`, and `memory nudge`; memory as a word stays.\n"
                                               "Hooks: `memory stats --snapshot --hook`, `memory stats --session`, `memory recall --success`, `memory recall --failure`,\n"
-                                              "`memory nudge --stop`, `memory nudge --compact`, `memory nudge --summary`, `memory index --vectors`, `memory stores add x u`.\n")
+                                              "`memory nudge --stop`, `memory nudge --compact`, `memory nudge --summary`, `memory index --vectors`, `memory stores add x u`, `memory stats  --snapshot`.\n")
     (root / ".claude").mkdir()
     (root / ".claude" / "memory.toml").write_text('ui = true\n\n[stores.project]\nkind = "project"\npath = ".memory"\n')
     (root / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"memory@dokidlc": True, "questlog@dokidlc": True}}, indent=2) + "\n")
@@ -1925,7 +1925,7 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     assert "`iirc show-page-stores`" in page and "`iirc summarize-page-usage`" in page and "`iirc suggest-pages`" in page and "`iirc remind-to-write`" in page
     for new in ("`iirc record-session-summary --hook`", "`iirc summarize-session-usage`", "`iirc record-command-success`", "`iirc suggest-pages --failure`",
                 "`iirc remind-to-write --at stop`", "`iirc remind-to-write --at compaction`", "`iirc show-compaction-instructions`",
-                "`iirc rebuild-search-index --vectors-only`", "`iirc add-remote-store x u`"):
+                "`iirc rebuild-search-index --vectors-only`", "`iirc add-remote-store x u`", "`iirc record-session-summary`."):
         assert new in page, new
     assert "iirc format" in (repo / ".iirc" / "index.md").read_text() and reindexed
     for b in bases:
