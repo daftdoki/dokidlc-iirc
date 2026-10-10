@@ -276,6 +276,8 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).toContain('status-line on · max-suggested 4')
   expect(helpText).toContain('/iirc max-suggested N')
   for (const cmd of ['tune', 'audit', 'setup', 'cost']) expect(helpText).toContain(`/iirc ${cmd} `)
+  expect(helpText).toContain('status-line on · max-suggested 4 · search semantic+keyword')
+  expect((helpText ?? '').indexOf('/iirc setup')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({
       plugin: 'iirc',
@@ -358,9 +360,10 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
     props: { command: 'iirc', args: 'help', text: 'x', isErrored: false },
   })
   expect(await help.find({ text: '/iirc max-suggested N' })).toBeDefined()
-  // commands that go to the skill have a heading of their own, with asking in words
-  expect(await help.find({ text: 'WITH CLAUDE' })).toBeDefined()
+  // tune and audit are maintenance; setup is a setting, shown with the search mode in force
+  expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
   for (const cmd of ['tune', 'audit', 'setup', 'cost', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  expect(await help.find({ text: 'search' })).toBeDefined()
 })
 
 test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {

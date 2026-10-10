@@ -94,16 +94,18 @@ const DEMO_HEALTH: IircHealth = {
 // pages the card names under SUGGESTED, NOT READ, and under TRUST
 const LIST_MAX = 3
 // the commands /iirc runs directly, as the card and the text help list them
-// WITH CLAUDE: commands that go to the skill, so Claude runs them and asks what it needs
-const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP' | 'WITH CLAUDE'][] = [
+// tune and audit go to the skill, which runs them and asks for each fix; the rest run directly
+const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
   ['doctor --fix', 'install or repair what doctor finds', 'MAINTENANCE'],
   ['doubt', 'pages that may be wrong', 'MAINTENANCE'],
+  ['audit', 'pages search shows badly, each with its fix', 'MAINTENANCE'],
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
   ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
   ['index', 'rebuild the search index', 'MAINTENANCE'],
   ['knobs', "the recall gate's distances and ranges", 'MAINTENANCE'],
+  ['tune', 'judge what recall suggested, then tune it', 'MAINTENANCE'],
   ['cost', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],
@@ -111,9 +113,6 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP' | 'WITH CLAUDE'][] = 
   ['open', 'unfold the latest suggested pages', 'LOOK UP'],
   ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
-  ['tune', 'judge what recall suggested, then tune it', 'WITH CLAUDE'],
-  ['audit', 'pages search shows badly, each with its fix', 'WITH CLAUDE'],
-  ['setup', 'the embedding model, or substring search', 'WITH CLAUDE'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
@@ -123,7 +122,7 @@ const TAGLINE_TO = '#a78bfa'
 // the card's frame is the gradient's violet end; the STATUS chip carries the health color
 const FRAME = '#a78bfa'
 const EXAMPLES = ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"]
-const MORE_HINT = 'settings, maintenance, look-up, and tuning'
+const MORE_HINT = 'settings, maintenance, and look-up'
 const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
@@ -290,9 +289,10 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `status-line ${shown} · max-suggested ${max}`,
+    `status-line ${shown} · max-suggested ${max} · search ${s?.mode ?? '?'}`,
     '/iirc status-line on|off  show or hide the line under the prompt',
     '/iirc max-suggested N     pages recall suggests at most (1-10)',
+    '/iirc setup               the embedding model, or substring search',
     ...COMMANDS.map(([cmd, what]) => `/iirc ${cmd.padEnd(20)}${what}`),
     "/iirc <request>           ask iirc in words: search, remember, what's out of date",
   ].join('\n')
@@ -1004,12 +1004,13 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
-      {(['MAINTENANCE', 'LOOK UP', 'WITH CLAUDE'] as const).map(group => (
+      {setting('search', s?.mode ?? '?', '/iirc setup')}
+      {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>
           {heading(group)}
           {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => command(`/iirc ${cmd}`, what))}
-          {group === 'WITH CLAUDE' && command('/iirc <request>', REQUEST_HINT)}
+          {group === 'LOOK UP' && command('/iirc <request>', REQUEST_HINT)}
         </Box>
       ))}
     </Box>
@@ -1090,7 +1091,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     widths.push(...factWidths)
     if (missed.length > 0) widths.push(2 + 'SUGGESTED, NOT READ'.length, ...missed.map(([name]) => 2 + 5 + name.replace(/\.md$/, '').length))
   } else {
-    widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length))
+    widths.push(2 + CMD_COL + 24 + Math.max(2, `up to ${max ?? '?'}`.length, (s?.mode ?? '?').length))
     widths.push(...COMMANDS.map(([, what]) => 2 + CMD_COL + what.length), 2 + CMD_COL + REQUEST_HINT.length)
   }
   // as wide as the widest row, but never wider than the terminal: past that, rows wrap inside the frame

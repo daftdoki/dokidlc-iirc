@@ -192,7 +192,7 @@ The `command.run` handler in
 |---|---|
 | `/iirc` | The short card: ask in words, pointers to help and status, this session's recall hit rate and average match, and the page count. |
 | `/iirc status` | Every number: the status chip, TRUST (suspect pages), each store's uncommitted and unpushed state, the session counts, the hit rate, and SUGGESTED, NOT READ. It runs `iirc doctor --health` first. |
-| `/iirc help` | The two settings with their current values, the commands `/iirc` runs directly, and under WITH CLAUDE the ones that go to the skill. |
+| `/iirc help` | The three settings with their current values, then the maintenance and look-up commands. |
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
 | `/iirc status-line` | Whether the line under the prompt is on or off. |
 | `/iirc status-line on`, `/iirc status-line off` | Shows or hides that line, on this machine. |
