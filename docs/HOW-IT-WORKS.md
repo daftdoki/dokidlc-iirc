@@ -66,7 +66,7 @@ frequency is the signal an injected record exploits. See
 
 Hooks fail open, then say so. A hook never blocks a prompt or a command.
 `log_event`, `eval_event`, and `keep_prompt` never raise, and
-`cmd_suggest_pages` and `cmd_record_command_success` catch every exception. A bad `.claude/iirc.toml` silences
+`hook_entry` catches every exception in the hook commands. A bad `.claude/iirc.toml` silences
 the hooks, and the session-start brief says so. A suggestion line killed at its
 time limit is logged. See [Session start](#session-start-and-subagent-start).
 

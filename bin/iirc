@@ -342,9 +342,12 @@ def recall_table() -> str:
     return iirc_embed.table_name(active_model().id)
 
 
-def table_header(table: str) -> str:
-    """suggestions.NAME as a TOML table header names it; a name with a dot is quoted, or TOML reads the dot as nesting."""
-    return f"suggestions.{table}" if TABLE_KEY_RE.fullmatch(table) else f'suggestions."{table}"'
+def table_header(table: str, word: str = "suggestions") -> str:
+    """suggestions.NAME as a TOML table header names it; a name with a dot is quoted, or TOML reads the dot as nesting.
+    `word` "recall" names the old table; an empty table is the flat [recall]."""
+    if not table:
+        return word
+    return f"{word}.{table}" if TABLE_KEY_RE.fullmatch(table) else f'{word}."{table}"'
 
 
 RECALL: dict[str, float] = {k: v[0] for k, v in knob_spec().items()}
@@ -390,24 +393,24 @@ def move_old_knobs(text: str) -> tuple[str, list[str]]:
     so its comments stay. Beside an existing table, each old key moves on its own and the new table's value wins.
     """
     lines = text.splitlines()
-    olds = [(i, recall_table_of(line) or FLAT_TABLE) for i, line in enumerate(lines) if recall_table_of(line) is not None]
+    olds = [(i, t or FLAT_TABLE) for i, line in enumerate(lines) if (t := table_of(line, "recall")) is not None]
     if not olds:
         return text, []
-    have = {suggestions_table_of(line) for line in lines} - {None}
+    have = {table_of(line, "suggestions") for line in lines} - {None}
     targets = [t for _, t in olds]
     notes, renamed = [], set()
     for i, t in olds:
         if targets.count(t) == 1 and t not in have:
-            old = "recall" if recall_table_of(lines[i]) == "" else f"recall.{t}" if TABLE_KEY_RE.fullmatch(t) else f'recall."{t}"'
+            old = table_header(table_of(lines[i], "recall"), "recall")
             lines[i] = re.sub(r"\[[^\]]*\]", f"[{table_header(t)}]", lines[i], count=1)
             notes.append(f"moved [{old}] to [{table_header(t)}]")
             renamed.add(i)
-    old_cfg = tomllib.loads(text).get("recall", {})
-    new_cfg = tomllib.loads(text).get("suggestions", {})
+    cfg = tomllib.loads(text)
+    old_cfg, new_cfg = cfg.get("recall", {}), cfg.get("suggestions", {})
     out, moves, target = [], [], None
     for i, line in enumerate(lines):
         if re.match(r"\s*\[", line):
-            table = recall_table_of(line)
+            table = table_of(line, "recall")
             target = None if table is None or i in renamed else (table or FLAT_TABLE)
             src = None if target is None else (old_cfg.get(table) if table else old_cfg)
             if target is not None:   # its keys move one by one below; the emptied header goes too
@@ -439,7 +442,7 @@ def fixed_knob_text(text: str) -> tuple[str, list[str]]:
     out, current = [], None
     for line in text.splitlines(keepends=True):
         if re.match(r"\s*\[", line):
-            current = suggestions_table_of(line)
+            current = table_of(line, "suggestions")
         key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
         if current == table and key and key[1] in bad:
             notes.append(f"commented out `{line.strip()}`; the threshold takes its default")
@@ -465,7 +468,7 @@ def load_knobs(cfg: dict) -> dict[str, float]:
             raise ConfigError(f"{STORE_CONFIG}: [recall] {flat[0]} is a flat key under the old name; thresholds live in a model's table; "
                               f"`iirc doctor --fix` moves them to [{table_header(FLAT_TABLE)}]")
         t = next(iter(old), FLAT_TABLE)
-        raise ConfigError(f"{STORE_CONFIG}: [recall.{t}] is the old name of [{table_header(t)}]; `iirc doctor --fix` renames it")
+        raise ConfigError(f"{STORE_CONFIG}: [{table_header(t, 'recall')}] is the old name of [{table_header(t)}]; `iirc doctor --fix` renames it")
     if old is not None:
         raise ConfigError(f"{STORE_CONFIG}: recall is the old name of suggestions, a table of model tables like [{table_header(FLAT_TABLE)}]")
     sec = cfg.get("suggestions", {})
@@ -1231,29 +1234,18 @@ def cmd_show_suggestion_thresholds(args: argparse.Namespace) -> None:
         print(f"{name} = {RECALL[name]:g}{mark}  {low:g} to {high:g}: {what}")
 
 
-# [recall] (flat), [recall.NAME], or [recall."NAME"], the old names, spaces allowed inside the brackets
-RECALL_HEADER_RE = re.compile(r'^\s*\[\s*recall\s*(?:\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*)?\]\s*(#.*)?$')
-# [suggestions.NAME] or [suggestions."NAME"], spaces allowed inside the brackets
-SUGGESTIONS_HEADER_RE = re.compile(r'^\s*\[\s*suggestions\s*\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*\]\s*(#.*)?$')
-
-
-def recall_table_of(line: str) -> str | None:
-    """The model table an old [recall...] header line opens: "" for the flat [recall], None for any other line."""
-    m = RECALL_HEADER_RE.match(line)
+def table_of(line: str, word: str) -> str | None:
+    """The model table a [WORD], [WORD.NAME], or [WORD."NAME"] header line opens, spaces allowed inside the brackets:
+    "" for the flat [WORD], None for any other line. WORD is suggestions, or recall, the old name."""
+    m = re.match(rf'^\s*\[\s*{word}\s*(?:\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*)?\]\s*(#.*)?$', line)
     return None if m is None else (m[1] or m[2] or "")
-
-
-def suggestions_table_of(line: str) -> str | None:
-    """The model table a [suggestions.NAME] header line opens, None for any other line."""
-    m = SUGGESTIONS_HEADER_RE.match(line)
-    return None if m is None else (m[1] or m[2])
 
 
 def set_knob_text(text: str, table: str, name: str, value: float) -> str:
     """The config text with one threshold set in its [suggestions.TABLE] table. Edits lines, so every other line and comment stays."""
     entry = f"{name} = {value:g}"
     lines = text.splitlines()
-    head = next((i for i, line in enumerate(lines) if suggestions_table_of(line) == table), None)
+    head = next((i for i, line in enumerate(lines) if table_of(line, "suggestions") == table), None)
     if head is None:
         body = text if not text or text.endswith("\n") else text + "\n"
         return body + ("\n" if body.strip() else "") + f"[{table_header(table)}]\n{entry}\n"
@@ -1583,63 +1575,64 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
             marker.unlink(missing_ok=True)
 
 
-def cmd_record_command_success(args: argparse.Namespace) -> None:
-    """PostToolUse hook entry: log the command; nudge to write when it had failed twice before. Never fails the hook."""
-    event = read_event()
-    if not live_stores():
-        return
-    try:
-        cmd = first_token(str((event.get("tool_input") or {}).get("command", "")))
-        if cmd:
-            log_event("success", command=cmd)
-        recovered = recovered_commands()
-        if recovered:
-            for c, _ in recovered:
-                log_event("nudged", command=c)
-            text = " ".join(RECOVERY_NUDGE.format(cmd=c, n=n) for c, n in recovered[:3])
-            print(hook_output("PostToolUse", text))
-    except SystemExit:
-        return
-    except Exception:  # a hook must never fail the tool call
-        return
+def hook_entry(func):
+    """A hook command: reads the hook JSON on stdin and passes it as `event`; quiet with no live store. Never fails the hook."""
+    def run(args: argparse.Namespace) -> None:
+        event = read_event()
+        if not live_stores():
+            return
+        try:
+            func(args, event)
+        except SystemExit:
+            return
+        except Exception:  # a hook must never fail the prompt or the tool call
+            return
+    return run
 
 
-def cmd_suggest_pages(args: argparse.Namespace) -> None:
-    """Hook entry. Reads the hook JSON on stdin, prints at most one line. Never fails the hook."""
-    event = read_event()
-    if not live_stores():
-        return
-    try:
-        if args.failure:
-            cmd = str((event.get("tool_input") or {}).get("command", ""))
-            err = str(event.get("error") or event.get("tool_response") or "")
-            err = re.sub(r"^\s*Exit code \d+\s*", "", err)   # every Bash failure starts with this; it is not a clue
-            first = first_token(cmd)
-            log_event("failure", command=first)
-            terms = query_terms(err)[:8]
-            if not terms:
-                return
-            query = " ".join([first] + terms).strip()
-            line = run_recall(query, "failure", event, failed=(cmd, err), query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
-            if line:
-                print(hook_output("PostToolUseFailure", line))
+@hook_entry
+def cmd_record_command_success(args: argparse.Namespace, event: dict) -> None:
+    """PostToolUse: log the command; nudge to write when it had failed twice before."""
+    cmd = first_token(str((event.get("tool_input") or {}).get("command", "")))
+    if cmd:
+        log_event("success", command=cmd)
+    recovered = recovered_commands()
+    if recovered:
+        for c, _ in recovered:
+            log_event("nudged", command=c)
+        text = " ".join(RECOVERY_NUDGE.format(cmd=c, n=n) for c, n in recovered[:3])
+        print(hook_output("PostToolUse", text))
+
+
+@hook_entry
+def cmd_suggest_pages(args: argparse.Namespace, event: dict) -> None:
+    """UserPromptSubmit, or PostToolUseFailure with --failure: print at most one line naming pages that match."""
+    if args.failure:
+        cmd = str((event.get("tool_input") or {}).get("command", ""))
+        err = str(event.get("error") or event.get("tool_response") or "")
+        err = re.sub(r"^\s*Exit code \d+\s*", "", err)   # every Bash failure starts with this; it is not a clue
+        first = first_token(cmd)
+        log_event("failure", command=first)
+        terms = query_terms(err)[:8]
+        if not terms:
             return
-        prompt = str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or "")
-        if not prompt.strip():
-            return
-        reason = skip_reason(prompt)
-        # the prompt text itself is not logged, it may hold secrets; its hash finds it in the transcript
-        if reason:
-            log_event("skipped", reason=reason, chars=len(prompt), prompt_hash=prompt_hash(prompt), transcript=event.get("transcript_path"))
-            keep_prompt(prompt, skipped=reason)
-            return
-        line = run_recall(person_text(prompt), "prompt", event, prompt_hash=prompt_hash(prompt))
+        query = " ".join([first] + terms).strip()
+        line = run_recall(query, "failure", event, failed=(cmd, err), query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
         if line:
-            print(hook_output("UserPromptSubmit", line))
-    except SystemExit:
+            print(hook_output("PostToolUseFailure", line))
         return
-    except Exception:  # a hook must never fail the prompt
+    prompt = str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or "")
+    if not prompt.strip():
         return
+    reason = skip_reason(prompt)
+    # the prompt text itself is not logged, it may hold secrets; its hash finds it in the transcript
+    if reason:
+        log_event("skipped", reason=reason, chars=len(prompt), prompt_hash=prompt_hash(prompt), transcript=event.get("transcript_path"))
+        keep_prompt(prompt, skipped=reason)
+        return
+    line = run_recall(person_text(prompt), "prompt", event, prompt_hash=prompt_hash(prompt))
+    if line:
+        print(hook_output("UserPromptSubmit", line))
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -4261,11 +4254,6 @@ def cmd_tune_done(args: argparse.Namespace) -> None:
     print(f"session {args.session} is tuned; `iirc tune-suggestions gather-suggestion-data` skips it from now on")
 
 
-def cmd_tune_suggestions(args: argparse.Namespace) -> None:
-    {"gather-suggestion-data": cmd_tune_gather, "record-relevance-judgments": cmd_tune_judge,
-     "evaluate-suggestion-thresholds": cmd_tune_sweep, "mark-session-tuned": cmd_tune_done}[args.tune_cmd](args)
-
-
 # --- audit ------------------------------------------------------------------
 
 
@@ -4371,13 +4359,11 @@ def cmd_audit_page_findability(args: argparse.Namespace) -> None:
 # --- main -------------------------------------------------------------------
 
 
-# the hook entries, which fail open, and the usage commands, which run with a broken config
-HOOK_COMMANDS = ("suggest-pages", "record-command-success", "remind-to-write", "show-compaction-instructions")
-USAGE_COMMANDS = ("summarize-page-usage", "record-session-summary", "summarize-session-usage")
-
-
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="iirc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
+    # each command's parser may set: fail_open, a hook entry that stays quiet on a bad config; runs_with_bad_config;
+    # skips_format_check, a command that runs before or without a store in the current format
+    parser.set_defaults(fail_open=False, runs_with_bad_config=False, skips_format_check=False)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("search", help="ranked pages for one or more queries; several terms are searched separately and merged")
@@ -4458,19 +4444,22 @@ def main(argv: list[str] | None = None) -> None:
     t = tsub.add_parser("gather-suggestion-data", help="write one evidence file per session under the state dir; no model calls")
     t.add_argument("--session", metavar="ID", help="this session only, even when it is tuned already")
     t.add_argument("--days", type=int, metavar="N", help="only sessions with a suggestion line in the last N days")
+    t.set_defaults(func=cmd_tune_gather)
     t = tsub.add_parser("record-relevance-judgments", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
+    t.set_defaults(func=cmd_tune_judge)
     t = tsub.add_parser("evaluate-suggestion-thresholds", help="the gate's counts on the judged pairs for the current thresholds and a grid of others")
     t.add_argument("--replay-prompts", nargs="+", metavar="FILE", help="replay JSONL: run each judged prompt through the current search and gate")
+    t.set_defaults(func=cmd_tune_sweep)
     t = tsub.add_parser("mark-session-tuned", help="mark a session tuned, so gather-suggestion-data skips it")
     t.add_argument("session", metavar="SESSION")
-    p.set_defaults(func=cmd_tune_suggestions)
+    t.set_defaults(func=cmd_tune_done)
 
     p = sub.add_parser("doctor", help="check prerequisites; --fix installs them")
     p.add_argument("--fix", action="store_true")
     p.add_argument("--brief", action="store_true", help="one line, no host probe; nothing if no field")
     p.add_argument("--hook", action="store_true", help="with --brief: read the hook payload on stdin and frame the line for its event")
     p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
-    p.set_defaults(func=cmd_doctor)
+    p.set_defaults(func=cmd_doctor, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("set-search-backend", help="the embedding model and where it runs, or substring search; prompts if no flags")
     p.add_argument("--substring", action="store_true", help="string search: exact text only; the fallback where no embedding model can run")
@@ -4481,17 +4470,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
     p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
                    help="the model for --local, --host, or --openai; ollama defaults to qwen3-embedding:0.6b, --openai to qwen3-embedding")
-    p.set_defaults(func=cmd_set_search_backend)
+    p.set_defaults(func=cmd_set_search_backend, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("show-page-topics", help="every topic with its page count, computed from the pages")
     p.set_defaults(func=cmd_show_page_topics)
 
     p = sub.add_parser("max-suggested-pages", help="how many pages a suggestion line names at most, on this machine")
     p.add_argument("n", nargs="?", type=int, metavar="N", help="1 to 10; without N, print the current number")
-    p.set_defaults(func=cmd_max_suggested_pages)
+    p.set_defaults(func=cmd_max_suggested_pages, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("init", help="create .iirc/ and the CLAUDE.md paragraph")
-    p.set_defaults(func=cmd_init)
+    p.set_defaults(func=cmd_init, skips_format_check=True)
 
     p = sub.add_parser("sync", help="commit, pull with rebase, and push every remote store")
     p.set_defaults(func=cmd_sync)
@@ -4507,42 +4496,42 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("suggest-pages", help="hook entry: name pages that match the prompt (stdin JSON)")
     p.add_argument("--failure", action="store_true", help="PostToolUseFailure: search the failed command and its error")
-    p.set_defaults(func=cmd_suggest_pages)
+    p.set_defaults(func=cmd_suggest_pages, fail_open=True, skips_format_check=True)
 
     p = sub.add_parser("record-command-success", help="hook entry, PostToolUse: log the command; nudge to write when it had failed twice before")
-    p.set_defaults(func=cmd_record_command_success)
+    p.set_defaults(func=cmd_record_command_success, fail_open=True, skips_format_check=True)
 
     p = sub.add_parser("remind-to-write", help="hook entry: a reminder to write what this session learned")
     p.add_argument("--at", required=True, choices=["stop", "compaction"],
                    help="stop: the Stop hook, once per session; compaction: plain text, once per compaction window")
-    p.set_defaults(func=cmd_remind_to_write)
+    p.set_defaults(func=cmd_remind_to_write, fail_open=True, skips_format_check=True)
 
     p = sub.add_parser("show-compaction-instructions", help="plain text: what the compaction summary keeps for iirc")
-    p.set_defaults(func=cmd_show_compaction_instructions)
+    p.set_defaults(func=cmd_show_compaction_instructions, fail_open=True, skips_format_check=True)
 
     p = sub.add_parser("migrate", help="move this repository and machine from the memory plugin's layout; stages, never commits")
-    p.set_defaults(func=cmd_migrate)
+    p.set_defaults(func=cmd_migrate, skips_format_check=True)
 
     p = sub.add_parser("summarize-page-usage", help="how the pages are being used, from the local log")
     p.add_argument("--days", type=int, default=7)
-    p.set_defaults(func=cmd_summarize_page_usage)
+    p.set_defaults(func=cmd_summarize_page_usage, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("record-session-summary", help="log this session's numbers and conditions as one row, for tuning suggestions; then rotate the logs")
     p.add_argument("--hook", action="store_true", help="read the hook payload on stdin")
-    p.set_defaults(func=cmd_record_session_summary)
+    p.set_defaults(func=cmd_record_session_summary, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("summarize-session-usage", help="JSON: the pages one session read or pulled, and wrote")
     p.add_argument("session", nargs="?", default="", metavar="ID", help="default: this session")
-    p.set_defaults(func=cmd_summarize_session_usage)
+    p.set_defaults(func=cmd_summarize_session_usage, runs_with_bad_config=True, skips_format_check=True)
 
     args = parser.parse_args(argv)
     set_root(project_root())
     if CONFIG_ERROR:
-        if args.command in HOOK_COMMANDS:
+        if args.fail_open:
             return   # hooks fail open; the session-start brief says why they are quiet
-        if args.command not in ("set-search-backend", *USAGE_COMMANDS, "max-suggested-pages", "doctor"):
+        if not args.runs_with_bad_config:
             die(CONFIG_ERROR)
-    if args.command not in ("doctor", "init", "set-search-backend", *HOOK_COMMANDS, *USAGE_COMMANDS, "migrate", "max-suggested-pages"):
+    if not args.skips_format_check:
         check_format()
     args.func(args)
 
