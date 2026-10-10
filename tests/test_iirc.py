@@ -3190,6 +3190,17 @@ def test_flat_key_that_loses_to_an_old_model_table_says_so():
     assert tomllib.loads(text)["suggestions"]["nomic-embed-text"] == {"semantic_only": 0.3, "both": 0.4}
 
 
+def test_empty_old_flat_table_names_itself(tmp_path, monkeypatch):
+    """An empty [recall] is reported as [recall], not as a model table, and doctor --fix renames it."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text("[recall]\n")
+    iirc.set_root(tmp_path)
+    assert "[recall] is the old name" in iirc.CONFIG_ERROR and "[recall.nomic-embed-text]" not in iirc.CONFIG_ERROR
+    assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and iirc.knob_error_only()
+    toml.unlink(); iirc.set_root(tmp_path)
+
+
 # p5 step 25
 
 @contextlib.contextmanager

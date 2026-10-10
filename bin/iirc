@@ -476,8 +476,8 @@ def load_knobs(cfg: dict) -> dict[str, float]:
         unknown = sorted(set(old) - tables)
         if unknown:
             raise ConfigError(f"{STORE_CONFIG}: [{table_header(unknown[0], 'recall')}] names no embedding model; the tables are {', '.join(sorted(tables))}")
-        t = next(iter(old), FLAT_TABLE)
-        raise ConfigError(f"{STORE_CONFIG}: [{table_header(t, 'recall')}] is the old name of [{table_header(t)}]; `iirc doctor --fix` renames it")
+        t = next(iter(old), "")   # an empty flat [recall] names itself
+        raise ConfigError(f"{STORE_CONFIG}: [{table_header(t, 'recall')}] is the old name of [{table_header(t or FLAT_TABLE)}]; `iirc doctor --fix` renames it")
     if old is not None:
         raise ConfigError(f"{STORE_CONFIG}: recall is the old name of suggestions, a table of model tables like [{table_header(FLAT_TABLE)}]")
     sec = cfg.get("suggestions", {})
