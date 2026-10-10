@@ -107,9 +107,10 @@ still keeps it. A recall logged before `recall_id` existed joins its
 prompt by time, so its prompt can be the wrong one when prompts queue.
 `iirc tune judge` appends to `tune/judgments.jsonl`, one file for every
 repository, so each line carries its `repo`; the last line for a
-repository, session, recall, and page wins. Judge also logs a `tuning`
-row, and gather skips a session that has one, because its recalls were
-about tuning. `iirc read --for-tune` logs `tune_read`, not `read`, so
+repository, session, recall, and page wins. Gather logs a `tune_gather`
+row and judge logs a `tune_judge` row. Gather skips the recalls between a
+session's first `tune_gather` row and its last `tune_judge` row, because
+those recalls were about tuning. `iirc read --for-tune` logs `tune_read`, not `read`, so
 judging does not count as the session's own use of a page. `iirc tune done` logs a `tuned` row whose
 `tuned` field names the session, so the row's own `session` stays the
 one that tuned. `gate()` is the one gate that both recall and `iirc tune

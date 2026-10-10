@@ -2184,23 +2184,6 @@ def test_tune_judge_refuses_a_page_the_recall_never_listed(tmp_path, monkeypatch
     assert not (st / "tune" / "judgments.jsonl").exists()
 
 
-def test_tune_gather_skips_a_session_that_judged(tmp_path, monkeypatch, capsys):
-    import io
-    st = _tune_fixture(tmp_path, monkeypatch)
-    r = str((tmp_path / "repo").resolve())
-    # the tuning session had recalls of its own; once it judges, they are about tuning
-    _jsonl(st / "log-2026-09.jsonl", [{"ts": "2026-10-08T12:00:00Z", "session": "tuner", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "t1"}])
-    _jsonl(st / "prompts" / "tuner.jsonl", [{"ts": "2026-10-08T12:00:00Z", "prompt_hash": "x", "excerpt": "tune recall", "recall_id": "t1"}])
-    iirc.main(["tune", "gather"])
-    assert "3 sessions" in capsys.readouterr().out
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a.md", "label": "noise"}) + "\n"))
-    iirc.main(["tune", "judge"]); capsys.readouterr()
-    assert iirc.read_log()[-1]["cmd"] == "tuning"
-    (st / "tune" / "tuner.json").unlink()
-    iirc.main(["tune", "gather"])
-    assert "2 sessions" in capsys.readouterr().out and not (st / "tune" / "tuner.json").exists()
-
-
 def test_tune_gather_skips_rows_that_are_not_objects(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
     for f in (st / "log.jsonl", st / "eval-2026-10.jsonl", st / "prompts" / "s1.jsonl"):
@@ -2479,3 +2462,44 @@ def test_doctor_brief_calls_git_once_per_sha(tmp_path, monkeypatch, capsys):
     assert "suspect" not in capsys.readouterr().out
     per_sha = {sha: sum(any(sha in arg for arg in argv) for argv in calls) for sha in (first, second)}
     assert per_sha == {first: 1, second: 1}
+
+
+# p5 step 20
+
+
+def test_read_unsuggested_skips_maintenance_reads(tmp_path, monkeypatch, capsys):
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+    # the 10:00:30 read of c.md, then a write of it within five minutes: the read was for the write, not for guidance
+    with (st / "log.jsonl").open("a") as f:
+        f.write(json.dumps({"ts": "2026-10-08T10:04:00Z", "session": "s1", "repo": r, "cmd": "write", "page": "project/c.md", "kind": "finding"}) + "\n")
+    iirc.main(["tune", "gather", "--session", "s1"])
+    r1 = json.loads((st / "tune" / "s1.json").read_text())["recalls"][0]
+    assert r1["read_unsuggested"] == []
+
+
+def test_gather_skips_the_tuning_window(tmp_path, monkeypatch, capsys):
+    import io
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+
+    def recall(ts, rid):
+        return {"ts": ts, "session": "tuner", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": rid}
+    # recalls before the first gather and after the last judge are work; the ones between are about tuning
+    _jsonl(st / "log-2026-09.jsonl", [
+        recall("2026-10-08T12:00:00Z", "t1"),
+        {"ts": "2026-10-08T12:01:00Z", "session": "tuner", "repo": r, "cmd": "tune_gather"},
+        recall("2026-10-08T12:02:00Z", "t2"),
+        {"ts": "2026-10-08T12:05:00Z", "session": "tuner", "repo": r, "cmd": "tune_judge", "judged": 1},
+        recall("2026-10-08T12:10:00Z", "t3"),
+    ])
+    _jsonl(st / "prompts" / "tuner.jsonl", [{"ts": "2026-10-08T12:00:00Z", "prompt_hash": "x", "excerpt": "real work", "recall_id": "t1"}])
+    iirc.main(["tune", "gather"])
+    assert "3 sessions" in capsys.readouterr().out
+    assert [x["key"] for x in json.loads((st / "tune" / "tuner.json").read_text())["recalls"]] == ["t1", "t3"]
+    assert iirc.read_log()[-1]["cmd"] == "tune_gather"
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a.md", "label": "noise"}) + "\n"))
+    iirc.main(["tune", "judge"]); capsys.readouterr()
+    assert iirc.read_log()[-1]["cmd"] == "tune_judge" and "tuning" not in {x["cmd"] for x in iirc.read_log()}
+    iirc.main(["tune", "gather"])   # the last judge now follows t3
+    assert [x["key"] for x in json.loads((st / "tune" / "tuner.json").read_text())["recalls"]] == ["t1"]

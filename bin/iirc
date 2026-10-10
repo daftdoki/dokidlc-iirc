@@ -3283,6 +3283,7 @@ TUNE_NEAR = 0.03        # a refused candidate this close to the larger knob is w
 TUNE_NEAR_MAX = 3       # refused candidates worth judging per recall, nearest the knob first
 TUNE_FLOOR = 30         # judged pairs with a distance before the sweep proposes a change
 TUNE_LABELS = ("relevant", "noise", "unsure")
+TUNE_UPKEEP = 300       # seconds: a read followed this soon by a write or verify of the page was upkeep
 CONDITION_KEYS = ("ts", "cmd", "source", "trigger", "commit", "knobs", "max_suggested", "mode", "tool_rev", "page_count")
 NOT_A_PROMPT = ("<command-name>", "<local-command-", "<bash-input>", "<bash-stdout>", "<bash-stderr>")
 
@@ -3468,9 +3469,24 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
     out["next_tools"] = [{"tool": t["tool"], "input": t["input"]} for t in (tx or {}).get("tools", [])
                          if t["ts"] is not None and start <= t["ts"] < end][:TUNE_TOOLS] if tx else None
     out["searches"] = [{"query": w.get("query"), "pages": w.get("pages") or []} for w in window if w["cmd"] == "search"]
-    read = [base(p) for w in window if w["cmd"] in ("read", "pull") for p in w.get("pages") or []]
+    # a read the session followed with a write or verify of that page within TUNE_UPKEEP was upkeep, not guidance
+    upkeep = [(base(w.get("page")), parse_ts(w["ts"])) for w in rows if w["cmd"] in ("write", "verify")]
+    read = [base(p) for w in window if w["cmd"] in ("read", "pull") for p in w.get("pages") or []
+            if not any(page == base(p) and t is not None and 0 <= t - (parse_ts(w["ts"]) or math.inf) <= TUNE_UPKEEP for page, t in upkeep)]
     out["read_unsuggested"] = sorted(set(read) - set(suggested))
     return out
+
+
+def tuning_window(rows: list[dict]) -> tuple[float, float] | None:
+    """From the session's first `tune gather` row to its last `tune judge` row: its recalls there are about tuning."""
+    gathers = [t for r in rows if r["cmd"] == "tune_gather" and (t := parse_ts(r["ts"])) is not None]
+    judges = [t for r in rows if r["cmd"] == "tune_judge" and (t := parse_ts(r["ts"])) is not None]
+    return (min(gathers), max(judges)) if gathers and judges and max(judges) >= min(gathers) else None
+
+
+def work_recall(r: dict, window: tuple[float, float] | None) -> bool:
+    """A recall outside the session's tuning window."""
+    return r["cmd"] == "recall" and not (window and window[0] <= (parse_ts(r["ts"]) or 0) <= window[1])
 
 
 def gather_session(session: str, rows: list[dict], evals: dict[str, list[dict]]) -> dict:
@@ -3487,7 +3503,8 @@ def gather_session(session: str, rows: list[dict], evals: dict[str, list[dict]])
     turns = [i for i, r in enumerate(rows) if r["cmd"] == "skipped" or (r["cmd"] == "recall" and r.get("via") == "prompt")]
     conds = [{k: r[k] for k in CONDITION_KEYS if k in r} for r in rows if r["cmd"] in ("start", "session")]
     knobs = next((c["knobs"] for c in reversed(conds) if isinstance(c.get("knobs"), dict)), RECALL)
-    recalls = [recall_evidence(i, rows, turns, tx, pf, evals, knobs, subs) for i, r in enumerate(rows) if r["cmd"] == "recall"]
+    window = tuning_window(rows)
+    recalls = [recall_evidence(i, rows, turns, tx, pf, evals, knobs, subs) for i, r in enumerate(rows) if work_recall(r, window)]
     return {"session": session, "repo": str(ROOT), "gathered": now_iso(), "transcript": str(path) if path else None,
             "prompts_file": bool(pf), "conditions": conds, "recalls": recalls}
 
@@ -3503,17 +3520,16 @@ def repo_sessions() -> dict[str, list[dict]]:
 
 def cmd_tune_gather(args: argparse.Namespace) -> None:
     sessions = repo_sessions()
+    log_event("tune_gather")   # this session's recalls from here to its last judge are about tuning
     if args.session:
         if args.session not in sessions:
             die(f"no log rows for session {args.session} in {ROOT}")
         chosen = [args.session]
     else:
         tuned = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
-        # a session that judged was tuning; its recalls are about tuning, not about work
-        tuned |= {s for s, rows in sessions.items() if any(r["cmd"] == "tuning" for r in rows)}
         cutoff = time.time() - args.days * 86400 if args.days is not None else -math.inf
         chosen = [s for s, rows in sessions.items() if s not in tuned
-                  and any(r["cmd"] == "recall" and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
+                  and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
                   and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
     if not chosen:
         print("iirc tune: no session to gather; each one with recalls is tuned already, or its transcript and prompts are gone")
@@ -3594,7 +3610,7 @@ def cmd_tune_judge(args: argparse.Namespace) -> None:
     with path.open("a") as f:
         for row in rows:
             f.write(json.dumps(row) + "\n")
-    log_event("tuning", judged=len(rows))   # gather skips this session: its recalls were about tuning
+    log_event("tune_judge", judged=len(rows))   # ends this session's tuning window, from its first gather
     print(f"recorded {len(rows)} judgment{'s' if len(rows) != 1 else ''} in {path}")
 
 
