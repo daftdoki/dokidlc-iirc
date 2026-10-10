@@ -5,11 +5,11 @@ import type { On } from 'claude-code'
 import { liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 
 const RECALL =
-  'iirc: 2 pages may apply. Read before you investigate: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
+  'iirc: 2 pages may apply. Read a page whose summary bears on this task; skip the rest: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
 const RECOVERY =
   'iirc: `uv tool` failed 2 times this session before it worked. If the fix was not obvious from a file in the repository, write one `iirc write` page.'
 const BRIEF =
-  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ. A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.'
+  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ. A hook names matching pages when the creator prompts; read one whose summary bears on the task. `iirc search QUERY` before an install, a fix, or a design.'
 const STOP =
   'iirc: before you stop, note that `uv tool` (2 failures) failed and then worked this session, and nothing was written to iirc.'
 
@@ -79,7 +79,7 @@ test('parses the recall line', () => {
     { name: 'alpha-page.md', summary: 'first summary (with parens)', isSuspect: false },
     { name: 'beta.md', summary: 'second one', isSuspect: true },
   ])
-  expect(parseRecall('iirc: 2 pages may apply. Read before you investigate: `iirc read a.md` (one (x)) [69% match, meaning+term] · `iirc read b.md` (two…) [term match] (suspect: 3 days; if it holds, `iirc verify b.md`)')).toEqual([
+  expect(parseRecall('iirc: 2 pages may apply. Read a page whose summary bears on this task; skip the rest: `iirc read a.md` (one (x)) [69% match, meaning+term] · `iirc read b.md` (two…) [term match] (suspect: 3 days; if it holds, `iirc verify b.md`)')).toEqual([
     { name: 'a.md', summary: 'one (x)', isSuspect: false, match: '69% match, meaning+term' },
     { name: 'b.md', summary: 'two…', isSuspect: true, match: 'term match' },
   ])
@@ -454,7 +454,7 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   const off = parseBrief('iirc: hooks off, .claude/iirc.toml: [recall] semantic_only must be a number from 0.1 to 0.6. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.')!
   expect(off.status.level).toBe('error')
   expect(statusText(off.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: hooks off · run iirc doctor --fix')
-  const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read them.')!.status
+  const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.')!.status
   const c = { reads: 1, writes: 0, suggested: 2, used: 1, missed: [], match: { all: null, read: null, unread: null }, timeouts: 2 }
   expect(liveStatus(ok, c).level).toBe('warn')
   expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run iirc doctor')
@@ -532,7 +532,7 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   on('ui.open', ($, e) => (opened.push(`${e.id}:${e.title}`), { value: { isPlaced: true } }))
   on('process.run', ($, e) => ({ value: { exitCode: 0, stdout: JSON.stringify({ store: 'project', name: 'pysqlite3-install-override.md', label: 'pysqlite3-install-override.md', path: '/p', fm: {}, body: 'b', links: [], signals: [] }), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await promptRow($, 'p-tree')
-  await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read before you investigate: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
+  await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read a page whose summary bears on this task; skip the rest: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
   const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
   expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeUndefined()      // folded
   expect((await $.command.run({ command: 'iirc', args: 'open' })).text).toContain('unfolded')

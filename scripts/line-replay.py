@@ -131,12 +131,20 @@ def today(rows: list[dict]) -> str:
     return iirc().recall_line([{**r, "filename": r["page"]} for r in rows])
 
 
-def proposed(rows: list[dict]) -> str:
-    """The next line to compare against today's. Steps 11 and 12 of the search-quality plan write it."""
-    raise NotImplementedError("the proposed variant is not written yet")
+def wording(rows: list[dict]) -> str:
+    """Today's line with step 11's instruction (decision 12)."""
+    return today(rows).replace("Read before you investigate: ", "Read a page whose summary bears on this task; skip the rest: ", 1)
 
 
-VARIANTS = {"today": today, "proposed": proposed}
+PERCENT_RE = re.compile(r" \[\d+% match, [^\]]+\]")
+
+
+def nopct(rows: list[dict]) -> str:
+    """The wording line without each entry's percentage; a term match keeps its tag (step 12, decision 13)."""
+    return PERCENT_RE.sub("", wording(rows))
+
+
+VARIANTS = {"today": today, "wording": wording, "nopct": nopct}
 
 
 # --- counting reads in a stream-json transcript --------------------------------

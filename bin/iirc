@@ -73,7 +73,7 @@ CLAUDE_MD_MARK = "<!-- iirc -->"
 CLAUDE_MD_PARAGRAPH = f"""
 ## IIRC {CLAUDE_MD_MARK}
 
-`.iirc/` holds what past sessions learned. A hook names matching pages when you are prompted; read them before you investigate. Search yourself before an install, a config change, or a design choice, and when the creator says "remember" or "did we". When something took more than one attempt, write it: `iirc write`. A page you find wrong, fix or delete in the same turn. The `iirc` skill has the rules.
+`.iirc/` holds what past sessions learned. A hook names matching pages when you are prompted; read a page whose summary bears on the task and skip the rest. Search yourself before an install, a config change, or a design choice, and when the creator says "remember" or "did we". When something took more than one attempt, write it: `iirc write`. A page you find wrong, fix or delete in the same turn. The `iirc` skill has the rules.
 """
 
 
@@ -1186,7 +1186,7 @@ def recall_line(rows: list[dict]) -> str:
         parts.append(f"`iirc read {name}` ({clip(r.get('summary', ''), 90)}) [{match_text(r)}]{tail}")
 
     def render(ps: list[str]) -> str:
-        return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read before you investigate: " + " · ".join(ps)
+        return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read a page whose summary bears on this task; skip the rest: " + " · ".join(ps)
 
     # drop whole entries from the end rather than cut a page name in half
     while len(parts) > 1 and len(render(parts).encode()) > recall_max_bytes():
@@ -3098,7 +3098,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if hook == "SessionStart":
             # the conditions this session's recall ran under, so an analysis compares like with like
             log_event("start", source=source, transcript=event.get("transcript_path"), **conditions(mode, n))
-        parts.append("A hook names matching pages when the creator prompts; read them. `iirc search QUERY` before an install, a fix, or a design.")
+        parts.append("A hook names matching pages when the creator prompts; read one whose summary bears on the task. `iirc search QUERY` before an install, a fix, or a design.")
         if source == "compact" and session_writes() == 0:
             parts.append("Context was just compacted and this session wrote no iirc. If the summary above names a fix that took more than one attempt, write it now.")
         emit(" ".join(parts))

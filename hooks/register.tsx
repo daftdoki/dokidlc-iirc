@@ -44,7 +44,7 @@ const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
-const RECALL_RE = /iirc: \d+ pages? may apply\. Read before you investigate: (.*)/
+const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears on this task; skip the rest: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
 const STOP_RE = /iirc: before you stop, note that (.*?) failed and then worked/
 const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plugin's layout/

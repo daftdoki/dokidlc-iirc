@@ -815,6 +815,7 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     iirc.main(["recall"])
     out = capsys.readouterr().out
     assert "`iirc read pysqlite3-install-override.md`" in out
+    assert "may apply. Read a page whose summary bears on this task; skip the rest: " in out
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "yes"})))
     iirc.main(["recall"]); assert capsys.readouterr().out == ""
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s2")   # in s1 the page is a repeat now
