@@ -745,7 +745,8 @@ def eval_event(rows: list[dict]) -> None:
 def keep_prompt(prompt: str, **fields) -> None:
     """The first 300 characters of a prompt, in this session's own file, for tuning recall, to read
     after the transcript is gone. Kept RETAIN_DAYS on this machine; never in the log or in git.
-    The excerpt is redacted; the hash is the raw prompt's, so it still finds the prompt in the transcript."""
+    The excerpt is redacted; a prompt's hash is the raw prompt's, so it still finds the prompt in the transcript.
+    A failure row's command arrives redacted, and tune joins it by recall_id, not by hash."""
     try:
         d = state_dir() / "prompts"
         d.mkdir(parents=True, exist_ok=True)

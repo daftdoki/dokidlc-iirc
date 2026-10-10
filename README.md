@@ -136,7 +136,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 - iirc records what recall did on this machine, in
   `~/.local/state/dokidlc-iirc/`, for 90 days: each recall and its
   candidates, each session's numbers, and the first 300 characters of each
-  prompt. Nothing there is committed or pushed. `/iirc tune` reads it, runs
+  prompt, with anything that looks like a secret redacted. Nothing there is committed or pushed. `/iirc tune` reads it, runs
   `iirc audit`, and proposes page fixes and knob changes, each for your
   yes. See [what iirc records](docs/HOW-IT-WORKS.md#what-iirc-records).
 - Every change the agent makes to the pages is committed at once, the

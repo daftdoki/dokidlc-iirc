@@ -81,7 +81,7 @@ def recall_prompt(recall: dict, prompt_hash: str | None, tx: list[dict] | None) 
     # a prompt typed twice joins to its last occurrence before the recall, as tune gather joins it
     before = [p for p in tx or [] if ts is None or p["ts"] < ts + 1]
     hit = next((p for p in reversed(before) if prompt_hash and p["hash"] == prompt_hash), None) \
-        or next((p for p in reversed(before) if excerpt and iirc.clean(p["text"], 300) == excerpt), None)
+        or next((p for p in reversed(before) if excerpt and iirc.clean(iirc.redact(p["text"]), 300) == excerpt), None)
     if hit:
         return {"prompt": hit["text"], "via": "prompt"}
     if excerpt:

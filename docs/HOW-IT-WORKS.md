@@ -511,7 +511,9 @@ this never reaches the gate), and its near-duplicate distances.
 The knob defaults come from one pooling round: each model's best F1 on
 the agent-builder replay that refuses no relevant pair the model passed
 before on the neckbeard replay. Under strict labels the models nearly
-tie at the gate. See [SEARCH-QUALITY.md](SEARCH-QUALITY.md#results).
+tie at the gate. An OpenAI-compatible host sets its own vector width, so
+any size of Qwen3-Embedding served as `qwen3-embedding` works, and
+`iirc doctor` names the width it answered. See [SEARCH-QUALITY.md](SEARCH-QUALITY.md#results).
 
 `iirc setup` offers ollama here, ollama on a host, an OpenAI-compatible
 host, this CPU, and string search. Its default is ollama, here or on the
@@ -569,7 +571,7 @@ committed or pushed. `iirc stats` and the `/iirc` cards read it. Commits
 |---|---|---|
 | `log.jsonl` | command and hook | reads, writes, searches, verifies, failures, nudges, and the rows below |
 | `eval-YYYY-MM.jsonl` | candidate page | the 25 best candidates of each recall, passed or not |
-| `prompts/SESSION.jsonl` | prompt | the first 300 characters of each prompt, its hash, and its `recall_id` or skip reason |
+| `prompts/SESSION.jsonl` | prompt | the first 300 characters of each prompt, redacted, its hash, and its `recall_id` or skip reason |
 
 A row that a subagent's hook writes also holds `agent`, the subagent's
 id.
@@ -599,7 +601,9 @@ it, its rare and head terms, the rule that passed it, and a verdict:
 `common_term`, `failure_needs_both`, `repeat`, `over_max`, `line_cut`).
 
 The prompt text never goes into `log.jsonl`, because a prompt can hold a
-secret. The hash finds the prompt in the transcript. The excerpts exist
+secret. The excerpt passes through `redact()` before it is cut to 300
+characters: each `SECRET_PATTERNS` match becomes `[REDACTED]`. A
+failure's command and error are redacted the same way. The hash finds the prompt in the transcript. The excerpts exist
 because Claude Code deletes transcripts after 30 days by default
 ([`cleanupPeriodDays`](https://code.claude.com/docs/en/claude-directory.md)),
 and judging a suggestion needs the prompt. `rotate_logs` moves

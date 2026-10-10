@@ -3748,3 +3748,14 @@ def test_saved_prompts_are_redacted(tmp_path, monkeypatch):
     assert [("skipped" in r) for r in rows] == [False, True]
     assert all(token not in r["excerpt"] and "[REDACTED]" in r["excerpt"] for r in rows)
     assert [r["prompt_hash"] for r in rows] == [iirc.prompt_hash(p) for p in prompts]
+
+
+# p5 review pass 3
+
+def test_replay_files_join_a_redacted_excerpt():
+    """A prompt that held a secret is kept redacted; the excerpt join still finds the full prompt when the hash does not."""
+    rf = _replay_files()
+    text = "push with ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + " please"
+    recall = {"via": "prompt", "ts": "2026-10-10T10:00:00Z", "prompt": {"text": rf.iirc.clean(rf.iirc.redact(text), 300)}}
+    tx = [{"ts": rf.iirc.parse_ts("2026-10-10T09:59:59Z"), "hash": "other", "text": text}]
+    assert rf.recall_prompt(recall, None, tx) == {"prompt": text, "via": "prompt"}
