@@ -560,13 +560,15 @@ def test_pull_prints_the_marker_above_each_page(tmp_path, monkeypatch, capsys):
         {"filename": "cited.md", "summary": "cited page", "distance": 0.2, "via": ["semantic"]},
         {"filename": "clean.md", "summary": "clean page", "distance": 0.3, "via": ["semantic"]},
     ])
-    monkeypatch.setattr(iirc, "tool", lambda *a, **k: type("P", (), {"returncode": 0, "stdout": f"<{a[-1]}>\n", "stderr": ""})())
+    monkeypatch.setattr(iirc, "tool", lambda *a, **k: pytest.fail("pull renders a page it can parse"))
     iirc.main(["pull", "anything"])
     out = capsys.readouterr().out
-    assert out.startswith(iirc.READ_HEAD) and out.endswith(iirc.READ_TAIL)
+    assert out.startswith(iirc.READ_HEAD) and out.endswith(iirc.read_tail([(iirc.STORES[0], "cited.md"), (iirc.STORES[0], "clean.md")]))
     lines = out.splitlines()
-    assert lines[1].startswith("cited.md: cited page") and "suspect: docs/a.md changed" in lines[1] and lines[2] == "<cited.md>"
-    assert lines[3].startswith("clean.md: clean page") and "suspect" not in lines[3] and lines[4] == "<clean.md>"
+    assert lines[1] == "cited.md: C" and lines[2].startswith("suspect: docs/a.md changed") and lines[3] == "x"
+    assert lines[4] == f"refs: docs/a.md@{sha}"
+    assert lines[6] == "clean.md: D" and lines[7] == "y"
+    assert lines[-1].endswith("where PAGE is cited.md or clean.md.")
 
 
 def test_tool_refuses_an_unpinned_install(monkeypatch, capsys):
@@ -1165,13 +1167,18 @@ def test_read_and_pull_pass_the_field(tmp_path, monkeypatch, capsys):
     project, agent = _two_stores(tmp_path, monkeypatch)
     _page(project.dir, "p.md"); _page(agent.dir, "a.md")
     calls = []
+    (project.dir / "raw.md").write_text("no frontmatter\n"); (agent.dir / "raw.md").write_text("no frontmatter\n")
     monkeypatch.setattr(iirc, "tool", _fake_tool(project.dir, calls))
     iirc.main(["read", "p.md", "agent/a.md"])
-    assert [(a[0], a[-1], f) for a, f in calls] == [("read", "p.md", project.field), ("read", "a.md", agent.field)]
-    calls.clear()
-    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [{"filename": "a.md", "store": "agent", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
+    out = capsys.readouterr().out
+    assert calls == [] and "project/p.md: T\n" in out and "agent/a.md: T\n" in out
+    # a page the wrapper cannot parse goes to the tool, with its store's field
+    iirc.main(["read", "project/raw.md", "agent/raw.md"])
+    assert [(a[0], a[-1], f) for a, f in calls] == [("read", "raw.md", project.field), ("read", "raw.md", agent.field)]
+    calls.clear(); capsys.readouterr()
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [{"filename": "raw.md", "store": "agent", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
     iirc.main(["pull", "x"])
-    assert calls == [(("read", "--no-line-numbers", "a.md"), agent.field)]
+    assert calls == [(("read", "--no-line-numbers", "raw.md"), agent.field)]
 
 
 def test_search_prefixes_store_with_two_stores(tmp_path, monkeypatch, capsys):
@@ -2283,3 +2290,44 @@ def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
     assert "left out: 1 unsure; 1 missing from the store; 1 from other repositories" in out
     assert "current  semantic_only 0.28 both 0.34: relevant passed 1, noise passed 1, relevant refused 1; precision 0.50, recall 0.50, F1 0.50" in out
     assert "best by F1:" in out and "no grid point beats the current knobs on F1" in out
+
+
+# p5 step 14
+
+
+def test_read_leads_with_the_page(tmp_path, monkeypatch, capsys):
+    import subprocess
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    sha = _repo(tmp_path)
+    field = tmp_path / ".iirc"; field.mkdir(); iirc.set_root(tmp_path)
+    (field / "cited.md").write_text(
+        f"---\ntitle: Cited page\nsummary: s\nkind: finding\nrefs:\n- docs/a.md@{sha}\nuuid: 1f1ae15b-0761\n"
+        "created: '2026-09-01T00:00:00Z'\nupdated: '2026-09-02T00:00:00Z'\nverified: '2026-09-19T00:00:00Z'\n---\nWhat is true.\n\n## Sources\n- x\n")
+    (tmp_path / "docs" / "a.md").write_text("two\n")
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qam", "two"], check=True)
+    # the tool's read prints the raw page; the wrapper must not need it for a page it can parse
+    monkeypatch.setattr(iirc, "tool", lambda *a, **k: type("P", (), {"returncode": 0, "stdout": (field / a[-1]).read_text(), "stderr": ""})())
+    iirc.main(["read", "cited.md"])
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert out.startswith(iirc.READ_HEAD) and lines[1] == "cited.md: Cited page"
+    assert lines[2].startswith("suspect: docs/a.md changed since cited")
+    assert lines[3] == "What is true."
+    assert f"refs: docs/a.md@{sha} · verified 2026-09-19" in lines
+    assert "uuid:" not in out and "created:" not in out and "updated:" not in out
+    assert lines[-1] == "wrong or stale? `iirc write cited.md` replaces it, `iirc delete cited.md` removes it; still right? `iirc verify cited.md`."
+
+
+def test_read_footer_write_names_the_store(tmp_path, monkeypatch, capsys):
+    project, agent = _two_stores(tmp_path, monkeypatch)
+    _page(project.dir, "p.md"); _page(agent.dir, "a.md")
+    # write takes a bare name and --store; delete and verify take STORE/PAGE
+    iirc.main(["read", "agent/a.md"])
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "wrong or stale? `iirc write a.md --store agent` replaces it, `iirc delete agent/a.md` removes it; still right? `iirc verify agent/a.md`.")
+    iirc.main(["read", "p.md"])
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "wrong or stale? `iirc write p.md` replaces it, `iirc delete project/p.md` removes it; still right? `iirc verify project/p.md`.")
+    iirc.main(["read", "p.md", "agent/a.md"])
+    assert capsys.readouterr().out.splitlines()[-1].endswith(
+        "where PAGE is project/p.md or agent/a.md; write takes `p.md` or `a.md --store agent`.")
