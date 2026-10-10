@@ -66,9 +66,9 @@ const WARNING_FIX: [RegExp, string][] = [
 ]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
-// commands that change the page count or the setup the brief reports, and commands that read pages
+// commands that change the page count or the setup the brief reports, and commands that read pages (read also matches read-matching-pages)
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-search-backend|init|doctor)\b/
-const COUNTS_RE = /\biirc\s+(read|read-matching-pages|write)\b/
+const COUNTS_RE = /\biirc\s+(read|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const SUMMARY_LINE_ARGS_RE = /^\s*summary-line-visibility(?:\s+(on|off))?\s*$/
@@ -127,8 +127,17 @@ const STATUS_HINT = 'trust, stores, session counts, and suggestion noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
-// the help card's command column: the longest command, /iirc summary-line-visibility on|off, is 36, plus a gap
-const CMD_COL = 38
+// the settings' commands, as the card and the text help list them
+const SET_LINE = '/iirc summary-line-visibility on|off'
+const SET_MAX = '/iirc max-suggested-pages N'
+const SET_SEARCH = '/iirc set-search-backend'
+const REQUEST_CMD = '/iirc <request>'
+// the help card's command column: the longest command, plus a gap
+const CMD_COL = 2 + Math.max(...[SET_LINE, SET_MAX, SET_SEARCH, REQUEST_CMD, ...COMMANDS.map(([cmd]) => `/iirc ${cmd}`)].map(c => c.length))
+// the hit-rate gauge: its cells, and its title row, the title then a percentage of up to four characters
+const BAR = 36
+const GAUGE_TITLE = 'SUGGESTION HIT RATE · THIS SESSION'
+const GAUGE_W = Math.max(BAR + 2, 2 + GAUGE_TITLE.length + 5)
 // one row of the text help: the command in the card's column, then what it does
 const row = (cmd: string, what: string) => `${cmd.padEnd(CMD_COL)}${what}`
 const KEEP = 200
@@ -292,11 +301,11 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   }
   return [
     `summary-line-visibility ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
-    row('/iirc summary-line-visibility on|off', 'show or hide the line under the prompt'),
-    row('/iirc max-suggested-pages N', 'pages a suggestion line names at most (1-10)'),
-    row('/iirc set-search-backend', 'the embedding model, or substring search'),
+    row(SET_LINE, 'show or hide the line under the prompt'),
+    row(SET_MAX, 'pages a suggestion line names at most (1-10)'),
+    row(SET_SEARCH, 'the embedding model, or substring search'),
     ...COMMANDS.map(([cmd, what]) => row(`/iirc ${cmd}`, what)),
-    row('/iirc <request>', "ask iirc in words: search, remember, what's out of date"),
+    row(REQUEST_CMD, "ask iirc in words: search, remember, what's out of date"),
   ].join('\n')
 }
 
@@ -937,10 +946,6 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
     : []
   const share = c.suggested > 0 ? c.used / c.suggested : 0
-  const BAR = 36
-  // the gauge's title row: the title, then a percentage of up to four characters
-  const GAUGE_TITLE = 'SUGGESTION HIT RATE · THIS SESSION'
-  const GAUGE_W = Math.max(BAR + 2, 2 + GAUGE_TITLE.length + 5)
   const filled = Math.round(share * BAR)
   const pct = Math.round(share * 100)
   const band = pct >= 50 ? GAUGE[2] : pct >= 25 ? GAUGE[1] : GAUGE[0]
@@ -1007,15 +1012,15 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     <Box flexDirection="column">
       <Text> </Text>
       {heading('SETTINGS')}
-      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc summary-line-visibility on|off')}
-      {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested-pages N')}
-      {setting('search', s?.mode ?? '?', '/iirc set-search-backend')}
+      {setting('line under the prompt', isShown ? 'on' : 'off', SET_LINE)}
+      {setting('suggested pages', max === null ? '?' : `up to ${max}`, SET_MAX)}
+      {setting('search', s?.mode ?? '?', SET_SEARCH)}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>
           {heading(group)}
           {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => command(`/iirc ${cmd}`, what))}
-          {group === 'LOOK UP' && command('/iirc <request>', REQUEST_HINT)}
+          {group === 'LOOK UP' && command(REQUEST_CMD, REQUEST_HINT)}
         </Box>
       ))}
     </Box>
@@ -1079,7 +1084,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   // a row of Text cannot stretch to fill a box. Every glyph used is one column wide.
   const widths = [9 + 'If I Recall Correctly'.length, 9 + TAGLINE.length]
   if (view === 'home') {
-    widths.push(16 + '/iirc <request>'.length, ...EXAMPLES.map(x => 4 + x.length))
+    widths.push(16 + REQUEST_CMD.length, ...EXAMPLES.map(x => 4 + x.length))
     widths.push(16 + '/iirc help'.length, 4 + MORE_HINT.length)
     widths.push(16 + '/iirc status'.length, 4 + statusHint.length)
     if (s && s.pages !== null) widths.push(2 + 'STORE'.length, 2 + String(s.pages).length, 2 + 'pages'.length)

@@ -247,6 +247,11 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   await clock.settle()
   expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run iirc doctor')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
+  // read-matching-pages reads pages too, so it refreshes the counts
+  const before = argv.length
+  await $.tool.call({ tool: 'Bash', command: 'iirc read-matching-pages ollama', tool_use_id: 't8' })
+  await clock.settle()
+  expect(argv.slice(before).map(a => a.slice(1))).toContainEqual(['summarize-session-usage', 's1'])
 })
 
 test('/iirc summary-line-visibility off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
