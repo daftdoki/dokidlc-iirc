@@ -42,6 +42,12 @@ const PANE = 'iirc'
 // a tab label past this many characters is cut
 const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
+// Before compaction: past this share of the auto-compact threshold (of the window when auto-compaction
+// is off), ask `iirc nudge --compact` once for its line, and hand it to the model with the next tool
+// result or prompt, whichever comes first. A fifth of the way short leaves room for the turns that write.
+const COMPACT_NEAR = 0.8
+const compactAsked = atom({ plugin: 'iirc', key: 'compactAsked' } as const, false)
+const compactNudge = atom({ plugin: 'iirc', key: 'compactNudge' } as const, null)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears on this task; skip the rest: (.*)/
@@ -538,6 +544,36 @@ function refreshBrief($: EngineInterface) {
   })
 }
 
+/** Near the auto-compact threshold, ask iirc once for the line that asks the model to write what it learned. */
+async function askCompactNudge($: EngineInterface) {
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const b = context.breakdown
+  const limit = b?.isAutoCompactEnabled && b.autoCompactThreshold ? b.autoCompactThreshold : context.window
+  if (context.tokens === undefined || context.tokens < COMPACT_NEAR * limit || (await read($, compactAsked))) return
+  await update($, compactAsked, () => true)
+  const line = await iircLine($, ['nudge', '--compact'])
+  if (line) await update($, compactNudge, () => line)
+}
+
+/** The waiting compaction nudge, once: the caller hands it to the model. */
+async function takeCompactNudge($: EngineInterface): Promise<string | null> {
+  const line = await read($, compactNudge)
+  if (line === null) return null
+  await update($, compactNudge, () => null)
+  if (await uiEnabled($)) $.ui.toast('✎ iirc: context compaction is near; Claude was asked to write what it learned')
+  return line
+}
+
+/** One line `bin/iirc` prints for the model, with this session on stdin as a hook payload; '' when it says nothing. */
+async function iircLine($: EngineInterface, args: string[]): Promise<string> {
+  const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, ...args], {
+    cwd: await $.session.root(),
+    stdin: JSON.stringify({ session_id: await $.session.id() }),
+    timeoutMs: 10000,
+  })
+  return ran.exitCode === 0 ? ran.stdout.trim() : ''
+}
+
 export const register: Register = on => {
   // A resumed session stores its SessionStart line where neither session.append
   // nor $.session.messages() shows it, so ask iirc for the brief directly.
@@ -560,6 +596,34 @@ export const register: Register = on => {
     if (e.tool === 'Bash') {
       if (CHANGES_BRIEF_RE.test(e.command)) refreshBrief($)
       if (COUNTS_RE.test(e.command)) refreshCounts($)
+    }
+    if (e.agentId === undefined && result.deny === undefined) {
+      const line = await takeCompactNudge($)
+      if (line) return { ...result, context: [...(result.context ?? []), line] }
+    }
+    return result
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    const line = await takeCompactNudge($)
+    return next(line ? { ...e, context: [...(e.context ?? []), line] } : e)
+  })
+
+  // after each main-thread turn: is the context near the auto-compact threshold?
+  on('session.measure', async ($, e, next) => {
+    const result = await next(e)
+    if (e.changed.includes('context')) $.clock.after(0, () => void askCompactNudge($).catch(() => {}))
+    return result
+  })
+
+  // the summary keeps what no page holds yet, so the session can write it after compaction;
+  // a compaction that stands starts a new window for the nudge
+  on('session.compact', async ($, e, next) => {
+    const keep = await iircLine($, ['nudge', '--summary']).catch(() => '')
+    const result = await next(keep ? { ...e, instructions: e.instructions ? `${e.instructions}\n\n${keep}` : keep } : e)
+    if (e.trigger !== 'precompute' && e.agentId === undefined && result.skip === undefined) {
+      await update($, compactAsked, () => false)
+      await update($, compactNudge, () => null)
     }
     return result
   })

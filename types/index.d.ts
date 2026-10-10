@@ -67,6 +67,10 @@ declare module 'claude-code' {
       health: IircHealth | null
       /** `iirc max-suggested` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
+      /** Whether this compaction window asked `iirc nudge --compact` already. */
+      compactAsked: boolean
+      /** The line `iirc nudge --compact` printed, waiting for the next tool result or prompt. */
+      compactNudge: string | null
     }
   }
 }

@@ -233,7 +233,7 @@ describes each one.
 | `iirc audit [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
 | `iirc setup`, `iirc init`, `iirc migrate`, `iirc max-suggested N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
 | `iirc tune gather`, `judge`, `sweep`, `done` | The tune steps. `iirc tune sweep --replay FILE...` replays judged prompts through today's search and gate. |
-| `iirc recall`, `iirc nudge` | Hook entries: `recall` names pages for a prompt or a failed command, and `nudge --stop` asks for a page at the end of a turn. |
+| `iirc recall`, `iirc nudge` | Hook entries: `recall` names pages for a prompt or a failed command; `nudge --stop` asks for a page at the end of a turn, and the hooks module runs `nudge --compact` near compaction and `nudge --summary` as it runs. |
 
 ## Every setting
 

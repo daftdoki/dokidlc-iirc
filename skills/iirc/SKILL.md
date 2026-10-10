@@ -125,9 +125,10 @@ Write at these moments, without being asked:
 - when a stage of a quest closes: one page per finding you established
   on your own during research, design, or plan, each citing the stage
   document with `--ref`
-- when a hook says a command worked after failing twice, or that context
-  was just compacted and nothing was written: write what a future session
-  would otherwise re-derive, or say there is nothing worth a page
+- when a hook says a command worked after failing twice, that context
+  compaction is near, or that context was just compacted and nothing was
+  written: write what a future session would otherwise re-derive, or say
+  there is nothing worth a page
 - when the creator says "remember": search first. If a page already holds
   it, `verify` that page and say so instead of writing a second one
 

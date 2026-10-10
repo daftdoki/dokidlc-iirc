@@ -738,3 +738,59 @@ test('/iirc reader PAGE opens the reader on that page, over a fresh session tab'
   expect(await view.find({ text: 'Title of a' })).toBeDefined()
   expect(await view.find({ key: 'tab-session' })).toBeDefined()
 })
+
+test('near the auto-compact threshold, hands the model the write nudge once per compaction, and the summary keeps what is unwritten', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const NUDGE = 'iirc: context compaction is near. Write what you learned.'
+  const SUMMARY = 'List each unwritten finding.'
+  const asked: { argv: string[]; stdin?: string }[] = []
+  const toast: string[] = []
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('session.id', () => ({ value: 's1' }))
+  on('process.run', ($, e) => {
+    asked.push({ argv: [...e.argv], stdin: e.init?.stdin })
+    return e.argv.includes('--compact') ? ran(NUDGE + '\n') : e.argv.includes('--summary') ? ran(SUMMARY + '\n') : ran('')
+  })
+  on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
+  // auto-compaction at 160,000 tokens of a 200,000 window
+  let tokens = 0
+  const context = () => ({ tokens, window: 200_000, percent: Math.round(tokens / 2000) })
+  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { ...context(), breakdown: { autoCompactThreshold: 160_000, isAutoCompactEnabled: true } as never } } }))
+  const measure = async (t: number) => {
+    tokens = t
+    await $.session.measure({ context: context(), rateLimits: [], changed: ['context'] })
+    await clock.settle()
+  }
+  const instructions: (string | undefined)[] = []
+  const summary = [{ role: 'user' as const, text: 'the summary', toolUses: [] }]
+  on('session.compact', ($, e) => (instructions.push(e.instructions), { messages: summary }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  const prompt = async () => (await $.prompt.submit({ text: 'go on', wait: false, origin: { kind: 'composer' } })).context ?? []
+  const nudges = () => asked.filter(a => a.argv.includes('--compact'))
+
+  await measure(100_000)
+  expect(nudges()).toHaveLength(0)                     // far from the threshold: iirc is not asked
+  expect(await prompt()).toEqual([])
+  await measure(130_000)                               // past 80% of the threshold
+  expect(nudges()).toHaveLength(1)
+  expect(nudges()[0]?.argv.slice(1)).toEqual(['nudge', '--compact'])
+  expect(JSON.parse(nudges()[0]?.stdin ?? '{}')).toEqual({ session_id: 's1' })
+  await measure(135_000)
+  expect(nudges()).toHaveLength(1)                     // asked once per compaction window
+  const tool = await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'c1' })
+  expect('context' in tool ? tool.context : undefined).toEqual([NUDGE])   // the first tool result after it carries the line
+  expect(toast.some(t => t.includes('compaction'))).toBe(true)
+  expect(await prompt()).toEqual([])                   // and only that one
+
+  await measure(150_000)
+  await $.session.compact({ trigger: 'auto', instructions: 'keep the plan', messages: summary })
+  expect(instructions.at(-1)).toBe(`keep the plan\n\n${SUMMARY}`)
+  await $.session.compact({ trigger: 'precompute', messages: summary })
+  expect(instructions.at(-1)).toBe(SUMMARY)
+
+  await measure(140_000)                               // a new window after the compaction
+  expect(nudges()).toHaveLength(2)
+  expect(await prompt()).toEqual([NUDGE])              // a prompt carries it when it comes first
+})

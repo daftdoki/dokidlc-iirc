@@ -248,7 +248,8 @@ the transcript. Like the reader, it is your read, not the agent's.
 
 The warnings from the session-start check come as a toast, once per
 distinct set of warnings. So does the reminder at stop when a command
-failed twice, then worked, and nothing was written.
+failed twice, then worked, and nothing was written. So does the
+reminder near compaction, when it reaches the agent.
 
 ## Switches in `.claude/iirc.toml`
 

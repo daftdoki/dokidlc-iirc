@@ -925,6 +925,39 @@ def test_stop_nudge_fires_when_recovery_was_not_nudged(tmp_path, monkeypatch, ca
     iirc.main(["nudge", "--stop"]); assert capsys.readouterr().out == ""
 
 
+def test_compact_nudge_speaks_once_per_compaction_window(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s9")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    def run():
+        # the hooks module passes the session on stdin, as a command hook's payload does
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session_id": "s9"}))); iirc.main(["nudge", "--compact"]); return capsys.readouterr().out
+    iirc.log_event("failure", command="uv tool"); iirc.log_event("failure", command="uv tool"); iirc.log_event("success", command="uv tool")
+    out = run()
+    assert out.startswith("iirc: context compaction is near.") and "`iirc write`" in out
+    assert "`uv tool` (2 failures)" in out                                    # a command that failed and then worked is named
+    assert run() == ""                                                        # once per compaction window
+    iirc.log_event("session", trigger="PreCompact")                           # the PreCompact hook's row: a new window
+    assert run().startswith("iirc: context compaction is near.")
+    iirc.log_event("write", page="a.md", kind="procedure"); iirc.log_event("session", trigger="PreCompact")
+    out = run()
+    assert out and "failed and then worked" not in out                        # a write clears the named commands
+
+
+def test_summary_nudge_asks_the_summary_for_unwritten_findings(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    iirc.set_root(tmp_path)
+    def run():
+        monkeypatch.setattr("sys.stdin", io.StringIO("{}")); iirc.main(["nudge", "--summary"]); return capsys.readouterr().out
+    assert run() == ""                                                        # no store: the summary hears nothing of iirc
+    (tmp_path / ".iirc").mkdir()
+    out = run()
+    assert "`iirc write`" in out and run() == out                             # every compaction, the same line
+
+
 def test_brief_channels(tmp_path, monkeypatch, capsys):
     import io
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))

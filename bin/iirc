@@ -3578,10 +3578,29 @@ def session_writes() -> int:
     return sum(r["cmd"] == "write" for r in read_log(session=session_id()))
 
 
+SUMMARY_NUDGE = "List each finding of this session that took more than one attempt and that no `iirc write` saved, with the command or fix that worked, so the session can write each one after compaction."
+COMPACT_NUDGE = "iirc: context compaction is near. Before it runs, write each finding of this session that a future session would otherwise re-derive and that no page holds yet: one `iirc write` page per finding. If there is nothing worth a page, go on with the task."
+
+
 def cmd_nudge(args: argparse.Namespace) -> None:
-    """Stop hook. Speak once per session, only when a command failed twice and then worked and nothing was written."""
+    """Stop hook: speak once per session, only when a command failed twice and then worked and nothing was written.
+    --compact, for the hooks module near the auto-compact threshold: speak once per compaction window, as plain text.
+    --summary, for the hooks module as compaction runs: the line it adds to what the summary keeps."""
     read_event()
     if not live_stores():
+        return
+    if args.summary:
+        print(SUMMARY_NUDGE)
+        return
+    if args.compact:
+        rows = read_log(session=session_id())
+        since = max((i for i, r in enumerate(rows) if compaction(r)), default=-1)
+        if any(r["cmd"] == "compact-nudged" for r in rows[since + 1:]):
+            return
+        log_event("compact-nudged")
+        recovered = recovered_commands(rows)
+        names = ", ".join(f"`{c}` ({n} failures)" for c, n in recovered[:3])
+        print(COMPACT_NUDGE + (f" These failed and then worked this session: {names}." if names else ""))
         return
     if args.stop:
         rows = read_log(session=session_id())
@@ -4429,8 +4448,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--success", action="store_true", help="PostToolUse: log the command; nudge to write when it had failed twice before")
     p.set_defaults(func=cmd_recall)
 
-    p = sub.add_parser("nudge", help="hook entry: Stop reminder to write, once per session")
+    p = sub.add_parser("nudge", help="hook entry: Stop reminder to write, once per session; --compact, before compaction")
     p.add_argument("--stop", action="store_true")
+    p.add_argument("--compact", action="store_true", help="plain text, once per compaction window: write what this session learned")
+    p.add_argument("--summary", action="store_true", help="plain text: what the compaction summary keeps for iirc")
     p.set_defaults(func=cmd_nudge)
 
     p = sub.add_parser("migrate", help="move this repository and machine from the memory plugin's layout; stages, never commits")

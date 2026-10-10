@@ -228,6 +228,30 @@ row, then rotate the logs. The 10-second timeout is there because the
 default `SessionEnd` budget is 1.5 seconds
 ([hooks](https://code.claude.com/docs/en/hooks.md)).
 
+Before a compaction, the hooks module asks the agent to write. After
+each main-thread turn it reads the context's fill. At 80% of the
+auto-compact threshold (of the window when auto-compaction is off), it
+runs `iirc nudge --compact` once per compaction window. The line rides
+on the next tool result or prompt, whichever comes first, and a toast
+tells you:
+
+```
+iirc: context compaction is near. Before it runs, write each finding of this session that a future session would otherwise re-derive and that no page holds yet: one `iirc write` page per finding. If there is nothing worth a page, go on with the task.
+```
+
+When a command failed and then worked and nothing was written, the
+line names it. A turn can run past the threshold before the line
+reaches the agent, so the module also adds `iirc nudge --summary` to
+what the summary keeps:
+
+```
+List each finding of this session that took more than one attempt and that no `iirc write` saved, with the command or fix that worked, so the session can write each one after compaction.
+```
+
+In a session that wrote nothing, the session-start line after the
+compaction asks for those pages.
+Both commands print nothing in a repository with no store.
+
 ### The guard
 
 `PreToolUse` on Bash and Read runs `scripts/guard.sh`. Claude Code asks
@@ -246,7 +270,7 @@ prints the trust markers, or `iirc doctor --fix` if that fails.
 | Common words | `bin/iirc_words.txt` | English words that never count as a strong term. From wordfreq, CC-BY-SA 4.0; see `NOTICE`. `scripts/common-words.py` rebuilds it. |
 | The engine pin | `iirc.pin` | The memoryfield-tool commit, and nomic, the model whose distances match the tool's. |
 | Command hooks | `hooks/hooks.json` | The events above. |
-| The hooks module | `hooks/register.tsx` | Draws the hook lines, the line under the prompt, and the `/iirc` cards. See [UI.md](UI.md). |
+| The hooks module | `hooks/register.tsx` | Draws the hook lines, the line under the prompt, and the `/iirc` cards. See [UI.md](UI.md). Near compaction, asks the agent to write. |
 | The guard | `scripts/guard.sh` | The `PreToolUse` asks and denies. |
 | The replays | `scripts/replay-files.py`, `scripts/line-replay.py` | Build replay files from judged labels, and replay prompts into `claude -p` sessions. See [The replays](#the-replays). |
 | The skill | `skills/iirc/SKILL.md`, `skills/iirc/references/` | When to search, when to write, the writing rules, setup, and tune. |
