@@ -3169,6 +3169,17 @@ def test_old_recall_tables_move_on_doctor_fix(tmp_path, monkeypatch, capsys):
     toml.unlink(); iirc.set_root(tmp_path)
 
 
+def test_old_table_of_no_model_names_no_fix(tmp_path, monkeypatch):
+    """[recall.foo] names no embedding model, so doctor --fix cannot rename it; the error says so and promises no fix."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text("[recall.foo]\nboth = 0.4\n")
+    iirc.set_root(tmp_path)
+    assert "[recall.foo] names no embedding model" in iirc.CONFIG_ERROR and "doctor --fix" not in iirc.CONFIG_ERROR
+    assert not iirc.knob_error_only()
+    toml.unlink(); iirc.set_root(tmp_path)
+
+
 # p5 step 25
 
 @contextlib.contextmanager

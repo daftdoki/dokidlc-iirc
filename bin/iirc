@@ -467,6 +467,10 @@ def load_knobs(cfg: dict) -> dict[str, float]:
         if flat:
             raise ConfigError(f"{STORE_CONFIG}: [recall] {flat[0]} is a flat key under the old name; thresholds live in a model's table; "
                               f"`iirc doctor --fix` moves them to [{table_header(FLAT_TABLE)}]")
+        tables = {iirc_embed.table_name(m) for m in iirc_embed.MODELS}
+        unknown = sorted(set(old) - tables)
+        if unknown:
+            raise ConfigError(f"{STORE_CONFIG}: [{table_header(unknown[0], 'recall')}] names no embedding model; the tables are {', '.join(sorted(tables))}")
         t = next(iter(old), FLAT_TABLE)
         raise ConfigError(f"{STORE_CONFIG}: [{table_header(t, 'recall')}] is the old name of [{table_header(t)}]; `iirc doctor --fix` renames it")
     if old is not None:
