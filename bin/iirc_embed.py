@@ -157,7 +157,7 @@ def run_cpu(backend: Backend, texts: list[str], kind: str):
 
 
 def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float = EMBED_TIMEOUT):
-    """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else."""
+    """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else, such as another width."""
     import numpy as np
     if not texts:
         return []
@@ -167,7 +167,7 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
             if got is None:
                 return None
             vecs, owner = np.asarray(got[0], dtype=np.float32), np.asarray(got[1])
-            if vecs.ndim != 2 or len(owner) != len(vecs):
+            if vecs.ndim != 2 or len(owner) != len(vecs) or vecs.shape[1] != backend.model.dims:
                 return None
             parts = [vecs[owner == i] for i in range(len(texts))]
             return parts if all(len(p) for p in parts) else None
@@ -179,7 +179,8 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
         vecs = np.asarray(rows, dtype=np.float32)
     except (urllib.error.URLError, OSError, ValueError, TypeError, AttributeError, KeyError):
         return None
-    if vecs.ndim != 2 or len(vecs) != len(texts):
+    # another width than the model's is another model served under its name; load() would refuse the store it made
+    if vecs.ndim != 2 or len(vecs) != len(texts) or vecs.shape[1] != backend.model.dims:
         return None
     return [vecs[i:i + 1] for i in range(len(texts))]
 
@@ -191,7 +192,11 @@ def embed_query(backend: Backend, query: str):
 
 
 def load(path: Path) -> Vectors | None:
-    """The store at path, or None when it is missing or not a store this module wrote."""
+    """The store at path, or None when it is missing, not a store this module wrote, or of another width than its model's.
+
+    The file name names the model (store_path). A server that serves another
+    model under the same name changes the width, and every page counts as missing.
+    """
     import numpy as np
     try:
         with np.load(path, allow_pickle=False) as data:
@@ -200,6 +205,9 @@ def load(path: Path) -> Vectors | None:
     except (OSError, KeyError, ValueError):
         return None
     if vecs.dtype != np.float32 or vecs.ndim != 2 or len(names) != len(shas):
+        return None
+    dims = {table_name(m.id): m.dims for m in MODELS.values()}.get(path.stem)
+    if len(vecs) and dims is not None and vecs.shape[1] != dims:
         return None
     if owner is None and len(vecs) != len(names):
         return None

@@ -2890,9 +2890,10 @@ _WORDS = ("alpha", "beta", "gamma")
 
 @contextlib.contextmanager
 def _fake_ollama(monkeypatch, model="nomic-embed-text"):
-    """An ollama that answers / and /api/embed: each text's vector counts the _WORDS in it. Yields the inputs it embedded."""
+    """An ollama that answers / and /api/embed: each text's vector counts the _WORDS in it, padded with zeros to the model's width. Yields the inputs it embedded."""
     import http.server
     seen: list[str] = []
+    pad = [0.0] * (iirc.iirc_embed.MODELS[model].dims - len(_WORDS) - 1)
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -2902,7 +2903,7 @@ def _fake_ollama(monkeypatch, model="nomic-embed-text"):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             assert self.path == "/api/embed" and body["model"] == model and body["truncate"] is True
             seen.extend(body["input"])
-            vecs = [[t.count(w) + 0.0 for w in _WORDS] + [0.01] for t in body["input"]]
+            vecs = [[t.count(w) + 0.0 for w in _WORDS] + [0.01] + pad for t in body["input"]]
             out = json.dumps({"embeddings": vecs}).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
 
@@ -2939,7 +2940,7 @@ def test_vector_store_round_trip(tmp_path, monkeypatch):
     v = iirc.iirc_embed.load(path)
     assert list(v.names) == ["alpha-notes.md", "beta-notes.md"]           # index.md is never a page
     assert list(v.sha) == [hashlib.sha256((field / n).read_bytes()).hexdigest() for n in v.names]
-    assert v.vecs.dtype == np.float32 and v.vecs.shape == (2, 4)
+    assert v.vecs.dtype == np.float32 and v.vecs.shape == (2, 768)
     assert sorted(seen) == sorted("search_document: " + (field / n).read_text() for n in v.names)
     # the page text is cut at 8,192 bytes, as memoryfield-tool cuts it
     assert iirc.iirc_embed.doc_text(b"x" * 9000) == "search_document: " + "x" * 8192
@@ -3097,6 +3098,7 @@ def _fake_openai(monkeypatch, model):
     """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order. Yields the inputs."""
     import http.server
     seen: list[str] = []
+    pad = [0.0] * (iirc.iirc_embed.MODELS[model].dims - len(_WORDS) - 1)
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -3106,7 +3108,7 @@ def _fake_openai(monkeypatch, model):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             assert self.path == "/v1/embeddings" and set(body) == {"model", "input"} and body["model"] == model
             seen.extend(body["input"])
-            data = [{"index": i, "embedding": [t.count(w) + 0.0 for w in _WORDS] + [0.01]} for i, t in enumerate(body["input"])]
+            data = [{"index": i, "embedding": [t.count(w) + 0.0 for w in _WORDS] + [0.01] + pad} for i, t in enumerate(body["input"])]
             out = json.dumps({"data": data[::-1], "model": model}).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
 
@@ -3223,7 +3225,8 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
 
     def run_cpu(backend, texts, kind):
         sent.append((kind, texts))
-        return cpu.embed_texts(texts, kind, tok, sess)
+        vecs, owner = cpu.embed_texts(texts, kind, tok, sess)
+        return np.pad(vecs, ((0, 0), (0, backend.model.dims - vecs.shape[1]))), owner   # the model's width, or the store is refused
     monkeypatch.setattr(iirc.iirc_embed, "run_cpu", run_cpu)
     monkeypatch.setattr(iirc, "cpu_ready", lambda: True)
     iirc._RESOLVED = None
@@ -3231,7 +3234,7 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
     docs = dict(zip(sorted(p.name for p in iirc.list_pages(field)), sent[0][1]))
     assert docs["long-notes.md"] == f"Long notes\nmostly alpha\nTopics: greek\n\n{text}\n"   # no YAML, no Sources
     v = iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0]))
-    assert v.vecs.shape[1] == 5 and list(v.owner).count(v.names.index("long-notes.md")) == 3
+    assert v.vecs.shape[1] == 384 and list(v.owner).count(v.names.index("long-notes.md")) == 3
     rows = {r["filename"]: r["distance"] for r in iirc.semantic_search("gamma")}
     wv, _ = cpu.embed_texts([docs["long-notes.md"]], "doc", tok, sess)
     qv, _ = cpu.embed_texts(["gamma"], "query", tok, sess)
@@ -3343,7 +3346,8 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
         assert rf.iirc.read_config()["embedding"]["model"] == backend.model.id
         seen.append((backend.model.id, str(rf.iirc.config_file()), os.environ["IIRC_CACHE_DIR"]))
         near = 0 if backend.model.id == "nomic-embed-text" else 1     # "gamma" is near alpha for nomic, near beta for gemma
-        return [np.asarray([[t.count("alpha") + (near == 0) * t.count("gamma"), t.count("beta") + (near == 1) * t.count("gamma"), 0.01]],
+        pad = [0.0] * (backend.model.dims - 3)                       # the model's width, or the store is refused
+        return [np.asarray([[t.count("alpha") + (near == 0) * t.count("gamma"), t.count("beta") + (near == 1) * t.count("gamma"), 0.01] + pad],
                            dtype=np.float32) for t in texts]
     monkeypatch.setattr(iirc.iirc_embed, "embed", embed)
     monkeypatch.setattr(rf.iirc, "start_background", lambda argv: 1 / 0)
@@ -3668,3 +3672,29 @@ def test_openai_host_without_the_model_fails_doctor(tmp_path, monkeypatch, capsy
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
         assert "ok  embedding endpoint http://127.0.0.1:" in capsys.readouterr().out
+
+
+def test_vector_store_of_the_wrong_width_is_reembedded(tmp_path, monkeypatch):
+    """A server that serves another model under the same name returns another width: the old store counts as missing, not a ValueError."""
+    import numpy as np
+    field = _vector_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "start_background", lambda argv: None)
+    with _fake_ollama(monkeypatch) as seen:
+        iirc.reindex()
+        path = iirc.vector_path(iirc.STORES[0])
+        v = iirc.iirc_embed.load(path)
+        iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
+        assert iirc.iirc_embed.load(path) is None
+        seen.clear()
+        rows = iirc.hybrid_search("alpha")
+        assert sorted(seen) == sorted(["search_query: alpha"] + ["search_document: " + (field / n).read_text() for n in ("alpha-notes.md", "beta-notes.md")])
+        assert [r["filename"] for r in rows if "semantic" in r["via"]] == ["alpha-notes.md"]
+        assert iirc.iirc_embed.load(path).vecs.shape == (2, 768)
+        # the server now answers at another width than the model's: a failed embed, so nothing is saved and nothing is embedded again
+        monkeypatch.setitem(iirc.iirc_embed.MODELS, "nomic-embed-text", iirc.iirc_embed.MODELS["nomic-embed-text"]._replace(dims=1024))
+        for _ in range(2):
+            seen.clear()
+            assert [r for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == []
+            assert seen == ["search_query: alpha"]
+        with np.load(path) as data:
+            assert data["vecs"].shape == (2, 768)
