@@ -1058,8 +1058,9 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     return [r for r in recall_verdicts(rows) if r["verdict"] == "passed"]
 
 
-def recall_verdicts(rows: list[dict]) -> list[dict]:
+def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None) -> list[dict]:
     """Every candidate, with its verdict: passed, over_max, or why the gate refused it.
+    `knobs` and `cap` default to RECALL and max_suggested(); `tune sweep --replay` passes others.
 
     Keep a page only on evidence that survives a busy field.
 
@@ -1071,10 +1072,11 @@ def recall_verdicts(rows: list[dict]) -> list[dict]:
     """
     out = []
     kept = 0
+    cap = max_suggested() if cap is None else cap
     for rank, r in enumerate(rows):
-        rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], RECALL)
+        rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], knobs or RECALL)
         if rule is not None:
-            reason = "passed" if kept < max_suggested() else "over_max"
+            reason = "passed" if kept < cap else "over_max"
             kept += reason == "passed"
         out.append({**r, "rank": rank, "rule": rule, "verdict": reason})
     return out
@@ -3497,9 +3499,14 @@ def knob_grid() -> list[dict[str, float]]:
 
 def sweep_counts(pairs: list[tuple[dict, bool]], knobs: dict[str, float]) -> dict:
     """What the gate would do under these knobs to the judged pairs: (candidate, relevant)."""
+    return sweep_tally([(gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs)[0] is not None,
+                         relevant) for cand, relevant in pairs])
+
+
+def sweep_tally(outcomes: list[tuple[bool, bool]]) -> dict:
+    """Counts, precision, recall, and F1 over (passed, relevant) outcomes."""
     c = {"relevant_passed": 0, "noise_passed": 0, "relevant_refused": 0, "noise_refused": 0}
-    for cand, relevant in pairs:
-        passed = gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs)[0] is not None
+    for passed, relevant in outcomes:
         c[("relevant_" if relevant else "noise_") + ("passed" if passed else "refused")] += 1
     tp, fp, fn = c["relevant_passed"], c["noise_passed"], c["relevant_refused"]
     c["precision"] = tp / (tp + fp) if tp + fp else 0.0
@@ -3514,7 +3521,82 @@ def sweep_line(knobs: dict[str, float], c: dict) -> str:
             f"precision {c['precision']:.2f}, recall {c['recall']:.2f}, F1 {c['f1']:.2f}")
 
 
+def replay_counts(prompts: list[tuple[list[dict], list[tuple[str, bool]]]], knobs: dict[str, float]) -> dict:
+    """The gate's counts under these knobs on (search rows, judged pairs) per prompt; every gate pass counts, with no max_suggested cut."""
+    outcomes = []
+    for rows, pairs in prompts:
+        passed = {r["filename"] for r in recall_verdicts(rows, knobs, cap=len(rows)) if r["verdict"] == "passed"}
+        outcomes += [(page in passed, relevant) for page, relevant in pairs]
+    return sweep_tally(outcomes)
+
+
+def cmd_tune_sweep_replay(files: list[str]) -> None:
+    """Replay judged pairs through the current search and gate: one search per (repo, qid), then the gate per grid point."""
+    groups: dict[tuple[str, str], dict] = {}
+    unsure, other_repo, missing, excerpt = 0, 0, 0, 0
+    for f in files:
+        for n, line in enumerate(Path(f).read_text().splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                j = json.loads(line)
+                repo, qid, page, label = j["repo"], str(j["qid"]), base(j["page"]), j["label"]
+            except (json.JSONDecodeError, KeyError, TypeError):
+                die(f"{f}:{n}: a replay row needs repo, qid, prompt, via, page, and label")
+            if repo != str(ROOT):
+                other_repo += 1   # a replay file may pool several repositories; each sweeps its own
+                continue
+            if label == "unsure":
+                unsure += 1
+                continue
+            if not find_page(page):
+                missing += 1
+                continue
+            excerpt += bool(j.get("excerpt"))
+            g = groups.setdefault((repo, qid), {"prompt": j.get("prompt") or "", "via": j.get("via"), "pairs": []})
+            g["pairs"].append((page, label == "relevant"))
+    # the hook searches the person's words of a prompt, and a failure's query as it stands
+    prompts = [(hybrid_search(person_text(g["prompt"]) if g["via"] == "prompt" else g["prompt"]), g["pairs"]) for g in groups.values()]
+    total = sum(len(pairs) for _, pairs in prompts)
+    rel = sum(r for _, pairs in prompts for _, r in pairs)
+    print(f"judged pairs: {total} ({rel} relevant, {total - rel} noise) from {len(prompts)} prompts; {excerpt} of them from excerpts")
+    print(f"left out: {unsure} unsure; {missing} missing from the store; {other_repo} from other repositories")
+    sweep_report(total, lambda k: replay_counts(prompts, k))
+
+
+def sweep_report(n: int, count) -> None:
+    """The current knobs' counts, and, past TUNE_FLOOR judged pairs, the grid's best; `count(knobs)` gives the counts."""
+    print("criterion: F1 = 2PR/(P+R), where P (precision) = relevant passed / all passed and R (recall) = relevant passed / all relevant")
+    now = count(RECALL)
+    print("current  " + sweep_line(RECALL, now))
+    if n < TUNE_FLOOR:
+        print(f"too few judged pairs to propose a change: {n}, and the floor is {TUNE_FLOOR}. Judge more sessions, then sweep again.")
+        return
+    grid = [(k, count(k)) for k in knob_grid()]
+
+    def off(k: dict[str, float]) -> float:
+        """How far a grid point moves the knobs; a tie goes to the smaller change."""
+        return abs(k["semantic_only"] - RECALL["semantic_only"]) + abs(k["both"] - RECALL["both"])
+    best = sorted(grid, key=lambda kc: (-round(kc[1]["f1"], 6), -round(kc[1]["precision"], 6), off(kc[0])))[:5]
+    print("best by F1:")
+    for k, c in best:
+        print("  " + sweep_line(k, c))
+    held = [kc for kc in grid if kc[1]["recall"] >= now["recall"]]
+    if held:
+        k, c = max(held, key=lambda kc: (round(kc[1]["precision"], 6), round(kc[1]["f1"], 6), -off(kc[0])))
+        print("best precision at equal or better recall:")
+        print("  " + sweep_line(k, c))
+    k, c = best[0]
+    if c["f1"] > now["f1"] + 1e-9:
+        print(f"the best grid point beats the current knobs on F1 by {c['f1'] - now['f1']:.2f}")
+    else:
+        print("no grid point beats the current knobs on F1; propose no knob change")
+
+
 def cmd_tune_sweep(args: argparse.Namespace) -> None:
+    if args.replay:
+        cmd_tune_sweep_replay(args.replay)
+        return
     evals = eval_rows()
     by_pair = {(c.get("session"), rid, base(c.get("page"))): c for rid, rows in evals.items() for c in rows}
     pairs, unsure, other_repo, no_row, no_distance = [], 0, 0, 0, 0
@@ -3538,31 +3620,7 @@ def cmd_tune_sweep(args: argparse.Namespace) -> None:
     print(f"judged pairs with a distance: {len(pairs)} ({rel} relevant, {len(pairs) - rel} noise)")
     print(f"left out: {unsure} unsure; {no_row} with no candidate row, from a recall older than eval rows or a page outside the "
           f"{EVAL_CANDIDATES} logged candidates; {no_distance} with no distance, which no knob moves; {other_repo} from other repositories")
-    print("criterion: F1 = 2PR/(P+R), where P (precision) = relevant passed / all passed and R (recall) = relevant passed / all relevant")
-    now = sweep_counts(pairs, RECALL)
-    print("current  " + sweep_line(RECALL, now))
-    if len(pairs) < TUNE_FLOOR:
-        print(f"too few judged pairs to propose a change: {len(pairs)}, and the floor is {TUNE_FLOOR}. Judge more sessions, then sweep again.")
-        return
-    grid = [(k, sweep_counts(pairs, k)) for k in knob_grid()]
-
-    def off(k: dict[str, float]) -> float:
-        """How far a grid point moves the knobs; a tie goes to the smaller change."""
-        return abs(k["semantic_only"] - RECALL["semantic_only"]) + abs(k["both"] - RECALL["both"])
-    best = sorted(grid, key=lambda kc: (-round(kc[1]["f1"], 6), -round(kc[1]["precision"], 6), off(kc[0])))[:5]
-    print("best by F1:")
-    for k, c in best:
-        print("  " + sweep_line(k, c))
-    held = [kc for kc in grid if kc[1]["recall"] >= now["recall"]]
-    if held:
-        k, c = max(held, key=lambda kc: (round(kc[1]["precision"], 6), round(kc[1]["f1"], 6), -off(kc[0])))
-        print("best precision at equal or better recall:")
-        print("  " + sweep_line(k, c))
-    k, c = best[0]
-    if c["f1"] > now["f1"] + 1e-9:
-        print(f"the best grid point beats the current knobs on F1 by {c['f1'] - now['f1']:.2f}")
-    else:
-        print("no grid point beats the current knobs on F1; propose no knob change")
+    sweep_report(len(pairs), lambda k: sweep_counts(pairs, k))
 
 
 def cmd_tune_done(args: argparse.Namespace) -> None:
@@ -3656,6 +3714,7 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--days", type=int, metavar="N", help="only sessions with a recall in the last N days")
     t = tsub.add_parser("judge", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
     t = tsub.add_parser("sweep", help="the gate's counts on the judged pairs for the current knobs and a grid of others")
+    t.add_argument("--replay", nargs="+", metavar="FILE", help="replay JSONL: run each judged prompt through the current search and gate")
     t = tsub.add_parser("done", help="mark a session tuned, so gather skips it")
     t.add_argument("session", metavar="SESSION")
     p.set_defaults(func=cmd_tune)

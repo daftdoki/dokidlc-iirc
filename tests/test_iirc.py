@@ -2250,3 +2250,36 @@ def test_skill_names_the_writing_rules():
     rules = ["write for the search", "words a future prompt or error will use", "quote error text exactly",
              "search before every write", "names the page it reverses", "where the fact holds"]
     assert [r for r in rules if r not in text] == []
+
+
+# p5 step 1
+
+def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)
+    field = tmp_path / ".iirc"; field.mkdir()
+    for name, title in (("pysqlite3-install-override.md", "pysqlite3-binary blocks install"), ("uv-install-notes.md", "uv install notes"),
+                        ("ollama-host-hang.md", "ollama on 11434 hangs"), ("quiet.md", "quiet page")):
+        (field / name).write_text(f"---\ntitle: {title}\nsummary: s\ntopics: [t]\nkind: finding\n---\nx\n")
+    iirc.write_config_file({"semantic": False})
+    r = str(tmp_path.resolve())
+    q1 = {"repo": r, "qid": "q1", "prompt": "why does uv tool install fail with pysqlite3-binary", "via": "prompt"}
+    q2 = {"repo": r, "qid": "q2", "prompt": "curl 127.0.0.1:11434 hangs", "via": "failure", "excerpt": True}
+    _jsonl(tmp_path / "a.jsonl", [{**q1, "page": "pysqlite3-install-override.md", "label": "relevant"},   # an identifier passes
+                                  {**q1, "page": "uv-install-notes.md", "label": "noise"},                # a plain word is refused
+                                  {**q1, "page": "gone.md", "label": "noise"}])                           # not in the store
+    _jsonl(tmp_path / "b.jsonl", [{**q2, "page": "ollama-host-hang.md", "label": "noise"},
+                                  {**q2, "page": "quiet.md", "label": "relevant"},                        # search never finds it
+                                  {**q2, "page": "uv-install-notes.md", "label": "unsure"},
+                                  {**q1, "repo": "/other", "page": "pysqlite3-install-override.md", "label": "noise"}])
+    calls = []
+    real = iirc.hybrid_search
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: calls.append(q) or real(q))
+    iirc.main(["tune", "sweep", "--replay", str(tmp_path / "a.jsonl"), str(tmp_path / "b.jsonl")])
+    out = capsys.readouterr().out
+    assert len(calls) == 2   # one search per prompt, none for another repository's
+    assert "judged pairs: 4 (2 relevant, 2 noise) from 2 prompts; 2 of them from excerpts" in out
+    assert "left out: 1 unsure; 1 missing from the store; 1 from other repositories" in out
+    assert "current  semantic_only 0.28 both 0.34: relevant passed 1, noise passed 1, relevant refused 1; precision 0.50, recall 0.50, F1 0.50" in out
+    assert "best by F1:" in out and "no grid point beats the current knobs on F1" in out
