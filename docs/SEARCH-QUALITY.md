@@ -263,8 +263,11 @@ Phases 1 and 2 were built on 2026-10-09 as quest 2610100115-p5 in
 agent-builder, whose `plan.md` records each step's measurement under
 "Deviations from plan". A count below is relevant passes, noise passes,
 and relevant pairs refused, from `iirc tune sweep --replay` on the strict
-labels. Agent-builder has 1,131 judged pairs (60 relevant) from 98
-prompts; neckbeard has 437 pairs (77 relevant) from 79 prompts.
+labels. Up to the retune, the replay files are as committed at
+agent-builder 5a3ae04: agent-builder has 1,131 judged pairs (60
+relevant) from 98 prompts, and neckbeard has 437 pairs (77 relevant)
+from 79 prompts. The pooling round merged its labels in later, giving
+1,318 and 566 pairs.
 
 **The gate passes more relevant pages and fewer noise pages.**
 
@@ -390,16 +393,15 @@ Decisions 1 and 2 are taken: phase 1 was built with the changes in
    build clean-room from the spec, or ask Cal first.
 5. Cleanup: the six pulled ollama models (about 5.2 GB), the two
    rerankers in `~/.cache/huggingface` (3.3 GB), and the research
-   downloads in the session scratchpad (about 7 GB). Remove now, or keep
-   for the phase 2 pooling round?
-6. The research reports live in this session's scratchpad, which does
-   not last. Keep a copy, and where? They quote prompts, so a public
-   repository needs a privacy pass first.
+   downloads in the session scratchpad (about 7 GB). Remove them?
+6. Taken: the research reports are kept in the `evidence/` directory of
+   quest 2610100115-p5 in the private agent-builder repository, because
+   they quote prompts.
 
 ## Sources
 
-The research reports, scripts, and judged data are in the agent-builder
-session scratchpad (`pageopt/`), session b4dd91da, 2026-10-09:
+The research reports, scripts, and judged data are in the `evidence/`
+directory of quest 2610100115-p5 in the agent-builder repository:
 mechanics, experiments, retrieval research, memory practice, the
 suggest and read flow, models, CPU tier, port, reranker, other
 repositories, and label agreement. The tune judgments are in

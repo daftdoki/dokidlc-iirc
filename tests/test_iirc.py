@@ -2866,7 +2866,7 @@ def test_recall_names_a_page_once_per_session(tmp_path, monkeypatch):
     for i in range(8):
         assert named(f"x{i}") == [f"x{i}"]
     assert named("a", "c") == ["c"]
-    assert named("a") == []            # 10 recalls without it: a stays out
+    assert named("a") == []            # named once this session: a stays out
     # a page read is left out too, STORE/PAGE or bare
     iirc.log_event("read", pages=["project/d"])
     assert named("d", "e") == ["e"]
