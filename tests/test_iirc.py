@@ -3337,6 +3337,7 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
                            dtype=np.float32) for t in texts]
     monkeypatch.setattr(iirc.iirc_embed, "embed", embed)
     monkeypatch.setattr(rf.iirc, "start_background", lambda argv: 1 / 0)
+    monkeypatch.setattr(rf.iirc, "resolve_host", lambda: ("http://127.0.0.1:9", "default", True))    # the stub is the backend; CI has no ollama
     prompts = {"q1": ("gamma rays", "prompt")}
     assert rf.ranked_pages("nomic-embed-text", tmp_path, prompts, tmp_path / "pool") == {"q1": ["alpha-notes.md"]}
     assert rf.ranked_pages("embeddinggemma", tmp_path, prompts, tmp_path / "pool") == {"q1": ["beta-notes.md"]}
