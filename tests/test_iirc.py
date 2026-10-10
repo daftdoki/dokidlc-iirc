@@ -2819,7 +2819,8 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
 
 # p5 step 18
 
-def test_tune_sweep_prints_audit(tmp_path, monkeypatch, capsys):
+def test_evaluate_suggestion_thresholds_leaves_the_audit_out(tmp_path, monkeypatch, capsys):
+    """Auditing is its own step before judging; the evaluation prints only the gate's counts."""
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise")])
     field = tmp_path / "repo" / ".iirc"; field.mkdir()
     (field / "wordy.md").write_text("---\ntitle: Wombat burrows collapse after heavy rain when the soil holds too much clay underneath\n"
@@ -2827,12 +2828,11 @@ def test_tune_sweep_prints_audit(tmp_path, monkeypatch, capsys):
     flagged = "wordy.md: title: the title is 85 characters, over 70; shorten it"
     iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds"])
     out = capsys.readouterr().out
-    assert "\naudit:\n" in out and out.index("\naudit:\n") < out.index(flagged)
-    assert out.rstrip().endswith("1 finding in 1 page; no vectors: own-title skipped")
+    assert "judged pairs" in out and "audit:" not in out and flagged not in out
     (tmp_path / "empty.jsonl").write_text("")
     iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds", "--replay-prompts", str(tmp_path / "empty.jsonl")])
     out = capsys.readouterr().out
-    assert "\naudit:\n" in out and flagged in out
+    assert "audit:" not in out and flagged not in out
 
 
 # p5 step 10

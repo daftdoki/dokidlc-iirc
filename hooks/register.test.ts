@@ -280,7 +280,8 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
   expect(helpText).toContain('summary-line-visibility on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
-  expect(helpText).toMatch(/\/iirc tune-suggestions .*then audit/)
+  expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate the thresholds/)
+  expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
   expect((helpText ?? '').indexOf('/iirc set-search-backend')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
   for (const surface of ['terminal', 'desktop'] as const) {

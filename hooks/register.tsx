@@ -105,7 +105,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['summarize-page-usage', 'how the pages are being used', 'MAINTENANCE'],
   ['rebuild-search-index', 'rebuild the search index', 'MAINTENANCE'],
   ['show-suggestion-thresholds', "the suggestion gate's distances and ranges", 'MAINTENANCE'],
-  ['tune-suggestions', 'judge suggestions, evaluate the thresholds, then audit', 'MAINTENANCE'],
+  ['tune-suggestions', 'judge suggestions, then evaluate the thresholds', 'MAINTENANCE'],
   ['estimate-context-tokens', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['show-page-topics', 'every topic with its page count', 'LOOK UP'],

@@ -4223,11 +4223,6 @@ def cmd_tune_sweep(args: argparse.Namespace) -> None:
         cmd_tune_sweep_replay(args.replay_prompts)
     else:
         cmd_tune_sweep_judged()
-    # the knobs cannot fix a page that search shows badly; references/tune.md has the step for these
-    pages = audit_pages()
-    findings, skip = audit_findings(pages)
-    print("\naudit:")
-    print_audit(findings, len(pages), skip)
 
 
 def cmd_tune_sweep_judged() -> None:
