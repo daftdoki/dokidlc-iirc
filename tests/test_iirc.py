@@ -2721,9 +2721,16 @@ def _audit_fixture(tmp_path, monkeypatch):
     return vectors
 
 
+def _audit_host_answers(monkeypatch):
+    """own-title runs as if a host answered; the title searches stay string matches, so the decoy ties by filename."""
+    real = iirc.own_title_skip
+    monkeypatch.setattr(iirc, "own_title_skip", lambda vectors: real(vectors) if not vectors else None)
+
+
 def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     vectors = _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
+    _audit_host_answers(monkeypatch)
     before = sorted(str(p) for p in tmp_path.rglob("*"))
     iirc.main(["audit"])
     out = capsys.readouterr().out
@@ -3439,6 +3446,7 @@ def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
     """The audit's last line names the model its vectors came from, not the pin's nomic."""
     vectors = _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
+    _audit_host_answers(monkeypatch)
     iirc.write_config_file({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
     iirc.main(["audit", "old.md"])
     assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"
@@ -3588,3 +3596,17 @@ def test_recall_refresh_never_overwrites_a_fuller_store(tmp_path, monkeypatch):
         monkeypatch.setattr(E, "load", real_load)
     names = E.load(path).names
     assert len(names) == len(iirc.list_pages(field)) == 20 and "alpha-notes.md" in names
+
+
+def test_audit_skips_own_title_when_no_host_answers(tmp_path, monkeypatch, capsys):
+    """Vectors on disk are not enough: with no host, a title search is string matches, which tie on filenames."""
+    vectors = _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
+    iirc.write_config_file({"semantic": True})
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
+    monkeypatch.setattr(iirc, "_RESOLVED", None)
+    iirc.main(["audit"])
+    out, err = capsys.readouterr()
+    assert ": own-title: " not in out and "hub.md: hub: " in out
+    assert err == ""                                                    # no line per page
+    assert out.splitlines()[-1] == "6 findings in 11 pages; 127.0.0.1:11434 does not answer: own-title skipped"

@@ -394,7 +394,7 @@ line per finding as `PAGE: CHECK: what; fix`. It writes nothing.
 |---|---|
 | `title`, `summary` | the write warnings above |
 | `secret` | a line that matches a secret pattern |
-| `own-title` | a search for the page's own title ranks another page first, or misses it; needs the vector store |
+| `own-title` | a search for the page's own title ranks another page first, or misses it; needs the vector store and an embedding host that answers, else the last line says why it was skipped |
 | `hub` | 6 or more tune judgments, with at least 3 noise judgments for each relevant one |
 | `superseded` | a page that says "superseded by [[" or "replaced by [[", or has a `superseded` key, and keeps more than one paragraph |
 

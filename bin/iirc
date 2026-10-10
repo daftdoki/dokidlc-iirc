@@ -4106,9 +4106,9 @@ def cmd_tune_sweep(args: argparse.Namespace) -> None:
         cmd_tune_sweep_judged()
     # the knobs cannot fix a page that search shows badly; references/tune.md has the step for these
     pages = audit_pages()
-    findings, vectors = audit_findings(pages)
+    findings, skip = audit_findings(pages)
     print("\naudit:")
-    print_audit(findings, len(pages), vectors)
+    print_audit(findings, len(pages), skip)
 
 
 def cmd_tune_sweep_judged() -> None:
@@ -4160,9 +4160,25 @@ HUB_RATIO = 3      # noise judgments per relevant one that make a page a hub
 HUB_JUDGED = 6     # fewer judgments than this say too little about one page
 
 
-def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], bool]:
-    """Findings {page, check, what, fix} for these pages, and whether own-title ran, which needs vectors. Reads only."""
+def own_title_skip(vectors: dict) -> str | None:
+    """Why the audit cannot rank a page by its own title, or None when it can.
+    Vectors alone are not enough: with no host a title search is string matches, which tie on filenames."""
+    if not vectors:
+        return "no vectors"
+    if not semantic_enabled():
+        return "string search"
+    url, _, answers = resolve_host()
+    if answers:
+        return None
+    if active_model().backend == "onnx":
+        return f"the {active_model().id} model files are missing"
+    return f"{re.sub(r'^https?://', '', url)} does not answer"
+
+
+def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | None]:
+    """Findings {page, check, what, fix} for these pages, and why own-title did not run (None when it ran). Reads only."""
     vectors = page_vectors()
+    skip = own_title_skip(vectors)
     judged: dict[str, dict[str, int]] = {}
     for (repo, _, _, page), j in judgments().items():
         if repo == str(ROOT) and j.get("label") in ("relevant", "noise"):
@@ -4183,7 +4199,7 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], bool]:
                 if pattern.search(line):
                     # never the match: this text reaches the transcript
                     add("secret", f"line {n} matches the secret pattern {name!r}", "remove the secret and write the page again")
-        if vectors:
+        if not skip:
             title = str(fm.get("title") or "")
             ranked = [(row_store(r), r["filename"]) for r in (hybrid_search(title) if title else [])]
             if ranked[:1] != [(store.name, path.name)]:
@@ -4206,14 +4222,14 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], bool]:
         if (fm.get("superseded") or said) and kept > 1:
             why = "the frontmatter has superseded" if fm.get("superseded") else f'says "{said[0][1].lower()}"'
             add("superseded", f"{why} and keeps {kept} paragraphs", "rewrite or delete the old text")
-    return findings, bool(vectors)
+    return findings, skip
 
 
-def print_audit(findings: list[dict], pages: int, vectors: bool) -> None:
+def print_audit(findings: list[dict], pages: int, skip: str | None) -> None:
     for f in findings:
         print(f"{f['page']}: {f['check']}: {f['what']}; {f['fix']}")
     n = len(findings)
-    tail = f"vectors checked with {active_model().id}" if vectors else "no vectors: own-title skipped"
+    tail = f"{skip}: own-title skipped" if skip else f"vectors checked with {active_model().id}"
     print(f"{n} finding{'s' if n != 1 else ''} in {pages} page{'s' if pages != 1 else ''}; {tail}")
 
 
@@ -4230,11 +4246,11 @@ def cmd_audit(args: argparse.Namespace) -> None:
     """Pages that search shows badly or that carry what they should not. Prints findings; writes nothing; exits 0."""
     require_stores()
     pages = audit_pages(args.page)
-    findings, vectors = audit_findings(pages)
+    findings, skip = audit_findings(pages)
     if args.json:
         print(json.dumps(findings, indent=2))
         return
-    print_audit(findings, len(pages), vectors)
+    print_audit(findings, len(pages), skip)
 
 
 # --- main -------------------------------------------------------------------
