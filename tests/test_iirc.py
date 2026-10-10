@@ -2787,11 +2787,16 @@ def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
     log = tmp_path / "st" / "dokidlc-iirc" / "log.jsonl"
     log.parent.mkdir(parents=True)
 
+    clock = iter(range(100))
+
+    def ts():
+        return f"2026-10-09T10:00:{next(clock):02d}Z"
+
     def rec(s, *pages):
-        return {"ts": "2026-10-09T10:00:00Z", "session": s, "cmd": "recall", "pages": [f"{p}.md" for p in pages]}
+        return {"ts": ts(), "session": s, "cmd": "recall", "pages": [f"{p}.md" for p in pages]}
 
     def read(s, page, cmd="read"):
-        return {"ts": "2026-10-09T10:00:01Z", "session": s, "cmd": cmd, "pages": [page]}
+        return {"ts": ts(), "session": s, "cmd": cmd, "pages": [page]}
     rows = [
         rec("s1", "a", "b"),
         read("s1", "proj/d"),         # STORE/PAGE and no .md: the same page as d.md
@@ -2804,9 +2809,10 @@ def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
         read("s3", "k"),              # read long before its last naming: only the session-wide read rules leave k out then
         rec("s3", "e", "k"),
         rec("s3", "f"), rec("s3", "g"), rec("s3", "h"),
+        {"ts": ts(), "session": "s3", "cmd": "session", "trigger": "PreCompact"},   # only session-once resets here
         rec("s3", "e", "k"),          # e named 4 recalls back: window 5 and 10 leave it out, window 3 does not
         read("s3", "e"),
-        {"ts": "2026-10-09T10:00:02Z", "session": "s3", "cmd": "write", "page": "e.md"},   # upkeep: lost, but not a plain cost
+        {"ts": ts(), "session": "s3", "cmd": "write", "page": "e.md"},   # upkeep: lost, but not a plain cost
     ]
     log.write_text("".join(json.dumps(r) + "\n" for r in rows) + "not json\n")
     out = tmp_path / "repeats.json"
@@ -2818,11 +2824,21 @@ def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
     assert result["sessions"]["s1"]["suppressed"] == 3 and result["sessions"]["s2"]["suppressed"] == 0
     assert result["rule"] == "window10" and "lost reads 2" in capsys.readouterr().out
     # each rule: (left out, lost reads)
-    expect = {"window5": (6, 2), "window3": (4, 1), "read-only": (3, 0), "read-or-window3": (5, 1)}
+    expect = {"window5": (6, 2), "window3": (4, 1), "read-only": (3, 0), "read-or-window3": (5, 1), "session-once": (4, 1)}
     for rule, counts in expect.items():
         assert lr.main(["--repeats", "--rule", rule, "--out", str(out)]) == 0
         t = json.loads(out.read_text())["totals"]
         assert (t["suppressed"], t["lost_reads"]) == counts, rule
+    # with --transcripts, the compactions are the transcripts' boundaries, not the log's PreCompact rows
+    # (s1 compacted before its last recall, so b returns; s3's log row no longer counts, so e and k stay out)
+    transcripts = tmp_path / "projects"
+    (transcripts / "proj" / "s1").mkdir(parents=True)
+    boundary = {"type": "system", "subtype": "compact_boundary", "sessionId": "s1", "timestamp": rows[3]["ts"].replace("Z", ".500Z")}
+    (transcripts / "proj" / "s1.jsonl").write_text(json.dumps({"type": "user", "sessionId": "s1"}) + "\n" + json.dumps(boundary) + "\n")
+    (transcripts / "proj" / "s1" / "agent.jsonl").write_text(json.dumps({**boundary, "timestamp": rows[0]["ts"]}) + "\n")   # a subagent's: ignored
+    assert lr.main(["--repeats", "--rule", "session-once", "--transcripts", str(transcripts), "--out", str(out)]) == 0
+    t = json.loads(out.read_text())["totals"]
+    assert (t["suppressed"], t["lost_reads"]) == (5, 2)
 
 
 def test_recall_names_a_page_once_per_session(tmp_path, monkeypatch):

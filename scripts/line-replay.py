@@ -6,7 +6,7 @@
 """Replay judged prompts through `claude -p` with a given recall line, and count the pages the model reads.
 
   scripts/line-replay.py --replay FILE [--variants today,...] [--sample N] [--seed S] [--passed FILE] [--streams DIR] [--dry-run] [--out FILE]
-  scripts/line-replay.py --repeats [--rule window10|window5|window3|read-only|read-or-window3] [--out FILE]
+  scripts/line-replay.py --repeats [--rule window10|window5|window3|read-only|read-or-window3|session-once] [--transcripts DIR] [--out FILE]
 
 FILE is a replay JSONL file, one judged pair per line:
 {"repo", "qid", "prompt", "via", "page", "label"}. Only `via: prompt` rows are
@@ -26,11 +26,16 @@ so its own recall hook stays silent; this checkout's bin/ is first on PATH, so
 the run's cwd is a real checkout.
 
 --repeats runs no model. It reads this machine's iirc logs, read-only, and applies
-the once-per-session rule to each session's recalls in log order: a page is left
-out when the session's last 10 recalls named it, or a read or pull of it is newer
-than the 10th-last recall. --rule picks a variant: window5 and window3 shorten the
-window; read-only leaves a page out only once the session read it; read-or-window3
-adds the last 3 recalls' names to that. It counts the suggestions the rule leaves out, and the
+a repeat rule to each session's recalls in log order. window10, the default, leaves
+a page out when the session's last 10 recalls named it, or a read or pull of it is
+newer than the 10th-last recall. --rule picks a variant: window5 and window3 shorten
+the window; read-only leaves a page out only once the session read it; read-or-window3
+adds the last 3 recalls' names to that; session-once leaves a page out when the
+session named, read, or pulled it since its last compaction, the PreCompact hook's
+`session` row in the log. --transcripts DIR takes the compactions from the
+compact_boundary rows of the session transcripts under DIR (~/.claude/projects)
+instead, since the log has the PreCompact row only from 2026-10-09; a session whose
+transcript is gone then has none. It counts the suggestions the rule leaves out, and the
 lost reads among them: a left-out page the session read after that recall and had
 not read before it. A left-out page's slot stays empty here, since the log keeps
 only the pages a line named.
@@ -45,6 +50,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -193,10 +199,56 @@ def count_reads(stream: str, labels: dict[str, str]) -> dict:
     return counts
 
 
-# --- the once-per-session rule over the real log ---------------------------------
+# --- repeat rules over the real log ----------------------------------------------
 
-# rule: (recalls a named page stays out for, whether a read leaves it out for the whole session or only within that window)
-REPEAT_RULES = {"window10": (10, False), "window5": (5, False), "window3": (3, False), "read-only": (0, True), "read-or-window3": (3, True)}
+# rule: (recalls a named page stays out for, whether a read leaves it out for the whole session or only within that window);
+# a window of None counts names and reads since the session's last compaction
+REPEAT_RULES = {"window10": (10, False), "window5": (5, False), "window3": (3, False), "read-only": (0, True), "read-or-window3": (3, True),
+                "session-once": (None, True)}
+
+
+def compaction(row: dict) -> bool:
+    """The PreCompact hook's snapshot row: it is written before the context is compacted."""
+    return row["cmd"] == "session" and row.get("trigger") == "PreCompact"
+
+
+def when(ts) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(ts))
+    except ValueError:
+        return None
+
+
+def transcript_compactions(root: Path) -> dict[str, list[datetime]]:
+    """Per session, the times its transcript records a compact_boundary. Top-level transcripts only: a subagent's compaction is its own."""
+    out: dict[str, list[datetime]] = {}
+    for path in sorted(root.glob("*/*.jsonl")):
+        with path.open(errors="replace") as f:
+            for line in f:
+                if '"compact_boundary"' not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                t = when(row.get("timestamp")) if isinstance(row, dict) and row.get("type") == "system" and row.get("subtype") == "compact_boundary" else None
+                if t is not None:
+                    out.setdefault(str(row.get("sessionId") or path.stem), []).append(t)
+    return {s: sorted(ts) for s, ts in out.items()}
+
+
+def with_transcript_compactions(rows: list[dict], marks: dict[str, list[datetime]]) -> list[dict]:
+    """The log's rows with its PreCompact rows replaced by one row per transcript compaction, placed by time."""
+    marks = {s: list(ts) for s, ts in marks.items()}
+    out = []
+    for r in rows:
+        if compaction(r):
+            continue
+        s, t = str(r.get("session")), when(r.get("ts"))
+        while t is not None and marks.get(s) and marks[s][0] <= t:
+            out.append({"ts": marks[s].pop(0).isoformat(), "session": s, "cmd": "session", "trigger": "PreCompact", "from": "transcript"})
+        out.append(r)
+    return out
 
 
 def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
@@ -215,12 +267,17 @@ def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
         reads = [(i, base(p)) for i, r in enumerate(srows) if r["cmd"] in ("read", "pull") for p in r.get("pages") or []]
         upkeep = [(i, base(r.get("page"))) for i, r in enumerate(srows) if r["cmd"] in ("write", "verify")]
         recalls = [i for i, r in enumerate(srows) if r["cmd"] == "recall"]
+        compactions = [i for i, r in enumerate(srows) if compaction(r)]
         named: list[tuple[int, set[str]]] = []   # (row index, pages the rule would let the line name), oldest first
         for i, r in enumerate(srows):
             if r["cmd"] != "recall":
                 continue
-            recent = named[-window:] if window else []
-            since = -1 if session_reads or len(recent) < window else recent[0][0]
+            if window is None:
+                since = max((j for j in compactions if j < i), default=-1)
+                recent = [(j, pages) for j, pages in named if j > since]
+            else:
+                recent = named[-window:] if window else []
+                since = -1 if session_reads or len(recent) < window else recent[0][0]
             out = set().union(*(pages for _, pages in recent)) | {p for j, p in reads if since < j < i}
             pages = [base(p) for p in r.get("pages") or []]
             kept = {p for p in pages if p not in out}
@@ -246,15 +303,19 @@ def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
             "plain": [c for n, c in enumerate(plain_cases) if (c["session"], c["page"]) not in {(d["session"], d["page"]) for d in plain_cases[:n]}]}
 
 
-def main_repeats(out: Path | None, rule: str) -> int:
-    result = repeat_counts(iirc().read_log(), rule)
+def main_repeats(out: Path | None, rule: str, transcripts: Path | None = None) -> int:
+    rows = iirc().read_log()
+    if transcripts:
+        rows = with_transcript_compactions(rows, transcript_compactions(transcripts))
+    result = repeat_counts(rows, rule)
+    result["compactions"] = "transcripts" if transcripts else "log"
     for s, c in result["sessions"].items():
         if c["suppressed"]:
             print(f"{s}: recalls {c['recalls']}, suggested {c['suggested']}, left out {c['suppressed']}, lost reads {c['lost_reads']}")
     for case in result["lost"]:
         print(f"lost: {case['session']} {case['ts']} {case['page']}")
     t = result["totals"]
-    print(f"{rule}: {t['sessions']} sessions, {t['recalls']} recalls, {t['suggested']} suggested, left out {t['suppressed']}, "
+    print(f"{rule}{' (compactions from transcripts)' if transcripts else ''}: {t['sessions']} sessions, {t['recalls']} recalls, {t['suggested']} suggested, left out {t['suppressed']}, "
           f"lost reads {t['lost_reads']}, lost pairs {t['lost_pairs']}, plain cost {t['plain_pairs']}")
     if out:
         out.write_text(json.dumps(result, indent=1) + "\n")
@@ -308,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--replay", type=Path)
     ap.add_argument("--repeats", action="store_true", help="count what the once-per-session rule leaves out of the real log, and the reads it loses")
     ap.add_argument("--rule", choices=list(REPEAT_RULES), default="window10", help="with --repeats: which repeat rule to apply")
+    ap.add_argument("--transcripts", type=Path, help="with --repeats: take compactions from the session transcripts under this directory, not the log")
     ap.add_argument("--variants", default="today", help=f"comma-separated, from: {', '.join(VARIANTS)}")
     ap.add_argument("--sample", type=int, help="N prompts with a relevant page and N without; default every human prompt")
     ap.add_argument("--seed", type=int, default=1)
@@ -319,7 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, help="JSON results: per variant, relevant reads, noise reads, runs")
     args = ap.parse_args(argv)
     if args.repeats:
-        return main_repeats(args.out, args.rule)   # before the state override below: it reads this machine's real log
+        return main_repeats(args.out, args.rule, args.transcripts)   # before the state override below: it reads this machine's real log
     if not args.replay:
         ap.error("--replay is required")
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
