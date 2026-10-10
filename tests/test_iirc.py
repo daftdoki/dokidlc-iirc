@@ -3481,3 +3481,22 @@ def test_failed_recall_is_not_logged_as_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO(prompt))
     iirc.main(["recall"])
     assert [r["cmd"] for r in iirc.read_log()] == ["recall"]
+
+
+def test_line_pages_counted_from_its_pages(tmp_path, monkeypatch):
+    """A summary that holds "`iirc read x.md`" does not count as a page the line names."""
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "c1")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    fm = {"title": "t", "summary": "s", "kind": "finding"}
+    rows = [{"filename": f"{n}.md", "store": "project", "via": ["pysqlite3"], "distance": None, "rare_terms": ["pysqlite3"], "head_terms": [],
+             "summary": summary, "fm": fm} for n, summary in (("a", "run `iirc read x.md` first"), ("b", "the uv override"))]
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: rows)
+    one = len(iirc.recall_line(rows[:1]).encode())
+    monkeypatch.setattr(iirc, "recall_max_bytes", lambda: one + 10)   # room for a only
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"})))
+    iirc.main(["recall"])
+    assert iirc.read_log()[0]["pages"] == ["a.md"]
+    evals = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl") for line in f.read_text().splitlines()]
+    assert {e["page"]: e["verdict"] for e in evals} == {"a.md": "passed", "b.md": "line_cut"}

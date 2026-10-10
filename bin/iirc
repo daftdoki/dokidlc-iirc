@@ -1363,8 +1363,16 @@ def clip(text: str, limit: int) -> str:
 
 def recall_line(rows: list[dict]) -> str:
     """One line, at most recall_max_bytes(), naming the read command for each page."""
-    if not rows:
-        return ""
+    parts = recall_entries(rows)
+    return render_recall(parts) if parts else ""
+
+
+def render_recall(parts: list[str]) -> str:
+    return f"iirc: {len(parts)} page{'s' if len(parts) != 1 else ''} may apply. Read a page whose summary bears on this task; skip the rest: " + " · ".join(parts)
+
+
+def recall_entries(rows: list[dict]) -> list[str]:
+    """The recall line's entry for each page it names: the first rows, as many as fit in recall_max_bytes()."""
     parts = []
     for r in rows:
         name = page_label(row_store(r), r["filename"])
@@ -1373,14 +1381,10 @@ def recall_line(rows: list[dict]) -> str:
         if signals:
             tail = " (" + marker(signals).strip() + f"; if it holds, `iirc verify {name}`)"
         parts.append(f"`iirc read {name}` ({clip(r.get('summary', ''), 90)}) [{match_text(r)}]{tail}")
-
-    def render(ps: list[str]) -> str:
-        return f"iirc: {len(ps)} page{'s' if len(ps) != 1 else ''} may apply. Read a page whose summary bears on this task; skip the rest: " + " · ".join(ps)
-
     # drop whole entries from the end rather than cut a page name in half
-    while len(parts) > 1 and len(render(parts).encode()) > recall_max_bytes():
+    while len(parts) > 1 and len(render_recall(parts).encode()) > recall_max_bytes():
         parts.pop()
-    return render(parts)
+    return parts
 
 
 PLAIN_STDOUT_EVENTS = {"SessionStart", "UserPromptSubmit", "UserPromptExpansion", "PostModelSwitch", ""}
@@ -1479,8 +1483,9 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
     try:
         verdicts = recall_verdicts(hybrid_search(query), source=via, repeats=True)
         passed = [r for r in verdicts if r["verdict"] == "passed"]
-        line = recall_line(passed)
-        named = line.count("`iirc read ")
+        entries = recall_entries(passed)
+        line = render_recall(entries) if entries else ""
+        named = len(entries)   # from the entries: a summary may itself hold "`iirc read "
         for r in passed[named:]:
             r["verdict"] = "line_cut"   # dropped to keep the line under recall_max_bytes()
         rows = passed[:named]
