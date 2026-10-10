@@ -12,14 +12,14 @@
 input=$(cat)
 cmd=$(printf '%s' "$input" | sed -n 's/.*"command":[[:space:]]*"\(.*\)".*/\1/p' | head -c 4000)
 file=$(printf '%s' "$input" | sed -n 's/.*"file_path":[[:space:]]*"\([^"]*\)".*/\1/p' | head -c 1000)
-case "$cmd" in
-  *iirc*suspect-pages*--n*|*iirc*--n*suspect-pages*)
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc suspect-pages --network contacts every URL cited in the pages. Approve only if you agreed to that."}}'
-    ;;
-  *iirc*approve*)
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc approve runs a page'"'"'s check command and approves it on this machine. Approve only if the agent showed you the command and you agreed."}}'
-    ;;
-esac
+# iirc running the verb: iirc, or a path ending in /iirc, then the verb, so a command that only
+# mentions both words (a grep, a test run, a path) passes
+runs() { printf '%s' "$cmd" | grep -Eq "(^|[;&|(]|\\\\n|[[:space:]])([^[:space:];&|(]*/)?iirc[\\\"]*[[:space:]]+$1"; }
+if runs 'suspect-pages[^;&|]*--n'; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc suspect-pages --network contacts every URL cited in the pages. Approve only if you agreed to that."}}'
+elif runs 'approve([[:space:]]|$)'; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc approve runs a page'"'"'s check command and approves it on this machine. Approve only if the agent showed you the command and you agreed."}}'
+fi
 # a page read with a pager: cat, head, sed, tail, less, or more starts a simple command (at the
 # start, or after ; & | ( or a newline) and a page path other than index.md follows it: .iirc/*.md,
 # or a remote store's clone, dokidlc-iirc/stores/NAME-HASH/*.md

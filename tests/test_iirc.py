@@ -651,6 +651,12 @@ def test_guard_asks_for_approve_too():
         return subprocess.run(["sh", str(shim)], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": "/tmp/iirc-doubt-notes"}), capture_output=True, text=True)
     assert "ask" in run("iirc approve x.md").stdout
     assert run("ls").stdout == ""               # a cwd containing the words does not trigger it
+    for cmd in ("bin/iirc approve x.md", 'cd /r && "/p/bin/iirc" approve x.md'):
+        assert "ask" in run(cmd).stdout, cmd
+    # only iirc running the verb asks; a command that merely holds both words does not
+    for cmd in ("grep -n approve bin/iirc", "cd ~/Code/agents/dokidlc-iirc && grep -rn approve scripts",
+                "uv run pytest -q tests/test_iirc.py -k approve", "iirc read approve-notes.md"):
+        assert run(cmd).stdout == "", cmd
 
 
 def test_guard_denies_a_raw_read_of_a_page():
@@ -685,6 +691,7 @@ def test_guard_asks_only_for_network_suspect_pages():
     assert run("git status").stdout == ""
     out = json.loads(run("iirc suspect-pages --network").stdout)
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert run("grep -n -- --network bin/iirc; grep -n suspect-pages docs/USAGE.md").stdout == ""
 
 
 def test_recall_gates_and_filter(monkeypatch):
