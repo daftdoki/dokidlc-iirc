@@ -407,6 +407,14 @@ def move_old_knobs(text: str) -> tuple[str, list[str]]:
             renamed.add(i)
     cfg = tomllib.loads(text)
     old_cfg, new_cfg = cfg.get("recall", {}), cfg.get("suggestions", {})
+    # each (target, key) is won by the new table's own value, else an old model table's, else the flat [recall]'s
+    winner: dict[tuple[str, str], str | None] = {}
+    sources = [(t, old_cfg.get(t, {})) for t in old_cfg if isinstance(old_cfg.get(t), dict)] + [("", old_cfg)]
+    for table, src in sources:
+        target = table or FLAT_TABLE
+        for name, value in src.items():
+            if not isinstance(value, dict):
+                winner.setdefault((target, name), None if name in new_cfg.get(target, {}) else table)
     out, moves, target = [], [], None
     for i, line in enumerate(lines):
         if re.match(r"\s*\[", line):
@@ -417,20 +425,17 @@ def move_old_knobs(text: str) -> tuple[str, list[str]]:
                 line = f"# {line.rstrip()}  # iirc doctor --fix: its keys go to [{table_header(target)}]"
         key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
         if target is not None and key and key[1] in src and not isinstance(src[key[1]], dict):
-            mine = new_cfg.get(target, {})
-            why = f"[{table_header(target)}] has its own" if key[1] in mine else f"moved to [{table_header(target)}]"
+            won = winner.get((target, key[1])) == table
+            why = f"moved to [{table_header(target)}]" if won else f"[{table_header(target)}] has its own"
             notes.append(f"{why}: `{line.strip()}`")
             line = f"# {line.rstrip()}  # iirc doctor --fix: {why}"
-            if key[1] not in mine:
-                moves.append((target, key[1], src[key[1]], table == ""))
+            value = src[key[1]]
+            if won and isinstance(value, (int, float)) and not isinstance(value, bool):
+                moves.append((target, key[1], value))
         out.append(line)
     text = "\n".join(out) + "\n"
-    # a model table's value wins over a flat one for the same knob
-    done: set[tuple[str, str]] = set()
-    for target, name, value, _ in sorted(moves, key=lambda m: m[3]):
-        if (target, name) not in done and isinstance(value, (int, float)) and not isinstance(value, bool):
-            text = set_knob_text(text, target, name, value)
-            done.add((target, name))
+    for target, name, value in moves:
+        text = set_knob_text(text, target, name, value)
     return text, notes
 
 

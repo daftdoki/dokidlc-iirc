@@ -12,6 +12,7 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 _loader = SourceFileLoader("iirc", str(ROOT / "bin" / "iirc"))
@@ -3178,6 +3179,15 @@ def test_old_table_of_no_model_names_no_fix(tmp_path, monkeypatch):
     assert "[recall.foo] names no embedding model" in iirc.CONFIG_ERROR and "doctor --fix" not in iirc.CONFIG_ERROR
     assert not iirc.knob_error_only()
     toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_flat_key_that_loses_to_an_old_model_table_says_so():
+    """Flat [recall] beside [recall.nomic-embed-text]: the model table's value wins, and the flat key is noted as the loser."""
+    text, notes = iirc.move_old_knobs("[recall]\nsemantic_only = 0.26\nboth = 0.4\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n")
+    assert "[suggestions.nomic-embed-text] has its own: `semantic_only = 0.26`" in notes
+    assert "moved to [suggestions.nomic-embed-text]: `both = 0.4`" in notes
+    assert "# semantic_only = 0.26  # iirc doctor --fix: [suggestions.nomic-embed-text] has its own" in text
+    assert tomllib.loads(text)["suggestions"]["nomic-embed-text"] == {"semantic_only": 0.3, "both": 0.4}
 
 
 # p5 step 25
