@@ -46,8 +46,15 @@ shorthand is fine on a machine that already has github.com in
 ```sh
 iirc setup --local                      # ollama on this machine
 iirc setup --host http://frame:11434    # ollama on another host
-iirc setup --substring                  # no ollama available
+iirc setup --openai https://llm.example.net   # an OpenAI-compatible host
+iirc setup --cpu                        # all-MiniLM-L6-v2 on this CPU, no ollama
+iirc setup --substring                  # string search only
 ```
+
+With ollama, the model is `qwen3-embedding:0.6b` unless `--model` names
+`nomic-embed-text` or `embeddinggemma`. `--cpu` fetches about 90 MB of
+model files from a pinned commit, checks their sha256, and runs the
+model once, so onnxruntime installs now and not in a hook.
 
 Pass a flag. `cmd_setup` in `bin/iirc` calls `sys.stdin.isatty()` and
 stops with "not a terminal" when it gets neither flags nor a tty. The
@@ -66,14 +73,15 @@ overrides file that drops `pysqlite3-binary`. That package ships a Linux
 x86_64 wheel only, and the tool falls back to stdlib sqlite3 without it.
 See `install_tool()` in `bin/iirc`. On macOS, when the embedding host is
 local and does not answer, `--fix` also runs `brew install ollama` and
-`brew services start ollama`, then pulls `nomic-embed-text`. On Linux it
-prints the one ollama command to run.
+`brew services start ollama`, then pulls the model setup chose. On Linux
+it prints the one ollama command to run.
 
 Doctor exits 1 here, and that is expected. The repository has no `.iirc/`
 yet, so the field, CLAUDE.md, and persistence rows report FAIL. Only four
-rows must read `ok` at this point: `uv on PATH`, `memoryfield-tool`,
-`embedding host`, and `model nomic-embed-text`. The rest turn green at step
-9.
+rows must read `ok` at this point: `uv on PATH`, `memoryfield-tool`, and
+the search rows for the choice in step 3: `embedding host` and `model`
+for ollama, `embedding endpoint` for an OpenAI-compatible host, or the
+model files for the CPU. The rest turn green at step 9.
 
 ## Per repository
 
@@ -129,8 +137,9 @@ iirc doctor
 ```
 
 Every row should read `ok`, including "field validates". The last line
-names the index cache directory. That cache is derived, never committed,
-and `iirc index` rebuilds it.
+names the index cache directory, which holds one vector store per store
+and model. That cache is derived, never committed, and `iirc index`
+rebuilds it.
 
 ## What project settings do not do
 

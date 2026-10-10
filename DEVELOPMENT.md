@@ -5,17 +5,22 @@
 ```
 .claude-plugin/plugin.json   manifest; no version field, the commit is the version
 bin/iirc                   the command; Python under uv run --script, PyYAML inline
+bin/iirc_embed.py          the model table, the embedding backends, and the vector store
+bin/iirc-cpu               all-MiniLM-L6-v2 through onnxruntime, its own uv script
+bin/iirc_words.txt         common English words, CC-BY-SA (NOTICE); scripts/common-words.py rebuilds it
 iirc.pin                   memoryfield-tool commit and the embedding model
+scripts/                   guard.sh, the replay builders and the session replay, screenshots and demo
 skills/iirc/SKILL.md       the agent's rules
 hooks/hooks.json             SessionStart and SubagentStart: doctor --brief --hook; UserPromptSubmit and PostToolUse(Failure): recall; Stop: nudge; PreToolUse (Bash, Read): guard
 tests/                       pytest; nothing needs ollama or memoryfield-tool
 ```
 
-`bin/iirc` is a thin layer over memoryfield-tool, used as published at the
-commit in `iirc.pin`. It generates the tool's per-machine config from the
-repository location, guards the embedding host with a two-second probe,
-reindexes synchronously after writes, filters `index.md` from results, and
-computes suspicion. It never reimplements storage, search, or indexing.
+`bin/iirc` uses memoryfield-tool, as published at the commit in
+`iirc.pin`, to write, delete, and validate pages. It generates the tool's
+per-machine config from the repository location, guards the embedding
+host with a two-second probe, searches and embeds pages itself through
+`bin/iirc_embed.py`, updates the vector store after writes, filters
+`index.md` from results, and computes suspicion.
 
 ## Run it from a checkout
 
@@ -31,18 +36,23 @@ CLAUDE_PROJECT_DIR=/path/to/repo OLLAMA_HOST=127.0.0.1:11434 bin/iirc search "qu
 
 ## Search
 
-`hybrid_search()` fuses `search_json()` (the tool's semantic search) with
-`string_search()` (a local exact-text loop over name, title, summary, and
-body). Ranking: both paths, then semantic by distance, then string-only
-by term count with title hits ahead of body hits. In string mode only the
-local loop runs and the tool is never called for search.
+`hybrid_search()` fuses `semantic_search()` (the active model's vectors,
+from `iirc_embed`) with `string_search()` (a local exact-text loop over
+name, title, summary, and body, without Sources and links). Ranking: both
+paths with a rare term, then semantic by distance, then string-only by
+rare-term count with title hits ahead of body hits. In string mode only
+the local loop runs.
 
 ## Search mode and embedding host
 
 Semantic search is on unless `semantic = false` in the setup file.
-`OLLAMA_HOST` exported always means semantic. In string mode the wrapper points the tool at
-a closed port so its client fails at once and falls back, and it skips
-reindexing. The host, when semantic is on, is resolved in this order: `OLLAMA_HOST` in the environment, then
+`OLLAMA_HOST` exported always means semantic. The `[embedding]` table of
+the setup file names the backend (`ollama`, `openai`, or `onnx`) and the
+model; without it the model is nomic through ollama. The wrapper always
+points the tool at a closed port (`NO_EMBEDDING_HOST`), because the tool
+no longer embeds. In string mode it skips reindexing. An `openai`
+backend has one host, the URL setup wrote; `onnx` has none. An ollama
+host, when semantic is on, is resolved in this order: `OLLAMA_HOST` in the environment, then
 `embedding_host` in `~/.config/dokidlc-iirc/config.toml` (written by
 `iirc setup`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
 `doctor` names the source. `doctor --fix` installs ollama only for a local

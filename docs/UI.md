@@ -45,14 +45,17 @@ bracket after the name says how the page matched:
 
 | Label | Means |
 |---|---|
-| `[N% match, meaning+term]` | at least 66% close in meaning, and it shares a rare term with your prompt |
-| `[N% match, meaning]` | at least 72% close in meaning, with no shared rare term |
+| `[N% match, meaning+term]` | close in meaning, within `both` (at least 62% for nomic by default), and it shares a strong term with your prompt |
+| `[N% match, meaning]` | closer in meaning, within `semantic_only` (at least 72% for nomic by default), with no shared strong term |
 | `[term match]` | found by an identifier alone, a rare term with digits or punctuation such as `2.1.290` or `session.append`; every page reads this way in keyword mode |
 
-N is 100 less the semantic distance as a percentage. A rare term has
-digits or punctuation in it, or is a word of five letters or more from the
-page's name, title, or summary, and appears in under a third of the pages.
-The agent sees the same label in its line.
+N is 100 less the semantic distance as a percentage. Each model has its
+own distance scale, so compare percentages only under one model. A strong
+term appears in at most a tenth of the pages, and has digits or
+punctuation in it or is a word of five letters or more from the page's
+name, title, or summary that is not common English. The agent sees the
+same label in its line, and a page appears once per session until the
+context is compacted.
 
 Recall suggests up to 3 pages. `/iirc max-suggested N` changes that, from 1
 to 10, and `/iirc max-suggested` prints the number. It is kept in

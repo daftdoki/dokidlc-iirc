@@ -25,13 +25,30 @@ card in the transcript; your reads do not count as the agent's.
 ### Set up a machine
 
 Install the plugin once per machine ([README](../README.md)). Then open
-a session in a repository and say "set up iirc". The agent asks whether
-you want semantic search or the string fallback, and, for semantic,
-whether ollama runs on this machine or on a host you name. It runs
-`iirc setup`, `iirc init` if you want pages in this repository, then
+a session in a repository and say "set up iirc". The agent asks where
+embeddings come from, and offers five choices:
+
+| Choice | `iirc setup` flag | Needs |
+|---|---|---|
+| ollama on this machine | `--local` | ollama here; doctor installs it on macOS |
+| ollama on another host | `--host URL` | ollama on that host |
+| an OpenAI-compatible host, such as vLLM serving qwen3-embedding | `--openai URL` | a server that answers `POST URL/v1/embeddings` |
+| this CPU, all-MiniLM-L6-v2 through onnxruntime | `--cpu` | about 90 MB of model files, which setup fetches; no ollama |
+| string search | `--substring` | nothing; it matches exact text only |
+
+With ollama, `--model` picks `qwen3-embedding:0.6b` (the default),
+`nomic-embed-text`, or `embeddinggemma`. The agent recommends ollama,
+here or on the host this machine already names, when one answers, and
+this CPU otherwise. String search is the last choice. The agent then
+runs `iirc setup`, `iirc init` if you want pages in this repository, then
 `iirc doctor --fix`, which installs memoryfield-tool and, for a local
 host on macOS, ollama and the model. You see doctor's report.
 [INSTALL.md](../INSTALL.md) has every step as a command.
+
+A machine set up before the model choice keeps nomic until setup runs
+again. A new model embeds every page again: the next `iirc index` does
+it, or the first search that finds the pages missing starts it in the
+background.
 
 ### Start iirc in a repository
 
@@ -92,10 +109,19 @@ is set, and only you set it.
 
 ### Merge near-duplicates
 
-When two pages sit at a cosine distance of 0.07 or less, the
+When two pages sit at the model's duplicate distance or closer, the
 session-start line counts the pair and the circle turns yellow with
 `· run iirc doctor`. `/iirc doctor` names each pair, and also notes
-similar pairs up to 0.10. Say "merge the near-duplicate pages". When a
+similar pairs up to the model's near-duplicate distance:
+
+| Model | Duplicate: the line turns yellow | Near-duplicate: doctor notes it |
+|---|---|---|
+| `nomic-embed-text` | 0.07 | 0.10 |
+| `qwen3-embedding:0.6b`, `qwen3-embedding` | 0.12 | 0.17 |
+| `embeddinggemma` | 0.10 | 0.14 |
+| `all-minilm-l6-v2` | 0.14 | 0.20 |
+
+Say "merge the near-duplicate pages". When a
 pair holds one finding, the agent merges the two into one page and
 deletes the other. When the two hold different kinds of finding, such as
 a decision and the procedure that carries it out, it links one to the
@@ -115,14 +141,32 @@ On another machine, `iirc doctor --fix` clones a missing remote store.
 
 ### Work without ollama
 
-Say "use string search". The agent runs `iirc setup --substring`. Search
-then matches exact text only, and the agent searches for the words a
-page contains ([references/search.md](../skills/iirc/references/search.md)).
-Recall names a page only on a shared identifier, and the line under the
-prompt shows `[keyword] mode`. To go back, ask for `iirc setup --local`
-or `iirc setup --host URL`. If ollama is only down for a while, change
-nothing: iirc skips a host that does not answer a two-second probe and
-searches by string until it answers.
+Say "search on this CPU". The agent runs `iirc setup --cpu`, which
+fetches all-MiniLM-L6-v2 and runs it once, so onnxruntime installs then
+and not in a hook. Search still matches meaning. If onnxruntime has no
+wheel for this machine, setup says so and writes nothing.
+
+Say "use string search" when nothing else can run. The agent runs
+`iirc setup --substring`. Search then matches exact text only, and the
+agent searches for the words a page contains
+([references/search.md](../skills/iirc/references/search.md)). Recall
+names a page only on a shared identifier, and the line under the prompt
+shows `[keyword] mode`. To go back, ask for `iirc setup` with another
+choice. If ollama is only down for a while, change nothing: iirc skips a
+host that does not answer a two-second probe and searches by string
+until it answers.
+
+### Audit the pages
+
+Say "audit the pages", or type `/iirc audit`. The agent runs
+`iirc audit`, which prints one line per page that search shows badly,
+with its fix: a title over 70 characters, a summary that starts with a
+date or shares no word with the title, a secret, a page that a search
+for its own title does not rank first, a page that tune judged noise
+far more often than relevant, and a page that names its successor but
+keeps its old text. `iirc audit PAGE` checks one page, and `--json`
+prints the findings as JSON. The audit changes nothing; the agent
+proposes each fix for your yes. `/iirc tune` runs it after the sweep.
 
 ### See exactly what the hooks told the agent
 
@@ -161,7 +205,7 @@ The `command.run` handler in
 | `/iirc stats`, `/iirc stats --days N` | Recall and page use over the last 7 days, or N days. |
 | `/iirc index` | Rebuilds the search index. |
 | `/iirc cost` | Bytes and tokens of `index.md` and of a sample search. |
-| `/iirc knobs` | The `[recall]` distances in force, and their ranges. |
+| `/iirc knobs` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
 | `/iirc topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
@@ -175,18 +219,33 @@ The direct commands print what the `iirc` command prints. `doctor --fix`,
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
 `stores add`, `setup`, `init`, `write`, `delete`, `approve`,
-`knobs set`, and `doubt --network`. The agent's own commands are listed by `iirc --help`.
+`knobs set`, and `doubt --network`.
+
+### The agent's commands
+
+These have no `/iirc` form of their own; ask in words. `iirc --help`
+describes each one.
+
+| Command | What it does |
+|---|---|
+| `iirc pull QUERY` | Searches, then prints the full text of each matching page, as `read` does. |
+| `iirc write`, `iirc verify`, `iirc delete`, `iirc approve` | Write, confirm, remove, or approve the check of a page. |
+| `iirc audit [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
+| `iirc setup`, `iirc init`, `iirc migrate`, `iirc max-suggested N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
+| `iirc tune gather`, `judge`, `sweep`, `done` | The tune steps. `iirc tune sweep --replay FILE...` replays judged prompts through today's search and gate. |
+| `iirc recall`, `iirc nudge` | Hook entries: `recall` names pages for a prompt or a failed command, and `nudge --stop` asks for a page at the end of a turn. |
 
 ## Every setting
 
 | Setting | Where it lives | Default | Range or values | What it changes | When to turn it |
 |---|---|---|---|---|---|
 | `semantic` | `~/.config/dokidlc-iirc/config.toml`, this machine | `true` | `true`, `false` | Semantic and string search, or string search only. | Ask the agent to run `iirc setup` again; it writes the file. |
-| `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc setup --host URL`. |
+| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Recall knobs per model](#recall-knobs-per-model); `url` for `openai` only | Which model embeds pages and queries, and where it runs. | `iirc setup` writes it. |
+| `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc setup --host URL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested N`, when the row brings too much or too little. |
 | `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc setup`, which warns when this is exported. |
-| `[recall] semantic_only` | `.claude/iirc.toml`, committed, so every clone | `0.28` | 0.10 to 0.60 | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc knobs set` on your yes. |
-| `[recall] both` | `.claude/iirc.toml` | `0.34` | 0.10 to 0.60, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
+| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc knobs set` on your yes. |
+| `[recall.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
 | `write` | `.claude/iirc.toml` | the project store, else the only store | the name of a store | The store `iirc write` uses without `--store`. | `iirc stores add NAME URL --default` sets it. |
@@ -203,18 +262,52 @@ store at `.iirc/`, so a file that holds only `ui` or `show_hooks` changes
 nothing else. Names are lowercase letters and digits joined by single
 hyphens, at most 31 characters. Unknown top-level keys are ignored.
 Some values are fixed in the code: recall skips a prompt shorter than 40
-characters, a page is at most 8192 bytes, and records are kept 90 days.
+characters, a page is at most 8192 bytes, a term in more than a tenth of
+the pages is common, a search embeds at most 5 changed pages, and
+records are kept 90 days.
+
+### Recall knobs per model
+
+Each model has its own distance scale, so each has its own table in
+`.claude/iirc.toml`, named after the model with `:` changed to `-`. The
+hooks read the table of this machine's model; a knob left out takes its
+default. `iirc knobs` prints the table name and the values in force.
+
+```toml
+[recall.nomic-embed-text]
+semantic_only = 0.28
+both = 0.38
+
+[recall."qwen3-embedding-0.6b"]   # quoted, because the name holds a dot
+both = 0.62
+```
+
+| Model (`[recall.MODEL-ID]`) | `semantic_only` | `both` | Range | Cut: never farther |
+|---|---|---|---|---|
+| `nomic-embed-text` | 0.28 | 0.38 | 0.10 to 0.60 | 0.45 |
+| `qwen3-embedding-0.6b` | 0.40 | 0.60 | 0.10 to 0.90 | 0.90 |
+| `embeddinggemma` | 0.40 | 0.68 | 0.10 to 0.90 | 0.90 |
+| `qwen3-embedding` (OpenAI-compatible) | 0.40 | 0.60 | 0.10 to 0.90 | 0.90 |
+| `all-minilm-l6-v2` | 0.60 | 0.68 | 0.10 to 0.90 | 0.90 |
+
+The defaults come from a replay of judged prompts
+([SEARCH-QUALITY.md](SEARCH-QUALITY.md#results)). The OpenAI-compatible
+`qwen3-embedding` takes the ollama qwen3's values without a measurement
+of its own.
 
 ### How a bad value fails
 
-A bad `.claude/iirc.toml`, such as a `[recall]` knob out of range or a
-store table with no `kind`, turns the hooks off. The session-start line
+A bad `.claude/iirc.toml`, such as a recall knob out of range, a flat
+`[recall]` table from before the model tables, or a store table with no
+`kind`, turns the hooks off. The session-start line
 reads "iirc: hooks off", then the error and the command that fixes it,
 and the line under the prompt turns red with "hooks off". Every other
 hook stays quiet until the file is fixed. `iirc doctor` fails the check
 ".claude/iirc.toml loads, so the hooks run" and names the line to
-change. `iirc doctor --fix` comments out each bad `[recall]` knob, with a
-note, so its default applies; a broken store table is yours to fix.
+change. `iirc doctor --fix` moves flat `[recall]` knobs into
+`[recall.nomic-embed-text]`, the only model there was, and comments out
+each bad knob, with a note, so its default applies; a broken store table
+is yours to fix.
 Every other command except `setup`, `stats`, and `max-suggested` stops
 with the error.
 
@@ -228,25 +321,31 @@ refuses with "max-suggested must be 1 to 10".
 ### Write pages that recall can find
 
 Three rules of the recall gate decide what a page should contain. They
-are in `recall_verdicts` in [`bin/iirc`](../bin/iirc).
+are in `gate` in [`bin/iirc`](../bin/iirc).
 
 - A page found only by text needs an identifier from the prompt: a word
   with a digit, dot, hyphen, or underscore, such as `2.1.290`,
   `nomic-embed-text`, or `session.append`. A plain word never passes
   alone.
-- A term counts only when it is rare. A term in more than a third of the
-  pages, and in more than three, counts for nothing.
+- A term counts only when it is rare. A term in more than a tenth of the
+  pages, and in more than two, counts for nothing. Term matching leaves
+  out the Sources section and `[[links]]`.
 - A page that semantic search finds within `both` also needs a strong
   term: a rare identifier anywhere in the page, or a rare word of five
-  letters or more in the page's file name, title, or summary.
+  letters or more in the page's file name, title, or summary that is not
+  one of the 1,000 most common English words.
 
 So put the tool name, the version, the error code, or the path in the
-summary. The semantic index embeds the whole page file, frontmatter and
-body, up to 8192 bytes; see `_embed_input` in memoryfield-tool's
-`index.py`. A page about two things therefore matches prompts about
-either. Keep one finding per page. The writing rules and the four kinds
-are in [the skill](../skills/iirc/SKILL.md#when-to-write); the agent
-follows them.
+summary. Every model embeds the whole page: nomic, qwen3, and gemma the
+page file up to 8192 bytes, frontmatter and body; MiniLM the title,
+summary, topics, and body in windows. A page about two things therefore
+matches prompts about either. Keep one finding per page. `iirc write`
+warns on a title over 70 characters, a summary that starts with a date
+or "Creator decision", and a summary whose first 90 characters share no
+word with the title, and refuses a page with a secret in it. The writing
+rules and the four kinds are in
+[the skill](../skills/iirc/SKILL.md#when-to-write); the agent follows
+them.
 
 ### Read the stats and act on them
 
@@ -265,8 +364,8 @@ cards and `/iirc stats` show it. Each number has a response:
   too few suggestions to judge; watch it over several sessions, or read
   "read after a search or recall named it" in `/iirc stats`.
 - The average match for read and unread pages: when the two are close,
-  the score does not predict which pages get used. Do not move `[recall]`
-  on that alone.
+  the score does not predict which pages get used. Do not move the
+  recall knobs on that alone.
 - Pages read that recall never suggested may be recall's misses. Ask
   the agent for `read_unsuggested` in the session's last row of
   `log.jsonl`, and check that each page carries the identifiers a prompt
@@ -282,15 +381,25 @@ cards and `/iirc stats` show it. Each number has a response:
 
 `/iirc max-suggested N` gives more or fewer pages per prompt. The line's
 byte cap grows with N, so each extra page allows up to 200 more bytes of
-context. Change `[recall]` only on evidence from the recorded sessions.
+context. Change the recall knobs only on evidence from the recorded
+sessions.
 
 Say "tune recall", or run `/iirc tune`. The agent follows
 [the tune reference](../skills/iirc/references/tune.md): it gathers the
 recorded sessions, judges each suggestion against what the session
 needed, and sweeps the knobs over those judgements. You then see each
 proposal with its evidence: a page to narrow, split, or write, or a knob
-value with the counts before and after. Nothing changes until you say
-yes. A knob change edits `.claude/iirc.toml`, which you commit. Expect
+value with the counts before and after. The sweep ends with
+`iirc audit`, and for each flagged page the agent writes two prompts of
+its own and checks where the page ranks. Nothing changes until you say
+yes. A knob change edits this machine's model table in
+`.claude/iirc.toml`, which you commit.
+
+To measure a change to search or the gate before it lands, the agent
+runs `iirc tune sweep --replay FILE...` on replay files of judged
+prompts. It searches each prompt again with the current code and prints
+the same counts. [HOW-IT-WORKS.md](HOW-IT-WORKS.md#the-replays) has the
+file format and the session replay. Expect
 the first knob proposal only after a few sessions: the sweep needs 30
 judged pairs with a distance, and only recalls since plugin commit
 699d710 record distances.

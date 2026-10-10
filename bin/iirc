@@ -1291,7 +1291,7 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
     string hit on an identifier (digits or punctuation) with no semantic hit.
     A plain word alone is not enough: replayed over 68 prompts on 2026-10-08,
     none of the 29 plain-word term matches was relevant. Common terms, ones in
-    over a third of pages, count for nothing.
+    over RARE_SHARE of pages, count for nothing.
     """
     out = []
     kept = 0
@@ -4301,7 +4301,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--openai", metavar="URL", help="embeddings from an OpenAI-compatible host (POST URL/v1/embeddings)")
     p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
     p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
-                   help="the model for --local, --host, or --openai; ollama defaults to nomic-embed-text, --openai to qwen3-embedding")
+                   help="the model for --local, --host, or --openai; ollama defaults to qwen3-embedding:0.6b, --openai to qwen3-embedding")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("topics", help="every topic with its page count, computed from the pages")

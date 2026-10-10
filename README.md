@@ -9,10 +9,9 @@ Pages are markdown files in `.iirc/` in the
 they travel with the code in git and any memoryfield tool can read them; a
 shared iirc repository can hold more. Four parts work together:
 
-- The `iirc` command wraps
-  [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool) with
-  per-repository configuration, a guard on the embedding host, and a trust
-  model.
+- The `iirc` command adds search by meaning and a trust model to
+  [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool),
+  configured per repository.
 - Hooks search the pages on every prompt and every failed shell command,
   and name the matches to the agent with how well each matched.
 - A skill tells the agent when to search, when to write, and what to do
@@ -71,9 +70,9 @@ between pinned commits.
 - Claude Code 2.1.195 or later, on macOS or Linux. The drawn rows are
   tested on 2.1.295.
 - [uv](https://docs.astral.sh/uv/) on PATH
-- [ollama](https://ollama.com) with the `nomic-embed-text` model, on this
-  machine or on a host you can reach. Without it, a string-search fallback
-  still works, and finds identifiers but not paraphrase.
+- An embedding model in [ollama](https://ollama.com), here or on a host;
+  an OpenAI-compatible host; or a small model on this CPU, no ollama
+  needed. Without one, string search finds identifiers only.
 - A git repository. The pages persist only if `.iirc/` is committed.
 
 ## Installation
@@ -86,11 +85,11 @@ Once per machine, in Claude Code:
 ```
 
 Then open a session in a repository and say "set up iirc". The agent
-asks whether you want semantic search or the string fallback, and where
-the embedding model runs. It then runs `iirc setup`, `iirc init`, and
-`iirc doctor --fix`, which installs memoryfield-tool at the pinned
-commit and, for a local model on macOS, ollama and the model. You commit
-what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
+asks where the embedding model runs, and recommends qwen3-embedding when
+ollama answers, the CPU model otherwise. It then runs `iirc setup`,
+`iirc init`, and `iirc doctor --fix`, which installs memoryfield-tool at
+the pinned commit and, for a local model on macOS, ollama and the model.
+You commit what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
 run yourself, for a bootstrap script or a container.
 
 A repository that used the earlier memory plugin is offered a migration
@@ -137,13 +136,13 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 - iirc records what recall did on this machine, in
   `~/.local/state/dokidlc-iirc/`, for 90 days: each recall and its
   candidates, each session's numbers, and the first 300 characters of each
-  prompt. Nothing there is committed or pushed. `/iirc tune` reads it to
-  propose page fixes and knob changes, each for your yes. See
-  [what iirc records](docs/HOW-IT-WORKS.md#what-iirc-records).
+  prompt. Nothing there is committed or pushed. `/iirc tune` reads it, runs
+  `iirc audit`, and proposes page fixes and knob changes, each for your
+  yes. See [what iirc records](docs/HOW-IT-WORKS.md#what-iirc-records).
 - Every change the agent makes to the pages is committed at once, the
   store's directory and nothing else, so your own staged work stays out.
-- The semantic index lives in the machine's cache directory, not the
-  repository. A fresh clone rebuilds it on first use.
+- The vectors live in the machine's cache directory, one store per model,
+  not the repository. A fresh clone or a new model rebuilds them on first use.
 - Nothing from a page runs or goes out without you. A check command that
   came with a clone runs only after you approve it, and a page's URLs are
   contacted only by `iirc doubt --network`, which asks first.
@@ -160,7 +159,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 |---|---|---|
 | search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc setup` again |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
-| how close a page must be for recall to suggest it | `.claude/iirc.toml`, `[recall]` | editing the file; `/iirc knobs` prints them |
+| how close a page must be for recall to suggest it, per model | `.claude/iirc.toml`, `[recall.MODEL-ID]` | `/iirc tune`, on your yes; `/iirc knobs` prints them |
 
 [docs/USAGE.md](docs/USAGE.md#every-setting) lists every setting, with
 its default, its range, and when to turn it.
@@ -183,7 +182,7 @@ File a bug or ask a question in
 
 ## Built on memoryfields
 
-The idea, the page format, and the search engine are Cal Paterson's: the
+The idea, the page format, and the page engine are Cal Paterson's: the
 [article](https://calpaterson.com/memoryfields.html), the [format
 specification](https://github.com/calpaterson/memoryfield-spec) (MIT),
 [memoryfield-tool](https://github.com/calpaterson/memoryfield-tool)

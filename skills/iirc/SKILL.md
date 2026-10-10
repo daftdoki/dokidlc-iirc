@@ -19,10 +19,11 @@ iirc search term1 term2 term3           several terms, searched separately, merg
 iirc pull "what am I looking for"       full text of the matching pages
 iirc read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
 iirc doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
+iirc audit [PAGE]                       pages search shows badly, each with its fix
 iirc verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
 iirc approve PAGE.md                    run a page's check once and approve it here (ask first)
 iirc delete PAGE.md
-iirc setup [--local|--host URL|--substring]   embedding host, or the string fallback; once per machine
+iirc setup [--local|--host URL|--openai URL|--cpu|--substring]   the embedding model and where it runs, or the string fallback; once per machine
 iirc migrate                            move a repository and this machine from the memory plugin's layout
 iirc doctor --fix                       install or repair prerequisites; clone missing remote stores
 iirc init                               create .iirc/ and the CLAUDE.md paragraph

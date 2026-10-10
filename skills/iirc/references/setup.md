@@ -3,25 +3,37 @@
 The creator never has to run a command. Hold a short conversation, then
 run the commands yourself.
 
-1. Ask, in one question: "IIRC searches by meaning by default, which
-   needs ollama with an embedding model on this machine or on a host you
-   can reach. If ollama cannot run or be reached here, there is a string
-   search fallback that matches exact text only and works less well. Which
-   do you want?" Recommend semantic unless they say ollama is out of
-   reach. If they ask what the difference is: semantic search finds the
-   missing-wheel page from "why does install fail on a mac"; string
-   search needs "pysqlite3".
-2. If semantic: ask whether embeddings should come from ollama on this
-   machine or from a remote host, and if remote, its address.
+1. Ask, in one question: "IIRC searches by meaning, which needs an
+   embedding model. It can run in ollama on this machine or on a host
+   you name, on an OpenAI-compatible host, or on this CPU with no ollama.
+   Where none of these can run, a string search fallback matches exact
+   text only and works less well. Which do you want?" Recommend ollama
+   with qwen3-embedding:0.6b when ollama runs here or on a host they
+   name, and this CPU otherwise. If they ask what the difference is:
+   semantic search finds the missing-wheel page from "why does install
+   fail on a mac"; string search needs "pysqlite3".
+2. For ollama on a remote host or an OpenAI-compatible host, ask its
+   address.
 3. Ask whether to create `.iirc/` in this repository, if it has none.
 
 Then run, in order, showing each command first:
 
 ```
-iirc setup --local                or --host URL, or --substring for the fallback
-iirc init                         if the creator said yes to a field
-iirc doctor --fix                 installs the tool; for a local host on macOS also ollama and the model
+iirc setup --local          ollama here; --host URL for a remote one; qwen3-embedding:0.6b unless --model names nomic-embed-text or embeddinggemma
+iirc setup --openai URL     or: an OpenAI-compatible host serving qwen3-embedding
+iirc setup --cpu            or: all-MiniLM-L6-v2 on this CPU; fetches about 90 MB and installs onnxruntime once
+iirc setup --substring      or: the string fallback
+iirc init                   if the creator said yes to a field
+iirc doctor --fix           installs the tool; for a local host on macOS also ollama and the model
 ```
+
+If `--cpu` fails because onnxruntime has no wheel for this machine, it
+writes nothing; offer the string fallback. A model change starts a
+vector store of its own: every page is embedded again, by the next
+`iirc index` or in the background by the first search. The recall knobs
+are per model, in `[recall.MODEL-ID]` of `.claude/iirc.toml`, so a new
+model starts at its own defaults and a table tuned for another model
+stays as it was.
 
 Report what `doctor` says. It also checks that `.iirc/`,
 `.claude/settings.json`, and `CLAUDE.md` are tracked by git and not

@@ -1,11 +1,12 @@
-# Search quality: findings and plan
+# Search quality: findings, plan, and results
 
 What iirc suggests to the agent, how often it is right, and what to change.
 Written 2026-10-09 from one tune run and ten research reports, then
 revised after an independent review. The creator asked for: a page audit
 that `tune` runs, better pages from the moment they are written, a review
 of what the model sees, a comparison of embedding models, a middle tier
-that needs no ollama, and a view on a port to Go or Rust.
+that needs no ollama, and a view on a port to Go or Rust. Phases 1 and 2
+are built; [Results](#results) has what they measured.
 
 ## What we measured
 
@@ -256,7 +257,128 @@ was relevant).
 - A Go binary for the hook path, after writing to Cal Paterson and
   choosing a license path.
 
+## Results
+
+Phases 1 and 2 were built on 2026-10-09 as quest 2610100115-p5 in
+agent-builder, whose `plan.md` records each step's measurement under
+"Deviations from plan". A count below is relevant passes, noise passes,
+and relevant pairs refused, from `iirc tune sweep --replay` on the strict
+labels. Agent-builder has 1,131 judged pairs (60 relevant) from 98
+prompts; neckbeard has 437 pairs (77 relevant) from 79 prompts.
+
+**The gate passes more relevant pages and fewer noise pages.**
+
+| Replay | Agent-builder | Neckbeard |
+|---|---|---|
+| Baseline, 0.28/0.34 | 13, 74, 47 (P 0.15, R 0.22, F1 0.18) | 29, 55, 48 (P 0.35, R 0.38, F1 0.36) |
+| Sources and links left out (item 3) | 16, 84, 44 (F1 0.20) | 28, 55, 49 (F1 0.35) |
+| Rarity by share and common words (item 4) | 13, 54, 47 (P 0.19, F1 0.20) | 23, 26, 54 (P 0.47, F1 0.37) |
+| Items 2 to 5 together, old knobs | 13, 53 (P 0.20, F1 0.21) | 24, 27 (P 0.47, F1 0.37) |
+| Retuned, RARE_SHARE 0.10, 0.28/0.38 (item 6) | 19, 71, 41 (P 0.21, R 0.32, F1 0.25) | 31, 41, 46 (P 0.43, R 0.40, F1 0.42) |
+
+Item 2 changed no replay count, because the gate does not read the rank
+and the replay has no cap; with a cap of 3, 2 of 98 prompts got a
+different top three, all of it noise. Item 5 has no measurement: neither
+set holds a failure recall. For item 6, 21 grid points passed the bar:
+no fewer relevant passes, fewer noise passes, and no relevant pass lost
+on neckbeard. Of these, RARE_SHARE 0.10, `semantic_only` 0.28, and
+`both` 0.38 had the best agent-builder F1.
+
+**The line keeps its percentage and its length.** Each session replay
+ran 40 human prompts, seed 1, Sonnet, at most 8 turns, with the passed
+pages fixed in a file. The baseline run of the old line read 10
+relevant, 16 noise, and 5 unlabelled pages over 40 runs ($4.92). Two
+later runs compared the variants on the same passed pages:
+
+| Line | Relevant reads | Noise reads | Landed |
+|---|---|---|---|
+| "Read before you investigate" | 11 | 24 | |
+| "Read a page whose summary bears on this task; skip the rest" (item 8) | 13 | 18 | yes |
+| the same, without the percentage (item 9) | 9 | 20 | no |
+| current line, second run | 14 | 21 | |
+| two pages (item 10) | 9 | 28 | no |
+| the previous prompt added to a prompt under 80 characters (item 10) | 10 | 23 | no |
+
+The two runs cost $12.25 and $10.45. On 28 prompts whose line was the
+same in two variants, reads differed by 13 against 9 relevant pages, so
+a difference of a few reads over 40 prompts is inside run-to-run
+variation. Each gate held the line to its current form when unsure.
+After item 9 failed its bar, the creator chose to keep the percentage.
+
+**Once per session, by the creator's choice.** A log replay
+(`line-replay.py --repeats`, 123 sessions, 2,720 recalls, 5,256
+suggestions) measured item 7's rule: it left out 51.1% of suggestions and
+lost 158 later reads over 49 session-page pairs, 12 with a plain cost.
+Read-only lost none but left out only 18.6%. The creator chose to name a
+page once per session, with the record reset when the context is
+compacted: "Anything more than one is a waste of context." That rule
+leaves out 70.1% of 5,258 suggestions, with at most 206 lost reads over
+55 session-page pairs, 15 with a plain cost. With the 10-recall check,
+recall on agent-builder went from a median 474 ms to 509 ms.
+
+**Speed.** `doctor --brief` on agent-builder went from 216 git calls in
+2.63 to 2.80 s to 39 calls in 0.73 to 0.74 s (item 17). Search in the
+wrapper (item 23) matched memoryfield-tool's distances to 1.1e-6 over
+777 page-query pairs, left both replays byte-identical, and cut recall
+on agent-builder from a median 0.564 s to 0.251 s. `iirc index` embeds
+95 pages in 2.3 s.
+
+**The audit's first run** on agent-builder found 79 findings in 95
+pages: 48 title, 14 summary, 17 hub, and none of own-title, superseded,
+or secret. It took about 40 s before item 23.
+
+**The models nearly tie at the gate.** The pooling round (item 26)
+listed each model's top three unlabelled pages per replay prompt: 674
+pairs. A stratified half, 345 pairs, was judged with the strict bar. It
+added no relevant pair: all 18 pairs judged relevant were pages written
+after their prompt, so they were set to unsure. The chosen defaults are
+the best agent-builder F1 that loses no relevant pass on neckbeard
+against the model's own earlier defaults:
+
+| Model | `semantic_only` / `both` | Agent-builder F1 | Neckbeard F1 |
+|---|---|---|---|
+| nomic-embed-text | 0.28 / 0.38, unchanged | 0.24 | 0.35 |
+| qwen3-embedding:0.6b | 0.40 / 0.60 | 0.24 | 0.40 |
+| embeddinggemma | 0.40 / 0.68 | 0.25 | 0.36 |
+| all-minilm-l6-v2 | 0.60 / 0.68 | 0.28 | 0.36 |
+
+No point passed the item 6 bar for any model, because qwen3 and gemma
+pass almost no noise at nomic's knobs. The store-ranking gap the model
+research measured does not carry over to a gate at a fixed distance.
+The OpenAI-compatible qwen3-embedding takes the local qwen3's values,
+unmeasured. Each model's near-duplicate line flags agent-builder's one
+closest page pair, as nomic's 0.10 does (qwen3 0.17, gemma 0.14, MiniLM
+0.20); its duplicate line is 0.7 of that, a choice, not a measurement.
+
+**What was built, changed, or dropped.** The numbers are the plan items
+above.
+
+| Item | Outcome |
+|---|---|
+| 1 | Built: `tune sweep --replay`, `scripts/replay-files.py`, and the session replay `scripts/line-replay.py`. |
+| 2, 3 | Built. |
+| 4 | Changed: rarity is a share of pages (`RARE_SHARE` 0.10), not a weight. The first word list, first20hours google-10000-english, permits only educational and personal use, so the list is the 1,000 top English words of wordfreq 3.1.1, CC-BY-SA 4.0, with a `NOTICE` file and `scripts/common-words.py` to rebuild it. |
+| 5 | Changed: `meaning+term` is required on a failure only with semantic search on; string-only search keeps the `term` rule. The one-page cap holds in both. New verdict `failure_needs_both`. |
+| 6 | Built: `both` 0.34 to 0.38. |
+| 7 | Changed: once per session, reset at compaction, instead of the 10-recall window. Verdict `repeat`. |
+| 8 | Built. |
+| 9 | Dropped by the creator after the replay; the line and the row keep the percentage. |
+| 10 | Dropped: neither experiment passed its bar. |
+| 11 | Built; `iirc pull` prints pages the same way. |
+| 12 | Built; each secret pattern starts at a word, so `task-...` never matches `sk-`. |
+| 13, 14, 16 | Built. |
+| 15 | Changed: `hub` rests on tune judgments only, because page-to-page distances are not on the prompt-to-page scale (for each page, 82 to 94 of 95 pages fell within 0.38); `superseded` matches only the link form or the frontmatter key. |
+| 17 to 22 | Built. |
+| 23 | Built, with an addition: a search that finds pages without vectors starts one background `iirc index`, at most every ten minutes per store. A search embeds at most 5 changed pages. |
+| 24 | Built: `[recall.MODEL-ID]`, a quoted name for a model with a dot, and `doctor --fix` moving a flat `[recall]` table. |
+| 25 | Built; MiniLM runs the fp32 model, not the 23 MB int8 one, so every machine computes the same vectors. |
+| 26 | Built: setup offers qwen3-embedding:0.6b where ollama or a host answers, MiniLM otherwise, substring last. A machine with no model in its setup file keeps nomic. |
+| Phase 3 | Not started: ideas 2610100122-x9 (reranker) and 2610100122-zj (native binary). |
+
 ## Decisions for the creator
+
+Decisions 1 and 2 are taken: phase 1 was built with the changes in
+[Results](#results), and phase 2 moved search into the wrapper.
 
 1. Approve phase 1 as written, or change items.
 2. Phase 2 moves search out of memoryfield-tool into the wrapper. The

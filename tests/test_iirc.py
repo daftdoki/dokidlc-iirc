@@ -3415,3 +3415,17 @@ def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
     assert iirc.near_duplicates() == []                          # nomic
     iirc.write_config_file({"embedding": {"backend": "ollama", "model": gemma.id}})
     assert iirc.near_duplicates() == [(round(d, 3), "a.md", "b.md")]   # same page shas, other model: not nomic's cached answer
+
+
+# p5 step 27
+
+
+def test_docs_name_every_command():
+    """USAGE.md names every top-level iirc command as a command, and the flags this quest added."""
+    usage = (ROOT / "docs" / "USAGE.md").read_text()
+    commands = re.findall(r'\bsub\.add_parser\(\s*"([a-z-]+)"', (ROOT / "bin" / "iirc").read_text())
+    assert len(commands) > 20
+    # as a command, in backticks: the noun "recall" or "read" in prose does not count
+    missing = [c for c in commands if not re.search(rf"`(?:/?iirc )?{re.escape(c)}\b", usage)]
+    assert missing == []
+    assert "`iirc audit" in usage and "--replay" in usage
