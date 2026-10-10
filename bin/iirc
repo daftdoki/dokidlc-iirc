@@ -2613,11 +2613,19 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 # --- migrate from the memory plugin -------------------------------------------
 
-OLD_VERBS = "search|pull|read|write|delete|verify|doubt|approve|index|cost|doctor|setup|init|sync|stores|stats|recall|nudge"
-OLD_COMMAND_RE = re.compile(r"`memory (" + OLD_VERBS + r")\b")
-RENAMED_VERBS = {"pull": "read-matching-pages", "doubt": "find-suspect-pages", "approve": "approve-page-check", "index": "rebuild-search-index",
-                 "cost": "estimate-context-tokens", "setup": "set-search-backend", "stores": "show-page-stores",
-                 "stats": "summarize-page-usage", "recall": "suggest-pages", "nudge": "remind-to-write"}   # the memory plugin's names that iirc changed
+# the memory plugin's invocations, each with its iirc form; the longest match wins, so a flag that became
+# its own command moves with its verb
+OLD_INVOCATIONS = {
+    **{v: v for v in ("search", "read", "write", "delete", "verify", "doctor", "init", "sync")},
+    "pull": "read-matching-pages", "doubt": "find-suspect-pages", "approve": "approve-page-check", "cost": "estimate-context-tokens",
+    "setup": "set-search-backend", "index": "rebuild-search-index", "index --vectors": "rebuild-search-index --vectors-only",
+    "stores": "show-page-stores", "stores add": "add-remote-store",
+    "stats": "summarize-page-usage", "stats --snapshot": "record-session-summary", "stats --session": "summarize-session-usage",
+    "recall": "suggest-pages", "recall --success": "record-command-success", "recall --failure": "suggest-pages --failure",
+    "nudge": "remind-to-write", "nudge --stop": "remind-to-write --at stop", "nudge --compact": "remind-to-write --at compaction",
+    "nudge --summary": "show-compaction-instructions",
+}
+OLD_COMMAND_RE = re.compile(r"`memory (" + "|".join(re.escape(k) for k in sorted(OLD_INVOCATIONS, key=len, reverse=True)) + r")(?![\w-])")
 OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
 SUGGESTED_COMMIT = 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
 
@@ -2673,7 +2681,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         rewritten = 0
         for page in list_pages(store.dir):
             text = page.read_text()
-            new_text = OLD_COMMAND_RE.sub(lambda m: "`iirc " + RENAMED_VERBS.get(m.group(1), m.group(1)), text)
+            new_text = OLD_COMMAND_RE.sub(lambda m: "`iirc " + OLD_INVOCATIONS[m.group(1)], text)
             if new_text != text:
                 page.write_text(new_text)
                 rewritten += 1
