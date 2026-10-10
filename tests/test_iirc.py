@@ -698,7 +698,8 @@ def test_guard_asks_only_for_network_doubt():
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
-def test_recall_gates_and_filter():
+def test_recall_gates_and_filter(monkeypatch):
+    monkeypatch.setattr(iirc, "RECALL", {"semantic_only": 0.28, "both": 0.34})   # the fixtures sit around these knobs, not the defaults
     assert not iirc.recall_worthy("yes")
     assert not iirc.recall_worthy("Yes, it is completed. Your suggested timebox works fine by me.")
     assert not iirc.recall_worthy("3> agree, and the second one too, please go ahead")
@@ -951,7 +952,7 @@ def test_brief_channels(tmp_path, monkeypatch, capsys):
     assert "just compacted" not in capsys.readouterr().out
     starts = [r for r in iirc.read_log(session="s3") if r["cmd"] == "start"]
     assert [r["source"] for r in starts] == ["compact", "startup"]   # SubagentStart logs no start
-    assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.34} and starts[0]["max_suggested"] == 3 and starts[0]["page_count"] == 0
+    assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.38} and starts[0]["max_suggested"] == 3 and starts[0]["page_count"] == 0
     # semantic mode probes the host, and the host's source must not replace the hook's
     iirc.write_config_file({"semantic": True})
     monkeypatch.setattr(iirc, "resolve_host", lambda: ("http://127.0.0.1:11434", "config", True))
@@ -974,7 +975,7 @@ def test_snapshot_logs_the_session_with_its_conditions(tmp_path, monkeypatch, ca
     assert (row["trigger"], row["reason"], row["transcript"]) == ("SessionEnd", "clear", "/t/s9.jsonl")
     assert row["used"] == ["a.md"] and row["missed"] == [["b.md", 1]] and row["read_unsuggested"] == ["z.md"]
     assert row["suggested_verified"] == ["a.md"] and row["skipped"] == 1 and row["recalls_with_pages"] == 1
-    assert row["knobs"] == {"semantic_only": 0.28, "both": 0.34} and "commit" in row and row["mode"] in ("semantic", "string")
+    assert row["knobs"] == {"semantic_only": 0.28, "both": 0.38} and "commit" in row and row["mode"] in ("semantic", "string")
 
 
 def test_stats(tmp_path, monkeypatch, capsys):
@@ -1924,13 +1925,13 @@ def test_recall_knobs_come_from_iirc_toml(tmp_path):
     toml = tmp_path / ".claude" / "iirc.toml"
     toml.write_text("[recall]\nsemantic_only = 0.3\n")
     iirc.set_root(tmp_path)
-    assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.34} and iirc.CONFIG_ERROR is None
+    assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.38} and iirc.CONFIG_ERROR is None
     near = [{"filename": "a.md", "via": ["semantic"], "distance": 0.29}]
     assert [r["rule"] for r in iirc.recall_filter(near)] == ["meaning"]
     for bad, says in (("semantic_only = 0.9", "from 0.1 to 0.6"), ("semantic_only = 0.4", "at least semantic_only"), ("loose = 0.3", "no knob 'loose'")):
         toml.write_text(f"[recall]\n{bad}\n")
         iirc.set_root(tmp_path)
-        assert says in iirc.CONFIG_ERROR and iirc.RECALL == {"semantic_only": 0.28, "both": 0.34}
+        assert says in iirc.CONFIG_ERROR and iirc.RECALL == {"semantic_only": 0.28, "both": 0.38}
     toml.unlink(); iirc.set_root(tmp_path)
 
 
@@ -2121,6 +2122,7 @@ def test_tune_sweep_says_when_too_few_pairs_were_judged(tmp_path, monkeypatch, c
 
 
 def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(iirc.KNOBS, "both", (0.34,) + iirc.KNOBS["both"][1:])   # the fixtures sit around this knob, not the default
     monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.30, "relevant"), ("p3.md", 0.33, "noise")])
     iirc.main(["tune", "sweep"])
@@ -2271,6 +2273,7 @@ def test_skill_names_the_writing_rules():
 # p5 step 1
 
 def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setitem(iirc.KNOBS, "both", (0.34,) + iirc.KNOBS["both"][1:])   # the fixtures sit around this knob, not the default
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)

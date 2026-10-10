@@ -245,7 +245,7 @@ SHOW_HOOKS = False   # show_hooks in .claude/iirc.toml: the user also sees what 
 # distance depends on the pages in the field. name: (default, low, high, what it sets)
 KNOBS: dict[str, tuple[float, float, float, str]] = {
     "semantic_only": (0.28, 0.10, 0.60, "how close, as cosine distance, a semantic hit must be with no strong term"),
-    "both": (0.34, 0.10, 0.60, "how close a semantic hit backed by an identifier or a rare page word must be"),
+    "both": (0.38, 0.10, 0.60, "how close a semantic hit backed by an identifier or a rare page word must be"),
 }
 RECALL: dict[str, float] = {k: v[0] for k, v in KNOBS.items()}
 
