@@ -1766,6 +1766,47 @@ def blob(rev: str, path: str, root: Path) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
+# set only inside git_cache(); a test or command can commit between two checks, so HEAD is not fixed per process
+_GIT_CACHE: dict | None = None
+
+
+@contextlib.contextmanager
+def git_cache():
+    """Within the block, changed_paths asks git once per sha and head_paths once per root."""
+    global _GIT_CACHE
+    outer = _GIT_CACHE
+    _GIT_CACHE = {} if outer is None else outer
+    try:
+        yield
+    finally:
+        _GIT_CACHE = outer
+
+
+def cached(key: tuple, compute):
+    if _GIT_CACHE is None:
+        return compute()
+    if key not in _GIT_CACHE:
+        _GIT_CACHE[key] = compute()
+    return _GIT_CACHE[key]
+
+
+def changed_paths(sha: str, root: Path) -> set[str] | None:
+    """Paths whose content differs between SHA and HEAD, or None when SHA is no commit here. Raises FileNotFoundError without git."""
+    def run() -> set[str] | None:
+        # --no-renames lists both sides of a move; -z keeps unusual paths unquoted
+        proc = subprocess.run(["git", "diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", f"{sha}^{{commit}}", "HEAD"],
+                              cwd=root, capture_output=True, text=True)
+        return set(filter(None, proc.stdout.split("\0"))) if proc.returncode == 0 else None
+    return cached(("changed", sha, str(root)), run)
+
+
+def head_paths(root: Path) -> set[str]:
+    def run() -> set[str]:
+        proc = subprocess.run(["git", "ls-tree", "-r", "-z", "--full-tree", "--name-only", "HEAD"], cwd=root, capture_output=True, text=True)
+        return set(filter(None, proc.stdout.split("\0")))
+    return cached(("head", str(root)), run)
+
+
 def ref_changed(ref: str, root: Path | None = None) -> str | None:
     """Reason text if the cited text changed since the cited commit, else None. A move alone is no change. URLs are never checked here."""
     root = root or ROOT
@@ -1780,10 +1821,17 @@ def ref_changed(ref: str, root: Path | None = None) -> str | None:
     if not sha:
         return f"{ref}: no commit cited"
     try:
-        if subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True).returncode:
-            return f"{path}: cited commit {sha} not found in history"
+        changed = changed_paths(sha, root)
     except FileNotFoundError:
         return None
+    if changed is None:
+        return f"{path}: cited commit {sha} not found in history"
+    if path not in changed and path in head_paths(root):
+        # the file at HEAD is the cited blob, so a cited section in it is unchanged too
+        if heading is None:
+            return None
+        text = cached(("show", path, str(root)), lambda: git("show", f"HEAD:{path}", cwd=root) or "")
+        return None if section_text(text, heading) is not None else f"{path}#{heading}: cited section not found at {sha}"
     now = current_path(path, sha, root)
     if now is None:
         return f"{path} no longer exists"
@@ -2910,7 +2958,8 @@ def conditions(mode: str, pages: int) -> dict:
 
 def suspect_pages(pages: list[Path]) -> list[str]:
     """Pages a cited file changed under since they cited it. Git only; never runs a page's check."""
-    return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
+    with git_cache():
+        return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:

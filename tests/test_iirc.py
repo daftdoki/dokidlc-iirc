@@ -2450,3 +2450,32 @@ def test_write_warns_and_succeeds(tmp_path, monkeypatch, capsys):
     assert "warning" not in capsys.readouterr().err
     _write_page(monkeypatch, tmp_path, "decided.md", "Search uses rare terms", "Creator decision: search uses rare terms", "x\n\n## Sources\n\n- y\n")
     assert "Creator decision" in capsys.readouterr().err
+
+
+# p5 step 19
+
+def test_doctor_brief_calls_git_once_per_sha(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.main(["setup", "--substring"]); capsys.readouterr()
+    docs = tmp_path / "docs"
+    for name in ("b.md", "c.md"):
+        (docs / name).write_text(f"{name}\n\n## Alpha\n\nalpha\n")
+    _git(tmp_path, "add", "docs"); _git(tmp_path, "commit", "-qm", "b c")
+    first = _git(tmp_path, "log", "-1", "--format=%h").strip()
+    (docs / "d.md").write_text("d\n"); _git(tmp_path, "add", "docs"); _git(tmp_path, "commit", "-qm", "d")
+    second = _git(tmp_path, "log", "-1", "--format=%h").strip()
+    _page(field, "p1.md", extra=f"refs:\n- docs/a.md@{first}\n- docs/b.md@{first}\n")
+    _page(field, "p2.md", extra=f"refs:\n- docs/c.md#Alpha@{first}\n- docs/a.md@{second}\n")
+    _page(field, "p3.md", extra=f"refs:\n- docs/d.md@{second}\n- docs/b.md@{second}\n")
+    calls: list[list[str]] = []
+    real = iirc.subprocess.run
+
+    def counting(argv, *a, **k):
+        if isinstance(argv, list) and argv[:1] == ["git"]:
+            calls.append(argv)
+        return real(argv, *a, **k)
+    monkeypatch.setattr(iirc.subprocess, "run", counting)
+    iirc.main(["doctor", "--brief"])
+    assert "suspect" not in capsys.readouterr().out
+    per_sha = {sha: sum(any(sha in arg for arg in argv) for argv in calls) for sha in (first, second)}
+    assert per_sha == {first: 1, second: 1}
