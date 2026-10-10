@@ -3462,3 +3462,22 @@ def test_failure_recall_saves_redacted_text(tmp_path, monkeypatch):
     kept = (tmp_path / "st" / "dokidlc-iirc" / "prompts" / "f1.jsonl").read_text()
     assert "[REDACTED]" in kept
     assert token not in kept
+
+
+def test_failed_recall_is_not_logged_as_timeout(tmp_path, monkeypatch):
+    """A recall that raises removes its inflight marker, so the next recall logs no timeout."""
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "e1")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    prompt = json.dumps({"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"})
+
+    def broken(q):
+        raise ValueError("shapes (1,768) and (1024,) not aligned")
+    monkeypatch.setattr(iirc, "hybrid_search", broken)
+    monkeypatch.setattr("sys.stdin", io.StringIO(prompt))
+    iirc.main(["recall"])
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
+    monkeypatch.setattr("sys.stdin", io.StringIO(prompt))
+    iirc.main(["recall"])
+    assert [r["cmd"] for r in iirc.read_log()] == ["recall"]
