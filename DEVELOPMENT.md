@@ -129,12 +129,12 @@ sweep` call.
 ## Approved checks
 
 `write` and `approve` record the sha256 of a page's check in
-`~/.local/state/dokidlc-iirc/checks.json`. `doubt` runs only approved
+`~/.local/state/dokidlc-iirc/checks.json`. `suspect-pages` runs only approved
 checks and lists the rest; `verify` refuses a page whose check is not
 approved or not read-only in form. Only `approve` and `write` grant
 approval, because those are the two places the creator was asked or the
 command came from this machine's own agent. The PreToolUse guard asks for
-`iirc approve` and `iirc doubt --network`, and the wrapper refuses
+`iirc approve` and `iirc suspect-pages --network`, and the wrapper refuses
 `--network` off a terminal unless `IIRC_ALLOW_NETWORK=1` is set. The
 same guard, registered for Bash and for Read, denies a raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, or `more` in a command

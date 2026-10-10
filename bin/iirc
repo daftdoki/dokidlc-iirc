@@ -18,15 +18,15 @@ Usage:
   iirc write PAGE [flags]    body on stdin; see write --help; --store NAME picks the store
   iirc delete PAGE
   iirc verify PAGE           record that the page was re-confirmed
-  iirc doubt [--all]         pages with evidence they may be wrong
+  iirc suspect-pages [--all] pages with evidence they may be wrong
   iirc approve PAGE          run a page's check once and approve it on this machine
   iirc index                 rebuild the search index
   iirc topics                every topic with its page count
-  iirc cost                  bytes and tokens of index.md and a search
+  iirc token-cost            bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
   iirc stats [--days N]      how the pages are being used
   iirc max-suggested [N]     pages recall suggests at most; N sets it on this machine
-  iirc knobs [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
+  iirc thresholds [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
   iirc tune gather|judge|sweep|done  evidence and judgments for tuning recall, and a sweep of the knobs
   iirc setup                 the embedding model and where it runs, or string search; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
@@ -1193,11 +1193,11 @@ def recall_max_bytes() -> int:
     return 120 + 200 * max_suggested()
 
 
-def cmd_knobs(args: argparse.Namespace) -> None:
+def cmd_thresholds(args: argparse.Namespace) -> None:
     """The recall gate's knobs for the active model: each value, its default and range, and what it sets. `set` writes one."""
     if args.action == "set":
         if args.name is None or args.value is None:
-            die("usage: iirc knobs set NAME VALUE")
+            die("usage: iirc thresholds set NAME VALUE")
         knobs_set(args.name, args.value)
         return
     print(f"[{table_header(recall_table())}] in {STORE_CONFIG}, for the embedding model {active_model().id}; a knob left out takes its default")
@@ -1252,7 +1252,7 @@ def knobs_set(name: str, value: float) -> None:
         if load_knobs(tomllib.loads(new))[name] != value:
             raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [{table_header(table)}]")
     except (tomllib.TOMLDecodeError, ConfigError) as e:
-        die(f"knobs set: {STORE_CONFIG} would not read back, so nothing was written: {e}")
+        die(f"thresholds set: {STORE_CONFIG} would not read back, so nothing was written: {e}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(new)
     print(f"{name} = {value:g} in [{table_header(table)}] of {path}; commit it, it is the repository's config")
@@ -1973,7 +1973,7 @@ CHECK_TIMEOUT = 10
 def url_status(url: str, timeout: float = URL_TIMEOUT) -> tuple[str, str] | None:
     """('ref', reason) when the source is gone, ('url', reason) when it cannot be reached, None when it answers.
 
-    Network access. Only `doubt --network` calls this, and only with the creator's permission.
+    Network access. Only `suspect-pages --network` calls this, and only with the creator's permission.
     """
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "dokidlc-iirc doubt"})
     try:
@@ -2276,7 +2276,7 @@ def page_frontmatter(name: str, store: Store | None = None) -> dict:
     return fm
 
 
-def cmd_doubt(args: argparse.Namespace) -> None:
+def cmd_suspect_pages(args: argparse.Namespace) -> None:
     """Pages with evidence they may be wrong, strongest signal first."""
     require_stores()
     if args.network:
@@ -2302,7 +2302,7 @@ def cmd_doubt(args: argparse.Namespace) -> None:
                 rows.append((page_label(store.name, page.name), fm.get("summary", ""), signals))
     log_event("doubt", suspects=sum(1 for r in rows if r[2]), network=bool(args.network))
     if unchecked_urls:
-        print(f"iirc: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `iirc doubt --network` contacts them; ask the creator first.", file=sys.stderr)
+        print(f"iirc: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `iirc suspect-pages --network` contacts them; ask the creator first.", file=sys.stderr)
     rows.sort(key=lambda r: (RANK[r[2][0][0]] if r[2] else 99, r[0]))
     if elsewhere:
         print(f"iirc: {len(elsewhere)} page{'s' if len(elsewhere) != 1 else ''} of other projects not checked here" + (": " + ", ".join(elsewhere) if args.all else ""), file=sys.stderr)
@@ -2498,7 +2498,7 @@ def tokens(nbytes: int) -> int:
     return (nbytes + 3) // 4
 
 
-def cmd_cost(args: argparse.Namespace) -> None:
+def cmd_token_cost(args: argparse.Namespace) -> None:
     require_stores()
     rows = []
     n = sum(len((s.dir / "index.md").read_bytes()) for s in live_stores() if (s.dir / "index.md").is_file())
@@ -2575,6 +2575,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 OLD_VERBS = "search|pull|read|write|delete|verify|doubt|approve|index|cost|doctor|setup|init|sync|stores|stats|recall|nudge"
 OLD_COMMAND_RE = re.compile(r"`memory (" + OLD_VERBS + r")\b")
+RENAMED_VERBS = {"doubt": "suspect-pages", "cost": "token-cost"}   # the memory plugin's names that iirc changed
 OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
 SUGGESTED_COMMIT = 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
 
@@ -2630,7 +2631,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
         rewritten = 0
         for page in list_pages(store.dir):
             text = page.read_text()
-            new_text = OLD_COMMAND_RE.sub(r"`iirc \1", text)
+            new_text = OLD_COMMAND_RE.sub(lambda m: "`iirc " + RENAMED_VERBS.get(m.group(1), m.group(1)), text)
             if new_text != text:
                 page.write_text(new_text)
                 rewritten += 1
@@ -4369,10 +4370,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("page")
     p.set_defaults(func=cmd_delete)
 
-    p = sub.add_parser("doubt", help="pages with evidence they may be wrong, strongest first; runs check commands")
+    p = sub.add_parser("suspect-pages", help="pages with evidence they may be wrong, strongest first; runs check commands")
     p.add_argument("--all", action="store_true", help="list clean pages too")
     p.add_argument("--network", action="store_true", help="also contact every URL in refs; needs the creator's permission")
-    p.set_defaults(func=cmd_doubt)
+    p.set_defaults(func=cmd_suspect_pages)
 
     p = sub.add_parser("audit", help="pages search shows badly: title and summary shape, secrets, own title, hubs, superseded text")
     p.add_argument("page", nargs="?", help="one page; default: every page")
@@ -4383,15 +4384,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--vectors", action="store_true", help=argparse.SUPPRESS)   # the vector cache only: no index.md stamp, no commit
     p.set_defaults(func=cmd_index)
 
-    p = sub.add_parser("cost", help="bytes and tokens of index.md and a search")
+    p = sub.add_parser("token-cost", help="bytes and tokens of index.md and a search")
     p.add_argument("--query", default="how to install and configure tools")
-    p.set_defaults(func=cmd_cost)
+    p.set_defaults(func=cmd_token_cost)
 
-    p = sub.add_parser("knobs", help="the recall gate's knobs in .claude/iirc.toml, with their ranges; `knobs set NAME VALUE` changes one")
+    p = sub.add_parser("thresholds", help="the recall gate's distances in .claude/iirc.toml, with their ranges; `thresholds set NAME VALUE` changes one")
     p.add_argument("action", nargs="?", choices=["set"])
     p.add_argument("name", nargs="?", choices=list(KNOB_TEXT))
     p.add_argument("value", nargs="?", type=float)
-    p.set_defaults(func=cmd_knobs)
+    p.set_defaults(func=cmd_thresholds)
 
     p = sub.add_parser("tune", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
     tsub = p.add_subparsers(dest="tune_cmd", required=True)

@@ -1,7 +1,7 @@
 #!/bin/sh
 # iirc guard. POSIX sh so it always parses. Reads PreToolUse JSON on stdin,
 # for Bash and for Read.
-# Asks before `iirc doubt --network` (contacts every URL cited in pages) and
+# Asks before `iirc suspect-pages --network` (contacts every URL cited in pages) and
 # `iirc approve` (accepts a page's check command for this machine).
 # Denies a raw read of a page file, by cat, head, sed, tail, less, or more in a
 # Bash command, or by the Read tool: `iirc read` prints the page with its
@@ -13,8 +13,8 @@ input=$(cat)
 cmd=$(printf '%s' "$input" | sed -n 's/.*"command":[[:space:]]*"\(.*\)".*/\1/p' | head -c 4000)
 file=$(printf '%s' "$input" | sed -n 's/.*"file_path":[[:space:]]*"\([^"]*\)".*/\1/p' | head -c 1000)
 case "$cmd" in
-  *iirc*doubt*--n*|*iirc*--n*doubt*)
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc doubt --network contacts every URL cited in the pages. Approve only if you agreed to that."}}'
+  *iirc*suspect-pages*--n*|*iirc*--n*suspect-pages*)
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc suspect-pages --network contacts every URL cited in the pages. Approve only if you agreed to that."}}'
     ;;
   *iirc*approve*)
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc approve runs a page'"'"'s check command and approves it on this machine. Approve only if the agent showed you the command and you agreed."}}'

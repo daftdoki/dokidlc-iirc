@@ -13,7 +13,7 @@ Mostly you do nothing. Recall names matching pages under your prompt,
 and a line under the prompt sums up the session; [UI.md](UI.md)
 describes the row, the line, and the cards. The row shows you the list
 the agent got. When the circle on the line turns yellow or red, the line
-ends with the command that clears it, such as `· run iirc doubt`; ask
+ends with the command that clears it, such as `· run iirc suspect-pages`; ask
 the agent to run it, or type it after `/iirc`. For anything else, ask in
 words: "what do we know about ollama hangs?", "remember that...",
 "what's out of date?". To read a page yourself, click its name, run
@@ -89,21 +89,21 @@ also writes at [the skill's moments](../skills/iirc/SKILL.md#when-to-write).
 
 ### Find and fix what may be out of date
 
-Ask: "What in iirc might be out of date?" The agent runs `iirc doubt`.
+Ask: "What in iirc might be out of date?" The agent runs `iirc suspect-pages`.
 It lists the pages with evidence against them, strongest first. A page
 is suspect when a file it cites changed since it cited it, or when its
 check command now fails. For each one, the agent reads the page and
 the diff, then verifies, rewrites, or deletes the page in the same turn.
-`/iirc doubt` prints the same list, and `/iirc doubt --all` adds the
+`/iirc suspect-pages` prints the same list, and `/iirc suspect-pages --all` adds the
 clean pages. Ask for a doubt pass after a `git pull` and when the line
-under the prompt says `· run iirc doubt`.
+under the prompt says `· run iirc suspect-pages`.
 
 Two cases need your yes. A check command that arrived with a clone is
-not approved on this machine, so `doubt` lists it and does not run it.
+not approved on this machine, so `suspect-pages` lists it and does not run it.
 The agent shows you the command and asks; on yes it runs
 `iirc approve PAGE`, and Claude Code asks you to approve the command too.
-`doubt` never contacts the URLs in a page's refs. To check them, the
-agent names the URLs `iirc doubt --network` will contact and asks. The
+`suspect-pages` never contacts the URLs in a page's refs. To check them, the
+agent names the URLs `iirc suspect-pages --network` will contact and asks. The
 command refuses unless a terminal answers yes or `IIRC_ALLOW_NETWORK=1`
 is set, and only you set it.
 
@@ -199,29 +199,29 @@ The `command.run` handler in
 | `/iirc max-suggested` | How many pages recall suggests at most. |
 | `/iirc max-suggested N` | Sets that number, 1 to 10, on this machine. |
 | `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails, then rebuilds the index. |
-| `/iirc doubt`, `/iirc doubt --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
+| `/iirc suspect-pages`, `/iirc suspect-pages --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
 | `/iirc sync` | Commits, pulls, and pushes every remote store. |
 | `/iirc stores` | The stores, their page counts, and anything not committed or pushed. |
 | `/iirc stats`, `/iirc stats --days N` | Recall and page use over the last 7 days, or N days. |
 | `/iirc index` | Rebuilds the search index. |
-| `/iirc cost` | Bytes and tokens of `index.md` and of a sample search. |
-| `/iirc knobs` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
+| `/iirc token-cost` | Bytes and tokens of `index.md` and of a sample search. |
+| `/iirc thresholds` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
 | `/iirc topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
-| `/iirc open` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
+| `/iirc unfold-suggestions` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
 | `/iirc reader`, `/iirc reader PAGE` | The reader, a pane with this session's suggested, written, and suspect pages, or open on one page. A click on a page name, here or anywhere iirc draws one, opens the page in the reader's page tab. See [UI.md](UI.md#the-reader). |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
 | `/iirc audit` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
 | `/iirc setup` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc setup`. |
-| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions, sweeps the knobs, then runs `audit`, and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
+| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions, sweeps the thresholds, then runs `audit`, and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,
 `sync`, and `index` may run for up to ten minutes; the rest stop after
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
 `stores add`, `setup`, `init`, `write`, `delete`, `approve`,
-`knobs set`, and `doubt --network`.
+`thresholds set`, and `suspect-pages --network`.
 
 ### The agent's commands
 
@@ -246,7 +246,7 @@ describes each one.
 | `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc setup --host URL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested N`, when the row brings too much or too little. |
 | `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc setup`, which warns when this is exported. |
-| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc knobs set` on your yes. |
+| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc thresholds set` on your yes. |
 | `[recall.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
@@ -255,7 +255,7 @@ describes each one.
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
 | the line under the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc status-line on` or `off`. |
-| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc doubt --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
+| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc suspect-pages --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | the environment | `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` | paths | Where the machine config, the index, the remote clones, and the records live. | When your machine moves them. |
 
 Store tables, in `.claude/iirc.toml`, replace the implicit project store.
@@ -273,7 +273,7 @@ records are kept 90 days.
 Each model has its own distance scale, so each has its own table in
 `.claude/iirc.toml`, named after the model with `:` changed to `-`. The
 hooks read the table of this machine's model; a knob left out takes its
-default. `iirc knobs` prints the table name and the values in force.
+default. `iirc thresholds` prints the table name and the values in force.
 
 ```toml
 [recall.nomic-embed-text]
@@ -355,7 +355,7 @@ Plugin commits `699d710`, `a16668a`, and `fa1ed37` record what recall
 does. The
 cards and `/iirc stats` show it. Each number has a response:
 
-- TRUST is not zero on `/iirc status`: type `/iirc doubt`, or ask the
+- TRUST is not zero on `/iirc status`: type `/iirc suspect-pages`, or ask the
   agent for a doubt pass.
 - A page under SUGGESTED, NOT READ keeps coming back: ask the agent to
   read the page once and decide whether to narrow it, split it, or delete

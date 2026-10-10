@@ -145,7 +145,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
   not the repository. A fresh clone or a new model rebuilds them on first use.
 - Nothing from a page runs or goes out without you. A check command that
   came with a clone runs only after you approve it, and a page's URLs are
-  contacted only by `iirc doubt --network`, which asks first.
+  contacted only by `iirc suspect-pages --network`, which asks first.
 - The guard refuses a raw read of a page by pattern, which is a
   convention, not a boundary.
 - Two near-duplicate pages make search name the wrong one; `iirc doctor`
@@ -159,7 +159,7 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 |---|---|---|
 | search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc setup` again |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested N` |
-| how close a page must be for recall to suggest it, per model | `.claude/iirc.toml`, `[recall.MODEL-ID]` | `/iirc tune`, on your yes; `/iirc knobs` prints them |
+| how close a page must be for recall to suggest it, per model | `.claude/iirc.toml`, `[recall.MODEL-ID]` | `/iirc tune`, on your yes; `/iirc thresholds` prints them |
 
 [docs/USAGE.md](docs/USAGE.md#every-setting) lists every setting, with
 its default, its range, and when to turn it.

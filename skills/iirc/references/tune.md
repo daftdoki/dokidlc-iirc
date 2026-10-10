@@ -110,8 +110,8 @@ Page fixes:
 
 Knob changes: only when the sweep had enough judged pairs and the change
 improves its criterion. Name the command, such as
-`iirc knobs set semantic_only 0.30`, and the counts before and after.
-The knobs belong to the embedding model the sweep ran with: `iirc knobs`
+`iirc thresholds set semantic_only 0.30`, and the counts before and after.
+The knobs belong to the embedding model the sweep ran with: `iirc thresholds`
 prints its table, such as `[recall.nomic-embed-text]`, and its range.
 
 For the plugin's developer, under a heading that says so: each pattern
@@ -123,8 +123,8 @@ Done when every proposal is in front of the creator with its evidence.
 ## 6. Apply
 
 Apply each change only on the creator's yes: page fixes with
-`iirc write` and `iirc delete`, knob changes with `iirc knobs set`.
-`knobs set` edits the active model's `[recall.MODEL-ID]` table in
+`iirc write` and `iirc delete`, knob changes with `iirc thresholds set`.
+`thresholds set` edits the active model's `[recall.MODEL-ID]` table in
 `.claude/iirc.toml`; show the creator the diff and commit it on their word.
 
 Then mark each session you judged:

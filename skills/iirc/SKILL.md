@@ -18,7 +18,7 @@ iirc search "what am I looking for"     ranked pages with summary and markers
 iirc search term1 term2 term3           several terms, searched separately, merged
 iirc pull "what am I looking for"       full text of the matching pages
 iirc read PAGE.md                       one page; STORE/PAGE.md when two stores hold the name
-iirc doubt [--network]                  pages with evidence they may be wrong; --network checks URL refs, with permission
+iirc suspect-pages [--network]          pages with evidence they may be wrong; --network checks URL refs, with permission
 iirc audit [PAGE]                       pages search shows badly, each with its fix
 iirc verify PAGE.md                     you re-confirmed it; re-run its check, refresh its refs
 iirc approve PAGE.md                    run a page's check once and approve it here (ask first)
@@ -30,7 +30,7 @@ iirc init                               create .iirc/ and the CLAUDE.md paragrap
 iirc stores                             the stores, their page counts, and anything not committed or pushed
 iirc topics                             every topic with its page count
 iirc max-suggested [N]                  how many pages the hook suggests at most (default 3); N sets it on this machine
-iirc knobs                              the recall gate's distances, from [recall.MODEL-ID] in .claude/iirc.toml
+iirc thresholds                         the recall gate's distances, from [recall.MODEL-ID] in .claude/iirc.toml
 iirc tune gather|judge|sweep|done       judge what recall suggested, and propose fixes; see references/tune.md
 iirc sync                               commit, pull, and push the remote stores
 ```
@@ -197,7 +197,7 @@ iirc.
 A page is trusted until there is evidence against it. Time alone is not
 evidence. Search marks a page `suspect` when a file it cites changed since
 the cited commit, and `glance` when an unverified page is past its kind's
-age. `doubt` also runs each page's `--check` command and marks failures.
+age. `suspect-pages` also runs each page's `--check` command and marks failures.
 
 - `suspect`: read the page and the cited diff before relying on it. Then
   `verify` it, rewrite it, or `delete` it. In the same turn.
@@ -206,20 +206,20 @@ age. `doubt` also runs each page's `--check` command and marks failures.
   Every `iirc read` ends with the commands.
 - Found right in use: `verify` it. One command. `verify` re-runs the
   page's check.
-- Run `iirc doubt` when the session-start line names a suspect, after a
+- Run `iirc suspect-pages` when the session-start line names a suspect, after a
   `git pull` or `iirc sync`, and before you close a quest stage. A page
-  another project wrote is not checked here; `doubt` counts them.
+  another project wrote is not checked here; `suspect-pages` counts them.
 - A `--check` must be read-only and must pass when you write it; the
-  wrapper refuses one that does not. Checks run only from `doubt`,
+  wrapper refuses one that does not. Checks run only from `suspect-pages`,
   `verify`, and `approve`, never from hooks.
 - A check that came with a clone is not approved on this machine.
-  `doubt` lists it instead of running it, and `verify` refuses the page
+  `suspect-pages` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run
   `iirc approve PAGE`. Claude Code prompts them to approve that command
   as well.
 
-A ref may be a URL. Search never contacts it, and `iirc doubt` skips
-URL refs and says how many it skipped. `iirc doubt --network` sends one
+A ref may be a URL. Search never contacts it, and `iirc suspect-pages` skips
+URL refs and says how many it skipped. `iirc suspect-pages --network` sends one
 HEAD request per URL; before you run it, tell the creator which URLs it
 will contact and ask. The wrapper itself refuses unless a terminal answers
 yes or `IIRC_ALLOW_NETWORK=1` is set, which only the creator does. A URL

@@ -99,7 +99,7 @@ test('parses the recovery nudge and the brief', () => {
   expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc setup' })
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc doubt')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc suspect-pages')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
@@ -275,7 +275,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
   expect(helpText).toContain('status-line on · max-suggested 4')
   expect(helpText).toContain('/iirc max-suggested N')
-  for (const cmd of ['tune', 'audit', 'setup', 'cost']) expect(helpText).toContain(`/iirc ${cmd} `)
+  for (const cmd of ['tune', 'audit', 'setup', 'token-cost', 'suspect-pages', 'unfold-suggestions', 'thresholds']) expect(helpText).toContain(`/iirc ${cmd} `)
   expect(helpText).toContain('status-line on · max-suggested 4 · search semantic+keyword')
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune .*then audit/)
@@ -365,7 +365,7 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
   expect(await help.find({ text: '/iirc max-suggested N' })).toBeDefined()
   // tune and audit are maintenance; setup is a setting, shown with the search mode in force
   expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
-  for (const cmd of ['tune', 'audit', 'setup', 'cost', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  for (const cmd of ['tune', 'audit', 'setup', 'token-cost', 'suspect-pages', 'unfold-suggestions', 'thresholds', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
   expect(await help.find({ text: 'search' })).toBeDefined()
 })
 
@@ -440,7 +440,7 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   await clock.settle()
   await hookRow($, 'SessionStart', BRIEF, 'h9')
   const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
-  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc doubt')
+  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc suspect-pages')
   expect(text).toContain('stores: shared 5 pages, 2 not pushed; fix with iirc sync')
   expect(text).toContain('suggested, not read: noisy.md ×4')
   expect(text).toContain('average match: 62% · read 75% · not read 49%')
@@ -545,8 +545,8 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read a page whose summary bears on this task; skip the rest: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
   const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
   expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeUndefined()      // folded
-  expect((await $.command.run({ command: 'iirc', args: 'open' })).text).toContain('unfolded')
-  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc open unfolds the latest row
+  expect((await $.command.run({ command: 'iirc', args: 'unfold-suggestions' })).text).toContain('unfolded')
+  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc unfold-suggestions unfolds the latest row
   await row.press({ key: 'open-p-tree-0-0-1' })
   expect(opened).toEqual(['iirc:iirc reader'])
 })

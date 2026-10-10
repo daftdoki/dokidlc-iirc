@@ -58,7 +58,7 @@ const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S*[^\s.]|string only \([^)]
 // the command that clears each kind of warning, in the order the line under the prompt names one
 const WARNING_FIX: [RegExp, string][] = [
   [/memoryfield-tool is not at the pin/, 'iirc doctor --fix'],
-  [/suspect:/, 'iirc doubt'],
+  [/suspect:/, 'iirc suspect-pages'],
   [/not pushed/, 'iirc sync'],
   [/Persistence:/, 'iirc doctor --fix'],
   [/near-duplicate/, 'iirc doctor'],
@@ -73,7 +73,7 @@ const COUNTS_RE = /\biirc\s+(read|pull|write)\b/
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const STATUS_LINE_ARGS_RE = /^\s*status-line(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
-const DIRECT_RE = /^(doctor(?:\s+--fix)?|doubt(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|cost|topics|knobs|search\s+\S.*|read(?:\s+\S+)+)$/s
+const DIRECT_RE = /^(doctor(?:\s+--fix)?|suspect-pages(?:\s+--all)?|stores|sync|stats(?:\s+--days\s+\d+)?|index|token-cost|topics|thresholds|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
@@ -98,19 +98,19 @@ const LIST_MAX = 3
 const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
   ['doctor --fix', 'install or repair, then rebuild the index', 'MAINTENANCE'],
-  ['doubt', 'pages that may be wrong', 'MAINTENANCE'],
+  ['suspect-pages', 'pages that may be wrong', 'MAINTENANCE'],
   ['audit', 'pages search shows badly, each with its fix', 'MAINTENANCE'],
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
   ['stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
   ['index', 'rebuild the search index', 'MAINTENANCE'],
-  ['knobs', "the recall gate's distances and ranges", 'MAINTENANCE'],
-  ['tune', 'judge recall, sweep the knobs, then audit', 'MAINTENANCE'],
-  ['cost', 'tokens of index.md and of a search', 'MAINTENANCE'],
+  ['thresholds', "the recall gate's distances and ranges", 'MAINTENANCE'],
+  ['tune', 'judge recall, sweep the thresholds, then audit', 'MAINTENANCE'],
+  ['token-cost', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
-  ['open', 'unfold the latest suggested pages', 'LOOK UP'],
+  ['unfold-suggestions', 'unfold the latest suggested pages', 'LOOK UP'],
   ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
@@ -483,7 +483,7 @@ async function loadDemoSession($: EngineInterface) {
 export function healthLines(checkup: IircHealth | null, c: SessionCounts): string[] {
   const lines: string[] = []
   if (checkup) {
-    lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with iirc doubt`)
+    lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with iirc suspect-pages`)
     lines.push('stores: ' + checkup.stores.map(storeText).join('; ') + (checkup.stores.some(x => x.unpushed > 0) ? '; fix with iirc sync' : ''))
   }
   if (c.match.all !== null) lines.push(`average match: ${matchText(c.match)}`)
@@ -683,7 +683,7 @@ export const register: Register = on => {
       // the card draws over this text; the text stands where the card cannot
       return { text: page ? `${String(page.fm.title ?? page.name)}\n${String(page.fm.summary ?? '')}\n\n${page.body.trim()}` : `iirc show ${ref}: ${error}` }
     }
-    if (e.args.trim() === 'open') {
+    if (e.args.trim() === 'unfold-suggestions') {
       // unfold the latest suggested-pages row, the keyboard's way to what a click on [+] does
       const keys = Object.keys(await read($, byPrompt))
       const last = keys[keys.length - 1]
@@ -898,7 +898,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
   // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
   const isHealthWarn = !!checkup && (checkup.suspect.length > 0 || isUnpushed)
-  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: checkup!.suspect.length > 0 ? 'iirc doubt' : 'iirc sync' }
+  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: checkup!.suspect.length > 0 ? 'iirc suspect-pages' : 'iirc sync' }
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
   // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
@@ -974,8 +974,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   if (checkup) {
     const n = checkup.suspect.length
     const text = n === 0 ? 'no suspect pages' : `${n} suspect ${n === 1 ? 'page' : 'pages'}: a cited file changed`
-    trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? 'iirc doubt' : undefined))
-    factWidths.push(widthOf(text, n > 0 ? 'iirc doubt' : undefined))
+    trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? 'iirc suspect-pages' : undefined))
+    factWidths.push(widthOf(text, n > 0 ? 'iirc suspect-pages' : undefined))
     for (const name of checkup.suspect.slice(0, LIST_MAX)) {
       trustRows.push(
         <Box key={`s${name}`} flexDirection="row" paddingLeft={14}>

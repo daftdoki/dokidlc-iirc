@@ -676,14 +676,14 @@ def test_guard_denies_a_raw_read_of_a_page():
         assert run(cmd).stdout == "", cmd
 
 
-def test_guard_asks_only_for_network_doubt():
+def test_guard_asks_only_for_network_suspect_pages():
     import json, subprocess
     shim = ROOT / "scripts" / "guard.sh"
     def run(cmd):
         return subprocess.run(["sh", str(shim)], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), capture_output=True, text=True)
-    assert run("iirc doubt").stdout == ""
+    assert run("iirc suspect-pages").stdout == ""
     assert run("git status").stdout == ""
-    out = json.loads(run("iirc doubt --network").stdout)
+    out = json.loads(run("iirc suspect-pages --network").stdout)
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
@@ -956,6 +956,13 @@ def test_summary_nudge_asks_the_summary_for_unwritten_findings(tmp_path, monkeyp
     (tmp_path / ".iirc").mkdir()
     out = run()
     assert "`iirc write`" in out and run() == out                             # every compaction, the same line
+
+
+def test_commands_carry_their_plain_names():
+    import subprocess
+    out = subprocess.run([str(ROOT / "bin" / "iirc"), "--help"], capture_output=True, text=True).stdout
+    names = set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
+    assert {"suspect-pages", "token-cost", "thresholds"} <= names and not {"doubt", "cost", "knobs"} & names
 
 
 def test_brief_channels(tmp_path, monkeypatch, capsys):
@@ -1638,7 +1645,7 @@ def test_ref_in_another_project_gives_no_signal(tmp_path, monkeypatch, capsys):
     _page(agent.dir, "theirs.md", extra=f"project: github.com/x/other\nrefs:\n- github.com/x/other:docs/a.md@deadbee\ncheck: touch {marker}\n")
     fm = iirc.page_frontmatter("theirs.md", agent)
     assert iirc.suspicion(fm, run_checks=True) == []
-    iirc.main(["doubt"])
+    iirc.main(["suspect-pages"])
     assert "not checked here" in capsys.readouterr().err and not marker.exists()
     iirc.main(["verify", "agent/theirs.md"])
     assert "verified agent/theirs.md" in capsys.readouterr().out and not marker.exists()
@@ -1839,7 +1846,7 @@ def _old_layout(root):
     """A repository as the memory plugin left it: store, config, CLAUDE.md section, and settings."""
     (root / ".memory").mkdir()
     (root / ".memory" / "index.md").write_text("---\ntitle: Memory\n---\n\n<!-- memory format 1, written by memory abc1234 on 2026-10-01 -->\n")
-    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`; memory as a word stays.\n")
+    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`; memory as a word stays.\n")
     (root / ".claude").mkdir()
     (root / ".claude" / "memory.toml").write_text('ui = true\n\n[stores.project]\nkind = "project"\npath = ".memory"\n')
     (root / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"memory@dokidlc": True, "questlog@dokidlc": True}}, indent=2) + "\n")
@@ -1894,6 +1901,7 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     assert "memory@memory-dev" in (repo / ".claude" / "settings.local.json").read_text()
     page = (repo / ".iirc" / "a-page.md").read_text()
     assert "`iirc read b.md`" in page and "`iirc doctor --fix`" in page and "memory as a word stays" in page
+    assert "`iirc suspect-pages`" in page and "`iirc token-cost`" in page   # renamed since the memory plugin
     assert "iirc format" in (repo / ".iirc" / "index.md").read_text() and reindexed
     for b in bases:
         assert not (b / "dokidlc-memory").exists() and (b / "dokidlc-iirc" / "kept.txt").is_file()
@@ -2164,21 +2172,21 @@ def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, ca
 def test_knobs_set_writes_only_its_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"
-    iirc.main(["knobs", "set", "both", "0.36"])   # no file yet
+    iirc.main(["thresholds", "set", "both", "0.36"])   # no file yet
     assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.36\n"
     toml.write_text("# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n")
-    iirc.main(["knobs", "set", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
+    iirc.main(["thresholds", "set", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
     assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n"
     toml.write_text("[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
-    iirc.main(["knobs", "set", "semantic_only", "0.3"])
-    iirc.main(["knobs", "set", "both", "0.4"])
+    iirc.main(["thresholds", "set", "semantic_only", "0.3"])
+    iirc.main(["thresholds", "set", "both", "0.4"])
     assert toml.read_text() == "[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     capsys.readouterr()
     for argv, says in ((["semantic_only", "0.9"], "from 0.1 to 0.6"), (["semantic_only", "0.45"], "set both first")):
         with pytest.raises(SystemExit):
-            iirc.main(["knobs", "set", *argv])
+            iirc.main(["thresholds", "set", *argv])
         assert says in capsys.readouterr().err
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     toml.unlink(); iirc.set_root(tmp_path)
@@ -2259,7 +2267,7 @@ def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monk
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
     toml.write_text('[ recall . "nomic-embed-text" ]\nboth = 0.36\n')
-    iirc.main(["knobs", "set", "both", "0.38"])
+    iirc.main(["thresholds", "set", "both", "0.38"])
     assert toml.read_text() == '[ recall . "nomic-embed-text" ]\nboth = 0.38\n'
     toml.unlink(); iirc.set_root(tmp_path)
 
@@ -3070,9 +3078,9 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
     _machine_model("qwen3-embedding:0.6b")
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}    # past nomic's 0.60, inside qwen3's range
-    iirc.main(["knobs"])
+    iirc.main(["thresholds"])
     assert '[recall."qwen3-embedding-0.6b"]' in capsys.readouterr().out
-    iirc.main(["knobs", "set", "both", "0.8"])
+    iirc.main(["thresholds", "set", "both", "0.8"])
     assert 'semantic_only = 0.5\nboth = 0.8\n' in toml.read_text() and "[recall.nomic-embed-text]\nsemantic_only = 0.3\n" in toml.read_text()
     _machine_model("all-minilm-l6-v2")
     iirc.set_root(tmp_path)
@@ -3082,7 +3090,7 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.6, "both": 0.68}   # minilm's own defaults
     grid = iirc.knob_grid()
     assert min(k["semantic_only"] for k in grid) == 0.1 and max(k["both"] for k in grid) == 0.9 and all(k["both"] >= k["semantic_only"] for k in grid)
-    iirc.main(["knobs", "set", "semantic_only", "0.55"])   # a new table for the active model, after the others
+    iirc.main(["thresholds", "set", "semantic_only", "0.55"])   # a new table for the active model, after the others
     assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.4\n\n[recall.all-minilm-l6-v2]\nsemantic_only = 0.55\n"
     toml.write_text("[recall.nomic]\nboth = 0.4\n")
     iirc.set_root(tmp_path)

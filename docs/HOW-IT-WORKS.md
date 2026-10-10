@@ -255,7 +255,7 @@ Both commands print nothing in a repository with no store.
 ### The guard
 
 `PreToolUse` on Bash and Read runs `scripts/guard.sh`. Claude Code asks
-you before `iirc doubt --network` and `iirc approve`. A raw read of a
+you before `iirc suspect-pages --network` and `iirc approve`. A raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, `more`, or the Read
 tool, is denied, and the reason tells the agent to use `iirc read`, which
 prints the trust markers, or `iirc doctor --fix` if that fails.
@@ -442,7 +442,7 @@ rewrites the ref to the new path. `path#Heading@sha` cites one markdown
 section, up to the next heading of its level or higher. With two headings
 of the same text, the first counts.
 
-Search never contacts a URL ref. `iirc doubt --network` sends one HEAD
+Search never contacts a URL ref. `iirc suspect-pages --network` sends one HEAD
 request per URL, after the agent asks you and Claude Code prompts you. A
 URL that answers "gone" makes the page suspect. A URL that does not
 answer adds a glance note.
@@ -513,7 +513,7 @@ the model tables, is a configuration error that `iirc doctor --fix`
 moves into the nomic table. A value out of range is a configuration
 error too: commands stop, and the hooks go quiet as
 [Session start](#session-start-and-subagent-start) describes.
-`iirc knobs` prints the values in force for the active model. A line's
+`iirc thresholds` prints the values in force for the active model. A line's
 `69% match` is 100% less the distance, so a percentage compares pages
 only under one model. Every knob, with its default and range per model,
 is in [USAGE.md](USAGE.md#recall-knobs-per-model).
@@ -687,7 +687,7 @@ gate is that kind of finding.
    with a distance, it proposes nothing. It ends with `iirc audit`.
 4. The agent proposes page fixes, checks each flagged page with two
    prompts of its own, and, when the sweep supports one, proposes a knob
-   change with `iirc knobs set`. Code findings go in a section for the
+   change with `iirc thresholds set`. Code findings go in a section for the
    developer. Nothing applies until you say yes. `iirc tune done` marks
    each session tuned, so gather skips it.
 

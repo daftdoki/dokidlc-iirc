@@ -11,9 +11,9 @@ tested on Claude Code 2.1.295.
 
 ![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
 
-![The same row unfolded by /iirc open: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
+![The same row unfolded by /iirc unfold-suggestions: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
 
-A click on `[+]` unfolds the row; `/iirc open` unfolds the latest one from the keyboard.
+A click on `[+]` unfolds the row; `/iirc unfold-suggestions` unfolds the latest one from the keyboard.
 
 When recall finds pages for your prompt, a row appears under it:
 
@@ -87,7 +87,7 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 | `[4] writes` | different pages this session wrote |
 | `· [2] timed out` | shown only when a recall this session ran past the hook's 5-second limit and Claude Code killed it |
 | `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
-| `· run iirc doubt` | shown when the circle is yellow or red: the command that clears it |
+| `· run iirc suspect-pages` | shown when the circle is yellow or red: the command that clears it |
 
 The line updates after each `iirc read`, `pull`, `write`, `delete`, `sync`,
 `migrate`, `setup`, `init`, and `doctor`, and after each recall. A status
@@ -122,7 +122,7 @@ A plain `/iirc` draws a short card in place of its output row:
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it, in green, yellow, or red
 - TRUST: the number of suspect pages, whose cited file changed since
-  they cited it, and up to three by name, with `iirc doubt` as the fix
+  they cited it, and up to three by name, with `iirc suspect-pages` as the fix
 - STORES: each store's pages, then `clean` or its uncommitted changes
   and unpushed commits, with `iirc sync` as the fix for unpushed ones
 - the counts, under STORE (pages) and THIS SESSION (used, reads, and
@@ -146,8 +146,8 @@ draw the two cards with sample numbers.
   and the search mode, each with its command and current value. `setup`
   goes to the skill, which asks which embedding model and where it runs
 - MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
-  directly, printing what they print: `doctor`, `doctor --fix`, `doubt`,
-  `sync`, `stores`, `stats`, `index`, `cost`, `knobs`, `search QUERY`, `topics`, and
+  directly, printing what they print: `doctor`, `doctor --fix`, `suspect-pages`,
+  `sync`, `stores`, `stats`, `index`, `token-cost`, `thresholds`, `search QUERY`, `topics`, and
   `read PAGE`. `audit` and `tune` are maintenance too, but they go to the
   skill, which proposes each fix for your yes. A page you read this way does not count toward the
   session's reads, which are the agent's. `/iirc doctor` draws its checks
