@@ -279,9 +279,9 @@ prompts; neckbeard has 437 pairs (77 relevant) from 79 prompts.
 Item 2 changed no replay count, because the gate does not read the rank
 and the replay has no cap; with a cap of 3, 2 of 98 prompts got a
 different top three, all of it noise. Item 5 has no measurement: neither
-set holds a failure recall. For item 6, 21 grid points passed the bar:
-no fewer relevant passes, fewer noise passes, and no relevant pass lost
-on neckbeard. Of these, RARE_SHARE 0.10, `semantic_only` 0.28, and
+set holds a failure recall. For item 6, 21 grid points passed the bar, which compares against the
+baseline row (13, 74 on agent-builder): no fewer relevant passes, fewer
+noise passes, and no relevant pass lost on neckbeard. Of these, RARE_SHARE 0.10, `semantic_only` 0.28, and
 `both` 0.38 had the best agent-builder F1.
 
 **The line keeps its percentage and its length.** Each session replay

@@ -6,7 +6,7 @@
 """Replay judged prompts through `claude -p` with a given recall line, and count the pages the model reads.
 
   scripts/line-replay.py --replay FILE [--variants current,...] [--sample N] [--seed S] [--passed FILE] [--transcripts DIR] [--streams DIR] [--dry-run] [--out FILE]
-  scripts/line-replay.py --repeats [--rule window10|window5|window3|read-only|read-or-window3|session-once] [--transcripts DIR] [--out FILE]
+  scripts/line-replay.py --repeats [--rule session-once|window10|window5|window3|read-only|read-or-window3] [--transcripts DIR] [--out FILE]
 
 FILE is a replay JSONL file, one judged pair per line:
 {"repo", "qid", "prompt", "via", "page", "label"}. Only `via: prompt` rows are
@@ -30,13 +30,13 @@ so its own recall hook stays silent; this checkout's bin/ is first on PATH, so
 the run's cwd is a real checkout.
 
 --repeats runs no model. It reads this machine's iirc logs, read-only, and applies
-a repeat rule to each session's recalls in log order. window10, the default, leaves
-a page out when the session's last 10 recalls named it, or a read or pull of it is
-newer than the 10th-last recall. --rule picks a variant: window5 and window3 shorten
-the window; read-only leaves a page out only once the session read it; read-or-window3
-adds the last 3 recalls' names to that; session-once leaves a page out when the
-session named, read, or pulled it since its last compaction, the PreCompact hook's
-`session` row in the log. --transcripts DIR takes the compactions from the
+a repeat rule to each session's recalls in log order. session-once, the default and
+the rule recall uses, leaves a page out when the session named, read, or pulled it
+since its last compaction, the PreCompact hook's `session` row in the log. --rule
+picks a variant: window10 leaves a page out when the session's last 10 recalls named
+it, or a read or pull of it is newer than the 10th-last recall; window5 and window3
+shorten the window; read-only leaves a page out only once the session read it;
+read-or-window3 adds the last 3 recalls' names to that. --transcripts DIR takes the compactions from the
 compact_boundary rows of the session transcripts under DIR (~/.claude/projects)
 instead, since the log has the PreCompact row only from 2026-10-09; a session whose
 transcript is gone then has none. It counts the suggestions the rule leaves out, and the
@@ -309,7 +309,7 @@ def with_transcript_compactions(rows: list[dict], marks: dict[str, list[datetime
     return out
 
 
-def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
+def repeat_counts(rows: list[dict], rule: str = "session-once") -> dict:
     """Per session and in total: recalls, pages suggested, pages the rule leaves out, and lost reads, with each lost case.
 
     A lost pair (session, page) is a plain cost when the session read the page before its next recall and never
@@ -432,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Count the pages a model reads under each recall line variant.")
     ap.add_argument("--replay", type=Path)
     ap.add_argument("--repeats", action="store_true", help="count what the once-per-session rule leaves out of the real log, and the reads it loses")
-    ap.add_argument("--rule", choices=list(REPEAT_RULES), default="window10", help="with --repeats: which repeat rule to apply")
+    ap.add_argument("--rule", choices=list(REPEAT_RULES), default="session-once", help="with --repeats: which repeat rule to apply")
     ap.add_argument("--transcripts", type=Path, help="with --repeats: take compactions from the session transcripts under this directory, not the log; "
                     "with the followup variant: where to find a prompt's previous one (default ~/.claude/projects)")
     ap.add_argument("--variants", default="today", help=f"comma-separated, from: {', '.join(VARIANTS)}")

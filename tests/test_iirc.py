@@ -2806,6 +2806,9 @@ def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
     log.write_text("".join(json.dumps(r) + "\n" for r in rows) + "not json\n")
     out = tmp_path / "repeats.json"
     assert lr.main(["--repeats", "--out", str(out)]) == 0
+    assert json.loads(out.read_text())["rule"] == "session-once"   # the rule that shipped is the default
+    capsys.readouterr()
+    assert lr.main(["--repeats", "--rule", "window10", "--out", str(out)]) == 0
     result = json.loads(out.read_text())
     t = result["totals"]
     assert (t["recalls"], t["suggested"], t["suppressed"], t["lost_reads"], t["lost_pairs"], t["plain_pairs"]) == (9, 14, 6, 2, 2, 1)
