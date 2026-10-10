@@ -40,7 +40,7 @@ Sleep 6s
 Escape
 Sleep 2s
 # unfold the row: each page with its summary and how well it matched (a click on [+] does the same)
-Type "/iirc unfold-suggestions"
+Type "/iirc unfold-suggested-pages"
 Sleep 500ms
 Enter
 Sleep 4s

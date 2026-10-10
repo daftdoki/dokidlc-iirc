@@ -62,7 +62,7 @@ shot() {
   shot '/iirc help' 4s card-help
   shot '/iirc doctor' 10s card-doctor
   shot "/iirc show $page" 4s card-page
-  printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc unfold-suggestions"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
+  printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc unfold-suggested-pages"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
   shot '/iirc reader demo' 4s pane-docked-session
   printf 'Enter\nSleep 3s\nScreenshot pane-docked-page.png\nEscape\nSleep 1s\nScreenshot pane-docked-keys-off.png\nType "q"\nSleep 500ms\nCtrl+U\n'
 } | tape wide 1600 1300

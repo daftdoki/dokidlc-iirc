@@ -249,18 +249,19 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
 })
 
-test('/iirc status-line off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
+test('/iirc summary-line-visibility off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
   await hookRow($, 'SessionStart', BRIEF, 'h7')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
-  expect((await $.command.run({ command: 'iirc', args: 'status-line off' })).text).toBe('iirc status-line off')
+  expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility off' })).text).toBe('iirc summary-line-visibility off')
   expect(await (await hintRow($)).find({ text: LINE })).toBeUndefined()
-  expect((await $.command.run({ command: 'iirc', args: 'status-line' })).text).toContain('is off')
-  expect((await $.command.run({ command: 'iirc', args: 'status-line on' })).text).toBe('iirc status-line on')
+  expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility' })).text).toContain('is off')
+  expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility on' })).text).toBe('iirc summary-line-visibility on')
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'what do we know about hooks?' })).text).toBe('the skill ran')
-  expect((await $.command.run({ command: 'iirc', args: 'stores add x y' })).text).toBe('the skill ran')
+  expect((await $.command.run({ command: 'iirc', args: 'add-remote-store x y' })).text).toBe('the skill ran')
+  for (const old of ['status-line off', 'unfold-suggestions', 'stats', 'thresholds']) expect((await $.command.run({ command: 'iirc', args: old })).text).toBe('the skill ran')
 })
 
 test('a plain /iirc prints help with the session line, and does not load the skill', async ($: Engine, on: On) => {
@@ -273,10 +274,11 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
-  expect(helpText).toContain('status-line on · max-suggested-pages 4')
+  expect(helpText).toContain('summary-line-visibility on · max-suggested-pages 4')
   expect(helpText).toContain('/iirc max-suggested-pages N')
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
-  expect(helpText).toContain('status-line on · max-suggested-pages 4 · search semantic+keyword')
+  expect(helpText).toContain('/iirc summary-line-visibility on|off ')
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
+  expect(helpText).toContain('summary-line-visibility on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune-suggestions .*then audit/)
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
@@ -311,7 +313,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     surface: 'terminal',
     component: 'CommandOutput',
     requestId: 'not-help',
-    props: { command: 'iirc:iirc', args: 'status-line', text: 'iirc status-line is on', isErrored: false },
+    props: { command: 'iirc:iirc', args: 'summary-line-visibility', text: 'iirc summary-line-visibility is on', isErrored: false },
   })
   expect(await other.find({ text: 'up to 4' })).toBeUndefined()
   const status = await $.ui.mount({
@@ -365,7 +367,7 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
   expect(await help.find({ text: '/iirc max-suggested-pages N' })).toBeDefined()
   // tune and audit are maintenance; setup is a setting, shown with the search mode in force
   expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
   expect(await help.find({ text: 'search' })).toBeDefined()
 })
 
@@ -545,8 +547,8 @@ test('a page name in the suggested-pages tree opens the reader', async ($: Engin
   await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read a page whose summary bears on this task; skip the rest: `iirc read pysqlite3-install-override.md` (the uv override) [69% match, meaning+term]', 'h-tree')
   const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-tree', props: { text: 'a prompt' } as never })
   expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeUndefined()      // folded
-  expect((await $.command.run({ command: 'iirc', args: 'unfold-suggestions' })).text).toContain('unfolded')
-  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc unfold-suggestions unfolds the latest row
+  expect((await $.command.run({ command: 'iirc', args: 'unfold-suggested-pages' })).text).toContain('unfolded')
+  expect(await row.find({ key: 'open-p-tree-0-0-1' })).toBeDefined()        // /iirc unfold-suggested-pages unfolds the latest row
   await row.press({ key: 'open-p-tree-0-0-1' })
   expect(opened).toEqual(['iirc:iirc reader'])
 })

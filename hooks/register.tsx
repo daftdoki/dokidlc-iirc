@@ -71,7 +71,7 @@ const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-search-backend
 const COUNTS_RE = /\biirc\s+(read|read-matching-pages|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
-const STATUS_LINE_ARGS_RE = /^\s*status-line(?:\s+(on|off))?\s*$/
+const SUMMARY_LINE_ARGS_RE = /^\s*summary-line-visibility(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
 const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|show-page-stores|sync|summarize-page-usage(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|show-suggestion-thresholds|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested-pages(?:\s+(\S+))?\s*$/
@@ -110,7 +110,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['show-page-topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
-  ['unfold-suggestions', 'unfold the latest suggested pages', 'LOOK UP'],
+  ['unfold-suggested-pages', 'unfold the latest suggested pages', 'LOOK UP'],
   ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
 ]
@@ -127,8 +127,8 @@ const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
-// the help card's command column: the longest command, /iirc show-suggestion-thresholds, is 32, plus a gap
-const CMD_COL = 34
+// the help card's command column: the longest command, /iirc summary-line-visibility on|off, is 36, plus a gap
+const CMD_COL = 38
 // one row of the text help: the command in the card's column, then what it does
 const row = (cmd: string, what: string) => `${cmd.padEnd(CMD_COL)}${what}`
 const KEEP = 200
@@ -291,8 +291,8 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `status-line ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
-    row('/iirc status-line on|off', 'show or hide the line under the prompt'),
+    `summary-line-visibility ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
+    row('/iirc summary-line-visibility on|off', 'show or hide the line under the prompt'),
     row('/iirc max-suggested-pages N', 'pages recall suggests at most (1-10)'),
     row('/iirc set-search-backend', 'the embedding model, or substring search'),
     ...COMMANDS.map(([cmd, what]) => row(`/iirc ${cmd}`, what)),
@@ -670,7 +670,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
   // A plain `/iirc` or `/iirc status` shows the home card, `/iirc help` the commands,
-  // `/iirc status-line on|off` turns the hint-row line on or off, and
+  // `/iirc summary-line-visibility on|off` turns the hint-row line on or off, and
   // `/iirc max-suggested-pages N` sets how many pages recall suggests; every other /iirc goes to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'iirc' && e.command !== 'iirc:iirc') return next(e)
@@ -685,7 +685,7 @@ export const register: Register = on => {
       // the card draws over this text; the text stands where the card cannot
       return { text: page ? `${String(page.fm.title ?? page.name)}\n${String(page.fm.summary ?? '')}\n\n${page.body.trim()}` : `iirc show ${ref}: ${error}` }
     }
-    if (e.args.trim() === 'unfold-suggestions') {
+    if (e.args.trim() === 'unfold-suggested-pages') {
       // unfold the latest suggested-pages row, the keyboard's way to what a click on [+] does
       const keys = Object.keys(await read($, byPrompt))
       const last = keys[keys.length - 1]
@@ -716,15 +716,15 @@ export const register: Register = on => {
       })
       return { text: (ran.stdout || ran.stderr).trim() }
     }
-    const m = STATUS_LINE_ARGS_RE.exec(e.args)
+    const m = SUMMARY_LINE_ARGS_RE.exec(e.args)
     if (!m) return next(e)
     if (m[1]) {
       const isOn = m[1] === 'on'
       await $.store.set('isStatusShown', isOn)
       await update($, isStatusShown, () => isOn)
-      return { text: `iirc status-line ${m[1]}` }
+      return { text: `iirc summary-line-visibility ${m[1]}` }
     }
-    return { text: `iirc status-line is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc status-line on|off changes it` }
+    return { text: `iirc summary-line-visibility is ${(await read($, isStatusShown)) ? 'on' : 'off'}; /iirc summary-line-visibility on|off changes it` }
   })
 
   // A plain /iirc draws its help as a panel in place of the text row.
@@ -1004,7 +1004,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     <Box flexDirection="column">
       <Text> </Text>
       {heading('SETTINGS')}
-      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
+      {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc summary-line-visibility on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested-pages N')}
       {setting('search', s?.mode ?? '?', '/iirc set-search-backend')}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
