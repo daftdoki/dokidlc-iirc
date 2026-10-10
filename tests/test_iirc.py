@@ -2736,13 +2736,13 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
     assert hub == "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2; narrow it or split it"
     assert 'says "replaced by" and keeps 2 paragraphs' in out
-    assert lines[-1] == f"7 findings in 11 pages; vectors checked with {iirc.read_pin()['model']}"
+    assert lines[-1] == f"7 findings in 11 pages; vectors checked with {iirc.active_model().id}"
     assert sorted(str(p) for p in tmp_path.rglob("*")) == before   # the audit never writes
     iirc.main(["audit", "--json"])
     rows = json.loads(capsys.readouterr().out)
     assert len(rows) == 7 and all(set(r) == {"page", "check", "what", "fix"} for r in rows)
     iirc.main(["audit", "old.md"])
-    assert capsys.readouterr().out.splitlines()[-1] == f"1 finding in 1 page; vectors checked with {iirc.read_pin()['model']}"
+    assert capsys.readouterr().out.splitlines()[-1] == f"1 finding in 1 page; vectors checked with {iirc.active_model().id}"
     monkeypatch.setattr(iirc, "page_vectors", lambda: {})
     iirc.main(["audit"])
     out = capsys.readouterr().out
@@ -3429,3 +3429,12 @@ def test_docs_name_every_command():
     missing = [c for c in commands if not re.search(rf"`(?:/?iirc )?{re.escape(c)}\b", usage)]
     assert missing == []
     assert "`iirc audit" in usage and "--replay" in usage
+
+
+def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
+    """The audit's last line names the model its vectors came from, not the pin's nomic."""
+    vectors = _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
+    iirc.write_config_file({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
+    iirc.main(["audit", "old.md"])
+    assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"

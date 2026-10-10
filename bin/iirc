@@ -4173,7 +4173,7 @@ def print_audit(findings: list[dict], pages: int, vectors: bool) -> None:
     for f in findings:
         print(f"{f['page']}: {f['check']}: {f['what']}; {f['fix']}")
     n = len(findings)
-    tail = f"vectors checked with {read_pin().get('model', 'the pinned model')}" if vectors else "no vectors: own-title skipped"
+    tail = f"vectors checked with {active_model().id}" if vectors else "no vectors: own-title skipped"
     print(f"{n} finding{'s' if n != 1 else ''} in {pages} page{'s' if pages != 1 else ''}; {tail}")
 
 
