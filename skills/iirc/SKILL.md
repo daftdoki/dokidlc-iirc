@@ -148,6 +148,24 @@ Four rules keep the field worth searching:
 4. A page about a workaround says what it works around, so the fix can
    delete the page.
 
+Write for the search. A future session finds a page only through the
+words it searches with:
+
+- Write the title and summary in the words a future prompt or error will
+  use: the tool, the command, the symptom. Words only you would choose
+  match nothing.
+- Quote error text exactly, in a code span in the body, and put its most
+  distinctive part in the summary when it fits. When a command
+  fails, the hook searches with the error as printed.
+- Search before every write, with the title and with the error or tool
+  name. When a page already holds the finding, rewrite or `verify` that
+  page. A second page splits the matches between two.
+- A page that reverses another names the page it reverses and the date,
+  and you rewrite or delete the old text. Old text left in place still
+  matches and says the opposite.
+- Say where the fact holds: machine, OS, tool or plugin version, or
+  "any". That detail tells two look-alike pages apart.
+
 Shapes by kind, so the next session gets what it needs:
 
 - `environment`: the fact, where it is true (which machine, host, or

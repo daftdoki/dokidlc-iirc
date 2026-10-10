@@ -2241,3 +2241,12 @@ def test_show_returns_the_page_as_json_and_is_not_the_agents_read(tmp_path, monk
     assert out["body"].startswith("See [[b]]") and out["links"] == ["b.md"] and out["signals"] == []
     assert [r["cmd"] for r in iirc.read_log(session="s12")] == ["show"]
     assert iirc.session_summary("s12")["read"] == []
+
+
+# p5 step 16
+def test_skill_names_the_writing_rules():
+    """SKILL.md carries research DQ5-A's five rules for writing a page the search can find."""
+    text = " ".join((ROOT / "skills" / "iirc" / "SKILL.md").read_text().lower().split())
+    rules = ["write for the search", "words a future prompt or error will use", "quote error text exactly",
+             "search before every write", "names the page it reverses", "where the fact holds"]
+    assert [r for r in rules if r not in text] == []
