@@ -9,7 +9,7 @@ A layer over memoryfield-tool (used as published, at the commit in
 iirc.pin), which keeps reading, writing, validating, and deleting pages.
 It generates the tool's per-machine config from the repository location,
 guards the embedding host, embeds and searches pages itself (iirc_embed.py),
-computes suspicion, and records what recall did so it can be tuned.
+computes suspicion, and records what the suggestion hook did so it can be tuned.
 
 Usage:
   iirc search QUERY...                      ranked pages; several terms are searched separately and merged
@@ -26,8 +26,8 @@ Usage:
   iirc estimate-context-tokens              bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief]               check or install prerequisites
   iirc summarize-page-usage [--days N]      how the pages are being used
-  iirc max-suggested-pages [N]              pages recall suggests at most; N sets it on this machine
-  iirc show-suggestion-thresholds           the recall gate's distances
+  iirc max-suggested-pages [N]              pages a suggestion line names at most; N sets it on this machine
+  iirc show-suggestion-thresholds           the suggestion gate's distances
   iirc set-suggestion-threshold NAME VALUE  write one into .claude/iirc.toml
   iirc tune-suggestions STEP                gather-suggestion-data, record-relevance-judgments,
                                             evaluate-suggestion-thresholds, or mark-session-tuned
@@ -312,14 +312,15 @@ WRITE_DEFAULT: str | None = None
 CONFIG_ERROR: str | None = None
 SHOW_HOOKS = False   # show_hooks in .claude/iirc.toml: the user also sees what the hooks tell the model
 
-# The recall gate's knobs, [recall.MODEL-ID] in .claude/iirc.toml: per repository, because the right
+# The suggestion gate's thresholds, [suggestions.MODEL-ID] in .claude/iirc.toml: per repository, because the right
 # distance depends on the pages in the field, and per model, because each model has its own distance
 # scale. Each model's defaults and ranges are in iirc_embed.MODELS. name: what it sets
 KNOB_TEXT: dict[str, str] = {
     "semantic_only": "how close, as cosine distance, a semantic hit must be with no strong term",
     "both": "how close a semantic hit backed by an identifier or a rare page word must be",
 }
-# a flat [recall] table predates the model tables, when nomic was the only model, so its knobs are nomic's
+# [recall.MODEL-ID] is the tables' old name, and a flat [recall] table predates the model tables,
+# when nomic was the only model, so its knobs are nomic's
 FLAT_TABLE = iirc_embed.table_name(iirc_embed.DEFAULT_MODEL)
 TABLE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
 
@@ -342,15 +343,15 @@ def recall_table() -> str:
 
 
 def table_header(table: str) -> str:
-    """recall.NAME as a TOML table header names it; a name with a dot is quoted, or TOML reads the dot as nesting."""
-    return f"recall.{table}" if TABLE_KEY_RE.fullmatch(table) else f'recall."{table}"'
+    """suggestions.NAME as a TOML table header names it; a name with a dot is quoted, or TOML reads the dot as nesting."""
+    return f"suggestions.{table}" if TABLE_KEY_RE.fullmatch(table) else f'suggestions."{table}"'
 
 
 RECALL: dict[str, float] = {k: v[0] for k, v in knob_spec().items()}
 
 
 def knob_error_only() -> bool:
-    """True when .claude/iirc.toml fails only on its recall knobs, which `doctor --fix` can move or reset."""
+    """True when .claude/iirc.toml fails only on its suggestion thresholds, which `doctor --fix` can move or reset."""
     try:
         cfg = read_store_config(ROOT)
         load_stores(ROOT)
@@ -371,7 +372,7 @@ def knob_error_only() -> bool:
 def bad_knobs(sec: dict) -> dict[str, str]:
     """Each key of the active model's table that fails, with why."""
     spec = knob_spec()
-    bad = {k: "no such knob" for k in sec if k not in spec}
+    bad = {k: "no such threshold" for k in sec if k not in spec}
     for name, (_, low, high, _) in spec.items():
         v = sec.get(name)
         if name in sec and (isinstance(v, bool) or not isinstance(v, (int, float)) or not low <= v <= high):
@@ -382,50 +383,66 @@ def bad_knobs(sec: dict) -> dict[str, str]:
     return bad
 
 
-def move_flat_knobs(text: str) -> tuple[str, list[str]]:
-    """The config text with flat [recall] keys moved into [recall.nomic-embed-text], and what moved.
+def move_old_knobs(text: str) -> tuple[str, list[str]]:
+    """The config text with each old [recall] table moved to its [suggestions.MODEL-ID] table, and what moved.
 
-    With no nomic table yet, the [recall] header is renamed, so its comments stay. Beside
-    an existing nomic table, each flat key moves on its own and the table's value wins.
+    A flat [recall] table goes to nomic's. A header whose new table does not exist yet is renamed,
+    so its comments stay. Beside an existing table, each old key moves on its own and the new table's value wins.
     """
     lines = text.splitlines()
-    heads = [i for i, line in enumerate(lines) if recall_table_of(line) == ""]
-    if not heads:
+    olds = [(i, recall_table_of(line) or FLAT_TABLE) for i, line in enumerate(lines) if recall_table_of(line) is not None]
+    if not olds:
         return text, []
-    if len(heads) == 1 and not any(recall_table_of(line) == FLAT_TABLE for line in lines):
-        lines[heads[0]] = re.sub(r"\[\s*recall\s*\]", f"[{table_header(FLAT_TABLE)}]", lines[heads[0]], count=1)
-        return "\n".join(lines) + "\n", [f"moved [recall] to [{table_header(FLAT_TABLE)}]"]
-    flat = tomllib.loads(text).get("recall", {})
-    have = flat.get(FLAT_TABLE, {})
-    out, notes, table = [], [], None
-    for line in lines:
+    have = {suggestions_table_of(line) for line in lines} - {None}
+    targets = [t for _, t in olds]
+    notes, renamed = [], set()
+    for i, t in olds:
+        if targets.count(t) == 1 and t not in have:
+            old = "recall" if recall_table_of(lines[i]) == "" else f"recall.{t}" if TABLE_KEY_RE.fullmatch(t) else f'recall."{t}"'
+            lines[i] = re.sub(r"\[[^\]]*\]", f"[{table_header(t)}]", lines[i], count=1)
+            notes.append(f"moved [{old}] to [{table_header(t)}]")
+            renamed.add(i)
+    old_cfg = tomllib.loads(text).get("recall", {})
+    new_cfg = tomllib.loads(text).get("suggestions", {})
+    out, moves, target = [], [], None
+    for i, line in enumerate(lines):
         if re.match(r"\s*\[", line):
             table = recall_table_of(line)
+            target = None if table is None or i in renamed else (table or FLAT_TABLE)
+            src = None if target is None else (old_cfg.get(table) if table else old_cfg)
+            if target is not None:   # its keys move one by one below; the emptied header goes too
+                line = f"# {line.rstrip()}  # iirc doctor --fix: its keys go to [{table_header(target)}]"
         key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
-        if table == "" and key and key[1] in flat and not isinstance(flat[key[1]], dict):
-            why = f"[{table_header(FLAT_TABLE)}] has its own" if key[1] in have else f"moved to [{table_header(FLAT_TABLE)}]"
+        if target is not None and key and key[1] in src and not isinstance(src[key[1]], dict):
+            mine = new_cfg.get(target, {})
+            why = f"[{table_header(target)}] has its own" if key[1] in mine else f"moved to [{table_header(target)}]"
             notes.append(f"{why}: `{line.strip()}`")
             line = f"# {line.rstrip()}  # iirc doctor --fix: {why}"
+            if key[1] not in mine:
+                moves.append((target, key[1], src[key[1]], table == ""))
         out.append(line)
     text = "\n".join(out) + "\n"
-    for name, value in flat.items():
-        if not isinstance(value, dict) and name not in have and isinstance(value, (int, float)) and not isinstance(value, bool):
-            text = set_knob_text(text, FLAT_TABLE, name, value)
+    # a model table's value wins over a flat one for the same knob
+    done: set[tuple[str, str]] = set()
+    for target, name, value, _ in sorted(moves, key=lambda m: m[3]):
+        if (target, name) not in done and isinstance(value, (int, float)) and not isinstance(value, bool):
+            text = set_knob_text(text, target, name, value)
+            done.add((target, name))
     return text, notes
 
 
 def fixed_knob_text(text: str) -> tuple[str, list[str]]:
     """The config text after `doctor --fix`: flat keys moved, then each failing knob of the active table commented out."""
-    text, notes = move_flat_knobs(text)
+    text, notes = move_old_knobs(text)
     table = recall_table()
-    bad = bad_knobs(tomllib.loads(text).get("recall", {}).get(table, {}))
+    bad = bad_knobs(tomllib.loads(text).get("suggestions", {}).get(table, {}))
     out, current = [], None
     for line in text.splitlines(keepends=True):
         if re.match(r"\s*\[", line):
-            current = recall_table_of(line)
+            current = suggestions_table_of(line)
         key = re.match(r"\s*([A-Za-z0-9_-]+)\s*=", line)
         if current == table and key and key[1] in bad:
-            notes.append(f"commented out `{line.strip()}`; the knob takes its default")
+            notes.append(f"commented out `{line.strip()}`; the threshold takes its default")
             line = f"# {line.rstrip()}  # iirc doctor --fix: {bad[key[1]]}\n"
         out.append(line)
     return "".join(out), notes
@@ -440,14 +457,23 @@ def fix_knobs() -> list[str]:
 
 
 def load_knobs(cfg: dict) -> dict[str, float]:
-    """The active model's [recall.MODEL-ID] table, each knob checked against its range; a missing knob takes its default."""
-    sec = cfg.get("recall", {})
-    fix = f"`iirc doctor --fix` moves them to [{table_header(FLAT_TABLE)}]"
+    """The active model's [suggestions.MODEL-ID] table, each threshold checked against its range; a missing one takes its default."""
+    old = cfg.get("recall")
+    if isinstance(old, dict):
+        flat = [k for k, v in old.items() if not isinstance(v, dict)]
+        if flat:
+            raise ConfigError(f"{STORE_CONFIG}: [recall] {flat[0]} is a flat key under the old name; thresholds live in a model's table; "
+                              f"`iirc doctor --fix` moves them to [{table_header(FLAT_TABLE)}]")
+        t = next(iter(old), FLAT_TABLE)
+        raise ConfigError(f"{STORE_CONFIG}: [recall.{t}] is the old name of [{table_header(t)}]; `iirc doctor --fix` renames it")
+    if old is not None:
+        raise ConfigError(f"{STORE_CONFIG}: recall is the old name of suggestions, a table of model tables like [{table_header(FLAT_TABLE)}]")
+    sec = cfg.get("suggestions", {})
     if not isinstance(sec, dict):
-        raise ConfigError(f"{STORE_CONFIG}: recall must be a table of model tables, like [{table_header(FLAT_TABLE)}]")
+        raise ConfigError(f"{STORE_CONFIG}: suggestions must be a table of model tables, like [{table_header(FLAT_TABLE)}]")
     flat = [k for k, v in sec.items() if not isinstance(v, dict)]
     if flat:
-        raise ConfigError(f"{STORE_CONFIG}: [recall] {flat[0]} is a flat key; knobs live in a model's table; {fix}")
+        raise ConfigError(f"{STORE_CONFIG}: [suggestions] {flat[0]} is a flat key; thresholds live in a model's table, like [{table_header(FLAT_TABLE)}]")
     tables = {iirc_embed.table_name(m) for m in iirc_embed.MODELS}
     unknown = sorted(set(sec) - tables)
     if unknown:
@@ -457,7 +483,7 @@ def load_knobs(cfg: dict) -> dict[str, float]:
     knobs, spec = sec.get(table, {}), knob_spec()
     extra = sorted(set(knobs) - set(spec))
     if extra:
-        raise ConfigError(f"{head} has no knob {extra[0]!r}; the knobs are {', '.join(spec)}")
+        raise ConfigError(f"{head} has no threshold {extra[0]!r}; the thresholds are {', '.join(spec)}")
     out: dict[str, float] = {}
     for name, (default, low, high, _) in spec.items():
         v = knobs.get(name, default)
@@ -1199,27 +1225,35 @@ def recall_max_bytes() -> int:
 
 def cmd_show_suggestion_thresholds(args: argparse.Namespace) -> None:
     """The recall gate's knobs for the active model: each value, its default and range, and what it sets."""
-    print(f"[{table_header(recall_table())}] in {STORE_CONFIG}, for the embedding model {active_model().id}; a knob left out takes its default")
+    print(f"[{table_header(recall_table())}] in {STORE_CONFIG}, for the embedding model {active_model().id}; a threshold left out takes its default")
     for name, (default, low, high, what) in knob_spec().items():
         mark = "" if RECALL[name] == default else f"  (default {default})"
         print(f"{name} = {RECALL[name]:g}{mark}  {low:g} to {high:g}: {what}")
 
 
-# [recall] (flat), [recall.NAME], or [recall."NAME"], spaces allowed inside the brackets
+# [recall] (flat), [recall.NAME], or [recall."NAME"], the old names, spaces allowed inside the brackets
 RECALL_HEADER_RE = re.compile(r'^\s*\[\s*recall\s*(?:\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*)?\]\s*(#.*)?$')
+# [suggestions.NAME] or [suggestions."NAME"], spaces allowed inside the brackets
+SUGGESTIONS_HEADER_RE = re.compile(r'^\s*\[\s*suggestions\s*\.\s*(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*\]\s*(#.*)?$')
 
 
 def recall_table_of(line: str) -> str | None:
-    """The model table a [recall...] header line opens: "" for the flat [recall], None for any other line."""
+    """The model table an old [recall...] header line opens: "" for the flat [recall], None for any other line."""
     m = RECALL_HEADER_RE.match(line)
     return None if m is None else (m[1] or m[2] or "")
 
 
+def suggestions_table_of(line: str) -> str | None:
+    """The model table a [suggestions.NAME] header line opens, None for any other line."""
+    m = SUGGESTIONS_HEADER_RE.match(line)
+    return None if m is None else (m[1] or m[2])
+
+
 def set_knob_text(text: str, table: str, name: str, value: float) -> str:
-    """The config text with one knob set in its [recall.TABLE] table. Edits lines, so every other line and comment stays."""
+    """The config text with one threshold set in its [suggestions.TABLE] table. Edits lines, so every other line and comment stays."""
     entry = f"{name} = {value:g}"
     lines = text.splitlines()
-    head = next((i for i, line in enumerate(lines) if recall_table_of(line) == table), None)
+    head = next((i for i, line in enumerate(lines) if suggestions_table_of(line) == table), None)
     if head is None:
         body = text if not text or text.endswith("\n") else text + "\n"
         return body + ("\n" if body.strip() else "") + f"[{table_header(table)}]\n{entry}\n"
@@ -1264,12 +1298,12 @@ def knobs_set(name: str, value: float) -> None:
 def cmd_max_suggested_pages(args: argparse.Namespace) -> None:
     if args.n is None:
         n = max_suggested()
-        print(f"recall suggests up to {n} page{'s' if n != 1 else ''}; `iirc max-suggested-pages N` changes it (1 to 10)")
+        print(f"a suggestion line names up to {n} page{'s' if n != 1 else ''}; `iirc max-suggested-pages N` changes it (1 to 10)")
         return
     if not 1 <= args.n <= 10:
         die("max-suggested-pages must be 1 to 10")
     path = write_config_file({**read_config(), "max_suggested": args.n})
-    print(f"recall suggests up to {args.n} page{'s' if args.n != 1 else ''}; written to {path}")
+    print(f"a suggestion line names up to {args.n} page{'s' if args.n != 1 else ''}; written to {path}")
 
 
 def recall_worthy(prompt: str) -> bool:
@@ -2373,7 +2407,7 @@ def cmd_write(args: argparse.Namespace) -> None:
     if not body.strip():
         die("empty body on stdin")
     if len(args.summary) > 160:
-        die("summary must be 160 characters or fewer; it is what search and recall print")
+        die("summary must be 160 characters or fewer; it is what search and the suggestion line print")
     fm: dict = {"title": args.title, "summary": args.summary}
     fm["topics"] = [t.strip() for t in args.topics.split(",") if t.strip()]
     fm["kind"] = args.kind
@@ -3483,7 +3517,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             close = 0
         timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
         if timeouts:
-            parts.append(f"{timeouts} recall{'s' if timeouts != 1 else ''} timed out in the last 7 days, past the hook's {RECALL_HOOK_TIMEOUT} s limit: iirc doctor names the cause.")
+            parts.append(f"{timeouts} suggestion lookup{'s' if timeouts != 1 else ''} timed out in the last 7 days, past the hook's {RECALL_HOOK_TIMEOUT} s limit: iirc doctor names the cause.")
         if close:
             parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.")
         if hook == "SessionStart":
@@ -3510,11 +3544,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     if CONFIG_ERROR:
         # nothing else can be checked: the stores are unknown, and every hook is quiet
         report(f"{STORE_CONFIG} loads, so the hooks run", False,
-               "iirc doctor --fix moves flat [recall] keys into a model table and comments out a bad knob" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
+               "iirc doctor --fix moves old [recall] tables to [suggestions.MODEL-ID] and comments out a bad threshold" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
         sys.exit(1)
     report(f"{STORE_CONFIG} loads, so the hooks run", True)
     timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
-    report(f"recall finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
+    report(f"suggest-pages finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
            timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend")
 
     if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
@@ -3716,7 +3750,7 @@ def cmd_summarize_page_usage(args: argparse.Namespace) -> None:
     verified = {r.get("page") for r in rows if r["cmd"] == "verify"}
     print(f"last {args.days} days" if args.days else "all time", f": {n} session{'s' if n != 1 else ''}")
     print(f"searches per session: agent {len(searches) / n:.1f}, hook {len(recalls) / n:.1f}; hook lines with a hit: {sum(1 for r in recalls if r.get('hits')) }/{len(recalls)}")
-    print(f"read after a search or recall named it: {read_after}/{len(named)}")
+    print(f"read after a search or a suggestion line named it: {read_after}/{len(named)}")
     print(f"pages written per session: {len(writes) / n:.1f}; written pages later verified: {sum(1 for w in writes if w.get('page') in verified)}/{len(writes)}")
     print(f"log: {state_dir() / 'log.jsonl'}")
 
@@ -3984,7 +4018,7 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
                   and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
                   and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
     if not chosen:
-        print("iirc tune-suggestions gather-suggestion-data: no session to gather; each one with recalls is tuned already, or its transcript and prompts are gone")
+        print("iirc tune-suggestions gather-suggestion-data: no session to gather; each one with suggestion lines is tuned already, or its transcript and prompts are gone")
         return
     evals = eval_rows()
     tune_dir().mkdir(parents=True, exist_ok=True)
@@ -4000,8 +4034,8 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
         sugg = sum(len(r["suggested"]) for r in ev["recalls"])
         judge = sum(len(r["candidates"]) for r in ev["recalls"])
         source = "transcript" if ev["transcript"] else "no transcript"
-        print(f"{path}: {n} recalls, {sugg} pages suggested, {judge} candidates to judge ({source})")
-    print(f"{len(chosen)} session{'s' if len(chosen) != 1 else ''}, {total} recalls")
+        print(f"{path}: {n} suggestion lines, {sugg} pages suggested, {judge} candidates to judge ({source})")
+    print(f"{len(chosen)} session{'s' if len(chosen) != 1 else ''}, {total} suggestion lines")
 
 
 def read_evidence(session: str) -> dict | None:
@@ -4046,9 +4080,9 @@ def cmd_tune_judge(args: argparse.Namespace) -> None:
             else:
                 rec = next((r for r in ev["recalls"] if r["key"] == key), None)
                 if rec is None:
-                    bad.append(f"session {session} has no recall {key}")
+                    bad.append(f"session {session} has no suggestion line {key}")
                 elif isinstance(page, str) and base(page) not in {c["page"] for c in rec["candidates"]} | {s["page"] for s in rec["suggested"]} | set(rec["read_unsuggested"]):
-                    bad.append(f"recall {key} lists no page {base(page)} in its candidates, suggested pages, or read_unsuggested")
+                    bad.append(f"suggestion line {key} lists no page {base(page)} in its candidates, suggested pages, or read_unsuggested")
         if bad:
             errors.append(f"line {n}: " + "; ".join(bad))
             continue
@@ -4108,7 +4142,7 @@ def sweep_tally(outcomes: list[tuple[bool, bool]]) -> dict:
 def sweep_line(knobs: dict[str, float], c: dict) -> str:
     return (f"semantic_only {knobs['semantic_only']:.2f} both {knobs['both']:.2f}: relevant passed {c['relevant_passed']}, "
             f"noise passed {c['noise_passed']}, relevant refused {c['relevant_refused']}; "
-            f"precision {c['precision']:.2f}, recall {c['recall']:.2f}, F1 {c['f1']:.2f}")
+            f"precision {c['precision']:.2f}, share of relevant pages passed {c['recall']:.2f}, F1 {c['f1']:.2f}")
 
 
 def replay_counts(prompts: list[tuple[list[dict], str, list[tuple[str, bool]]]], knobs: dict[str, float]) -> dict:
@@ -4157,7 +4191,7 @@ def cmd_tune_sweep_replay(files: list[str]) -> None:
 
 def sweep_report(n: int, count) -> None:
     """The current knobs' counts, and, past TUNE_FLOOR judged pairs, the grid's best; `count(knobs)` gives the counts."""
-    print("criterion: F1 = 2PR/(P+R), where P (precision) = relevant passed / all passed and R (recall) = relevant passed / all relevant")
+    print("criterion: F1 = 2PR/(P+R), where P (precision) = relevant passed / all passed and R (share of relevant pages passed) = relevant passed / all relevant")
     now = count(RECALL)
     print("current  " + sweep_line(RECALL, now))
     if n < TUNE_FLOOR:
@@ -4175,13 +4209,13 @@ def sweep_report(n: int, count) -> None:
     held = [kc for kc in grid if kc[1]["recall"] >= now["recall"]]
     if held:
         k, c = max(held, key=lambda kc: (round(kc[1]["precision"], 6), round(kc[1]["f1"], 6), -off(kc[0])))
-        print("best precision at equal or better recall:")
+        print("best precision at an equal or larger share of relevant pages passed:")
         print("  " + sweep_line(k, c))
     k, c = best[0]
     if c["f1"] > now["f1"] + 1e-9:
-        print(f"the best grid point beats the current knobs on F1 by {c['f1'] - now['f1']:.2f}")
+        print(f"the best grid point beats the current thresholds on F1 by {c['f1'] - now['f1']:.2f}")
     else:
-        print("no grid point beats the current knobs on F1; propose no knob change")
+        print("no grid point beats the current thresholds on F1; propose no threshold change")
 
 
 def cmd_tune_sweep(args: argparse.Namespace) -> None:
@@ -4219,8 +4253,8 @@ def cmd_tune_sweep_judged() -> None:
         pairs.append((cand, j["label"] == "relevant"))
     rel = sum(r for _, r in pairs)
     print(f"judged pairs with a distance: {len(pairs)} ({rel} relevant, {len(pairs) - rel} noise)")
-    print(f"left out: {unsure} unsure; {no_row} with no candidate row, from a recall older than eval rows or a page outside the "
-          f"{EVAL_CANDIDATES} logged candidates; {no_distance} with no distance, which no knob moves; {other_repo} from other repositories")
+    print(f"left out: {unsure} unsure; {no_row} with no candidate row, from a suggestion line older than eval rows or a page outside the "
+          f"{EVAL_CANDIDATES} logged candidates; {no_distance} with no distance, which no threshold moves; {other_repo} from other repositories")
     sweep_report(len(pairs), lambda k: sweep_counts(pairs, k))
 
 
@@ -4416,21 +4450,21 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--query", default="how to install and configure tools")
     p.set_defaults(func=cmd_estimate_context_tokens)
 
-    p = sub.add_parser("show-suggestion-thresholds", help="the recall gate's distances in .claude/iirc.toml, with their ranges")
+    p = sub.add_parser("show-suggestion-thresholds", help="the suggestion gate's distances in .claude/iirc.toml, with their ranges")
     p.set_defaults(func=cmd_show_suggestion_thresholds)
 
-    p = sub.add_parser("set-suggestion-threshold", help="write one of the recall gate's distances into .claude/iirc.toml")
+    p = sub.add_parser("set-suggestion-threshold", help="write one of the suggestion gate's distances into .claude/iirc.toml")
     p.add_argument("name", choices=list(KNOB_TEXT))
     p.add_argument("value", type=float)
     p.set_defaults(func=cmd_set_suggestion_threshold)
 
-    p = sub.add_parser("tune-suggestions", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
+    p = sub.add_parser("tune-suggestions", help="evidence for judging suggestions, the judgments, and an evaluation of the gate's thresholds")
     tsub = p.add_subparsers(dest="tune_cmd", required=True)
     t = tsub.add_parser("gather-suggestion-data", help="write one evidence file per session under the state dir; no model calls")
     t.add_argument("--session", metavar="ID", help="this session only, even when it is tuned already")
-    t.add_argument("--days", type=int, metavar="N", help="only sessions with a recall in the last N days")
+    t.add_argument("--days", type=int, metavar="N", help="only sessions with a suggestion line in the last N days")
     t = tsub.add_parser("record-relevance-judgments", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
-    t = tsub.add_parser("evaluate-suggestion-thresholds", help="the gate's counts on the judged pairs for the current knobs and a grid of others")
+    t = tsub.add_parser("evaluate-suggestion-thresholds", help="the gate's counts on the judged pairs for the current thresholds and a grid of others")
     t.add_argument("--replay-prompts", nargs="+", metavar="FILE", help="replay JSONL: run each judged prompt through the current search and gate")
     t = tsub.add_parser("mark-session-tuned", help="mark a session tuned, so gather-suggestion-data skips it")
     t.add_argument("session", metavar="SESSION")
@@ -4457,7 +4491,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("show-page-topics", help="every topic with its page count, computed from the pages")
     p.set_defaults(func=cmd_show_page_topics)
 
-    p = sub.add_parser("max-suggested-pages", help="how many pages a recall line suggests at most, on this machine")
+    p = sub.add_parser("max-suggested-pages", help="how many pages a suggestion line names at most, on this machine")
     p.add_argument("n", nargs="?", type=int, metavar="N", help="1 to 10; without N, print the current number")
     p.set_defaults(func=cmd_max_suggested_pages)
 
@@ -4498,7 +4532,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--days", type=int, default=7)
     p.set_defaults(func=cmd_summarize_page_usage)
 
-    p = sub.add_parser("record-session-summary", help="log this session's numbers and conditions as one row, for tuning recall; then rotate the logs")
+    p = sub.add_parser("record-session-summary", help="log this session's numbers and conditions as one row, for tuning suggestions; then rotate the logs")
     p.add_argument("--hook", action="store_true", help="read the hook payload on stdin")
     p.set_defaults(func=cmd_record_session_summary)
 

@@ -104,8 +104,8 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['show-page-stores', 'the stores, and anything not pushed', 'MAINTENANCE'],
   ['summarize-page-usage', 'how the pages are being used', 'MAINTENANCE'],
   ['rebuild-search-index', 'rebuild the search index', 'MAINTENANCE'],
-  ['show-suggestion-thresholds', "the recall gate's distances and ranges", 'MAINTENANCE'],
-  ['tune-suggestions', 'judge recall, evaluate the thresholds, then audit', 'MAINTENANCE'],
+  ['show-suggestion-thresholds', "the suggestion gate's distances and ranges", 'MAINTENANCE'],
+  ['tune-suggestions', 'judge suggestions, evaluate the thresholds, then audit', 'MAINTENANCE'],
   ['estimate-context-tokens', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['show-page-topics', 'every topic with its page count', 'LOOK UP'],
@@ -123,7 +123,7 @@ const TAGLINE_TO = '#a78bfa'
 const FRAME = '#a78bfa'
 const EXAMPLES = ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"]
 const MORE_HINT = 'settings, maintenance, and look-up'
-const STATUS_HINT = 'trust, stores, session counts, and recall noise'
+const STATUS_HINT = 'trust, stores, session counts, and suggestion noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
 const HEADING = '#c4b5fd'
@@ -293,7 +293,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   return [
     `summary-line-visibility ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
     row('/iirc summary-line-visibility on|off', 'show or hide the line under the prompt'),
-    row('/iirc max-suggested-pages N', 'pages recall suggests at most (1-10)'),
+    row('/iirc max-suggested-pages N', 'pages a suggestion line names at most (1-10)'),
     row('/iirc set-search-backend', 'the embedding model, or substring search'),
     ...COMMANDS.map(([cmd, what]) => row(`/iirc ${cmd}`, what)),
     row('/iirc <request>', "ask iirc in words: search, remember, what's out of date"),

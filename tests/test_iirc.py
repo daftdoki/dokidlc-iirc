@@ -780,11 +780,11 @@ def test_max_suggested_sets_how_many_pages_recall_suggests(tmp_path, monkeypatch
     rows = [{"filename": f"p{i}.md", "summary": "s", "distance": 0.1, "via": ["semantic"]} for i in range(6)]
     assert len(iirc.recall_filter(rows)) == 3
     iirc.main(["max-suggested-pages", "5"])
-    assert "suggests up to 5 pages" in capsys.readouterr().out
+    assert "a suggestion line names up to 5 pages" in capsys.readouterr().out
     assert iirc.max_suggested() == 5 and len(iirc.recall_filter(rows)) == 5
     assert iirc.read_config()["embedding_host"] == "http://h:1"   # the other settings stay
     iirc.main(["max-suggested-pages"])
-    assert "suggests up to 5 pages" in capsys.readouterr().out
+    assert "a suggestion line names up to 5 pages" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         iirc.main(["max-suggested-pages", "0"])
     iirc.write_config_file({"max_suggested": "lots"})
@@ -1033,7 +1033,7 @@ def test_stats(tmp_path, monkeypatch, capsys):
     iirc.log_event("search", query="q", hits=1, pages=["a.md"]); iirc.log_event("read", pages=["a.md"]); iirc.log_event("write", page="a.md", kind="finding")
     iirc.main(["summarize-page-usage"])
     out = capsys.readouterr().out
-    assert "1 session" in out and "read after a search or recall named it: 1/1" in out
+    assert "1 session" in out and "read after a search or a suggestion line named it: 1/1" in out
 
 
 def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypatch, capsys):
@@ -1161,7 +1161,7 @@ def test_doctor_fix_comments_out_a_bad_knob(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     (tmp_path / ".claude").mkdir()
     toml = tmp_path / ".claude" / "iirc.toml"
-    toml.write_text("ui = true\n\n[recall.nomic-embed-text]\nsemantic_only = 0.9   # too loose\nboth = 0.34\n")
+    toml.write_text("ui = true\n\n[suggestions.nomic-embed-text]\nsemantic_only = 0.9   # too loose\nboth = 0.34\n")
     iirc.main(["doctor", "--brief"])
     assert "`iirc doctor --fix`" in capsys.readouterr().out
     monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks
@@ -1974,13 +1974,13 @@ def test_recall_verdicts_say_why_each_candidate_was_left_out(monkeypatch):
 def test_recall_knobs_come_from_iirc_toml(tmp_path):
     (tmp_path / ".claude").mkdir()
     toml = tmp_path / ".claude" / "iirc.toml"
-    toml.write_text("[recall.nomic-embed-text]\nsemantic_only = 0.3\n")
+    toml.write_text("[suggestions.nomic-embed-text]\nsemantic_only = 0.3\n")
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.38} and iirc.CONFIG_ERROR is None
     near = [{"filename": "a.md", "via": ["semantic"], "distance": 0.29}]
     assert [r["rule"] for r in iirc.recall_filter(near)] == ["meaning"]
-    for bad, says in (("semantic_only = 0.9", "from 0.1 to 0.6"), ("semantic_only = 0.4", "at least semantic_only"), ("loose = 0.3", "no knob 'loose'")):
-        toml.write_text(f"[recall.nomic-embed-text]\n{bad}\n")
+    for bad, says in (("semantic_only = 0.9", "from 0.1 to 0.6"), ("semantic_only = 0.4", "at least semantic_only"), ("loose = 0.3", "no threshold 'loose'")):
+        toml.write_text(f"[suggestions.nomic-embed-text]\n{bad}\n")
         iirc.set_root(tmp_path)
         assert says in iirc.CONFIG_ERROR and iirc.RECALL == {"semantic_only": 0.28, "both": 0.38}
     toml.unlink(); iirc.set_root(tmp_path)
@@ -2088,7 +2088,7 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
     iirc.main(["tune-suggestions", "gather-suggestion-data"])
     out = capsys.readouterr().out
-    assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 5 candidates to judge (transcript)" in out
+    assert "2 sessions, 4 suggestion lines" in out and "s1.json: 3 suggestion lines, 2 pages suggested, 5 candidates to judge (transcript)" in out
     text = (st / "tune" / "s1.json").read_text()
     s1 = json.loads(text)
     assert len(text.splitlines()) == 2 + len(s1["recalls"])   # one recall per line
@@ -2121,9 +2121,9 @@ def test_tune_done_makes_gather_skip_a_session(tmp_path, monkeypatch, capsys):
     row = iirc.read_log()[-1]
     assert (row["cmd"], row["tuned"], row["session"]) == ("tuned", "s0", "tuner")
     iirc.main(["tune-suggestions", "gather-suggestion-data"])
-    assert "1 session, 3 recalls" in capsys.readouterr().out and not (st / "tune" / "s0.json").exists()
+    assert "1 session, 3 suggestion lines" in capsys.readouterr().out and not (st / "tune" / "s0.json").exists()
     iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s0"])   # named, a tuned session is gathered again
-    assert "1 session, 1 recalls" in capsys.readouterr().out
+    assert "1 session, 1 suggestion lines" in capsys.readouterr().out
     with pytest.raises(SystemExit):
         iirc.main(["tune-suggestions", "mark-session-tuned", "nope"])
 
@@ -2146,7 +2146,7 @@ def test_tune_judge_validates_and_later_lines_supersede(tmp_path, monkeypatch, c
     with pytest.raises(SystemExit):
         iirc.main(["tune-suggestions", "record-relevance-judgments"])
     err = capsys.readouterr().err
-    assert "line 2" in err and "label must be one of" in err and "no recall r9" in err
+    assert "line 2" in err and "label must be one of" in err and "no suggestion line r9" in err
     assert len((st / "tune" / "judgments.jsonl").read_text().splitlines()) == 3   # the good line went unwritten too
 
 
@@ -2182,7 +2182,7 @@ def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, ca
     best = out.split("best by F1:\n")[1].splitlines()[0]
     # 0.30 and 0.32 both pass the two relevant pages and refuse the noise; the smaller move wins the tie
     assert best.strip().startswith("semantic_only 0.30 both 0.34: relevant passed 2, noise passed 0, relevant refused 0")
-    assert "beats the current knobs on F1 by 0.33" in out
+    assert "beats the current thresholds on F1 by 0.33" in out
     grid = iirc.knob_grid()
     assert len(grid) == len({(k["semantic_only"], k["both"]) for k in grid}) and all(k["both"] >= k["semantic_only"] for k in grid)
 
@@ -2191,14 +2191,14 @@ def test_knobs_set_writes_only_its_line(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"
     iirc.main(["set-suggestion-threshold", "both", "0.36"])   # no file yet
-    assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.36\n"
-    toml.write_text("# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n")
-    iirc.main(["set-suggestion-threshold", "semantic_only", "0.3"])   # [stores.recall] is not a [recall.MODEL] table
-    assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.recall]\nkind = \"project\"\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n"
-    toml.write_text("[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
+    assert toml.read_text() == "[suggestions.nomic-embed-text]\nboth = 0.36\n"
+    toml.write_text("# stores\nshow_hooks = true\n\n[stores.suggestions]\nkind = \"project\"\n")
+    iirc.main(["set-suggestion-threshold", "semantic_only", "0.3"])   # [stores.suggestions] is not a [suggestions.MODEL] table
+    assert toml.read_text() == "# stores\nshow_hooks = true\n\n[stores.suggestions]\nkind = \"project\"\n\n[suggestions.nomic-embed-text]\nsemantic_only = 0.3\n"
+    toml.write_text("[suggestions.nomic-embed-text]  # the gate\nsemantic_only = 0.26   # measured\n\n[stores.project]\nkind = \"project\"\n")
     iirc.main(["set-suggestion-threshold", "semantic_only", "0.3"])
     iirc.main(["set-suggestion-threshold", "both", "0.4"])
-    assert toml.read_text() == "[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
+    assert toml.read_text() == "[suggestions.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.4\n\n[stores.project]\nkind = \"project\"\n"
     iirc.set_root(tmp_path)
     assert iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     capsys.readouterr()
@@ -2259,7 +2259,7 @@ def test_tune_judge_refuses_a_page_the_recall_never_listed(tmp_path, monkeypatch
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a-typo.md", "label": "noise"}) + "\n"))
     with pytest.raises(SystemExit):
         iirc.main(["tune-suggestions", "record-relevance-judgments"])
-    assert "line 1: recall r1 lists no page a-typo.md" in capsys.readouterr().err
+    assert "line 1: suggestion line r1 lists no page a-typo.md" in capsys.readouterr().err
     assert not (st / "tune" / "judgments.jsonl").exists()
 
 
@@ -2268,7 +2268,7 @@ def test_tune_gather_skips_rows_that_are_not_objects(tmp_path, monkeypatch, caps
     for f in (st / "log.jsonl", st / "eval-2026-10.jsonl", st / "prompts" / "s1.jsonl"):
         f.write_text(f.read_text() + "42\n[1, 2]\n\"text\"\n")
     iirc.main(["tune-suggestions", "gather-suggestion-data"])
-    assert "2 sessions, 4 recalls" in capsys.readouterr().out
+    assert "2 sessions, 4 suggestion lines" in capsys.readouterr().out
 
 
 def test_read_for_tune_logs_apart_from_the_sessions_reads(tmp_path, monkeypatch, capsys):
@@ -2284,9 +2284,9 @@ def test_read_for_tune_logs_apart_from_the_sessions_reads(tmp_path, monkeypatch,
 def test_knobs_set_finds_a_header_with_spaces_inside_the_brackets(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
-    toml.write_text('[ recall . "nomic-embed-text" ]\nboth = 0.36\n')
+    toml.write_text('[ suggestions . "nomic-embed-text" ]\nboth = 0.36\n')
     iirc.main(["set-suggestion-threshold", "both", "0.38"])
-    assert toml.read_text() == '[ recall . "nomic-embed-text" ]\nboth = 0.38\n'
+    assert toml.read_text() == '[ suggestions . "nomic-embed-text" ]\nboth = 0.38\n'
     toml.unlink(); iirc.set_root(tmp_path)
 
 
@@ -2351,8 +2351,9 @@ def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
     assert len(calls) == 2   # one search per prompt, none for another repository's
     assert "judged pairs: 4 (2 relevant, 2 noise) from 2 prompts; 2 of them from excerpts" in out
     assert "left out: 1 unsure; 1 missing from the store; 1 from other repositories" in out
-    assert "current  semantic_only 0.28 both 0.34: relevant passed 1, noise passed 1, relevant refused 1; precision 0.50, recall 0.50, F1 0.50" in out
-    assert "best by F1:" in out and "no grid point beats the current knobs on F1" in out
+    assert "current  semantic_only 0.28 both 0.34: relevant passed 1, noise passed 1, relevant refused 1; precision 0.50, share of relevant pages passed 0.50, F1 0.50" in out
+    assert "R (share of relevant pages passed)" in out and "(recall)" not in out
+    assert "best by F1:" in out and "no grid point beats the current thresholds on F1" in out
 
 
 # p5 step 14
@@ -3086,43 +3087,44 @@ def _machine_model(model):
 
 
 def test_knobs_per_model(tmp_path, monkeypatch, capsys):
-    """Each model has a [recall.MODEL-ID] table with its own defaults and ranges; only the active model's table is checked."""
+    """Each model has a [suggestions.MODEL-ID] table with its own defaults and ranges; only the active model's table is checked."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
-    toml.write_text('[recall.nomic-embed-text]\nsemantic_only = 0.3\n\n[recall."qwen3-embedding-0.6b"]\nsemantic_only = 0.5\nboth = 0.7\n\n'
-                    '[recall.all-minilm-l6-v2]\nboth = 0.95\n')
+    toml.write_text('[suggestions.nomic-embed-text]\nsemantic_only = 0.3\n\n[suggestions."qwen3-embedding-0.6b"]\nsemantic_only = 0.5\nboth = 0.7\n\n'
+                    '[suggestions.all-minilm-l6-v2]\nboth = 0.95\n')
     iirc.set_root(tmp_path)   # no embedding in the setup file: nomic-embed-text
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}   # minilm's 0.95 is not checked
     _machine_model("qwen3-embedding:0.6b")
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}    # past nomic's 0.60, inside qwen3's range
     iirc.main(["show-suggestion-thresholds"])
-    assert '[recall."qwen3-embedding-0.6b"]' in capsys.readouterr().out
+    assert '[suggestions."qwen3-embedding-0.6b"]' in capsys.readouterr().out
     iirc.main(["set-suggestion-threshold", "both", "0.8"])
-    assert 'semantic_only = 0.5\nboth = 0.8\n' in toml.read_text() and "[recall.nomic-embed-text]\nsemantic_only = 0.3\n" in toml.read_text()
+    assert 'semantic_only = 0.5\nboth = 0.8\n' in toml.read_text() and "[suggestions.nomic-embed-text]\nsemantic_only = 0.3\n" in toml.read_text()
     _machine_model("all-minilm-l6-v2")
     iirc.set_root(tmp_path)
-    assert "[recall.all-minilm-l6-v2] both must be a number from 0.1 to 0.9" in iirc.CONFIG_ERROR
-    toml.write_text("[recall.nomic-embed-text]\nboth = 0.4\n")
+    assert "[suggestions.all-minilm-l6-v2] both must be a number from 0.1 to 0.9" in iirc.CONFIG_ERROR
+    toml.write_text("[suggestions.nomic-embed-text]\nboth = 0.4\n")
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.6, "both": 0.68}   # minilm's own defaults
     grid = iirc.knob_grid()
     assert min(k["semantic_only"] for k in grid) == 0.1 and max(k["both"] for k in grid) == 0.9 and all(k["both"] >= k["semantic_only"] for k in grid)
     iirc.main(["set-suggestion-threshold", "semantic_only", "0.55"])   # a new table for the active model, after the others
-    assert toml.read_text() == "[recall.nomic-embed-text]\nboth = 0.4\n\n[recall.all-minilm-l6-v2]\nsemantic_only = 0.55\n"
-    toml.write_text("[recall.nomic]\nboth = 0.4\n")
+    assert toml.read_text() == "[suggestions.nomic-embed-text]\nboth = 0.4\n\n[suggestions.all-minilm-l6-v2]\nsemantic_only = 0.55\n"
+    toml.write_text("[suggestions.nomic]\nboth = 0.4\n")
     iirc.set_root(tmp_path)
-    assert "[recall.nomic] names no embedding model" in iirc.CONFIG_ERROR and "nomic-embed-text" in iirc.CONFIG_ERROR
+    assert "[suggestions.nomic] names no embedding model" in iirc.CONFIG_ERROR and "nomic-embed-text" in iirc.CONFIG_ERROR
     toml.unlink(); iirc.set_root(tmp_path)
 
 
-def test_flat_recall_moves_on_doctor_fix(tmp_path, monkeypatch, capsys):
-    """A flat [recall] key fails with the fix named; doctor --fix moves it into nomic's table, where every flat knob was measured."""
+def test_old_recall_tables_move_on_doctor_fix(tmp_path, monkeypatch, capsys):
+    """A [recall] table, flat or per model, fails with the fix named; doctor --fix renames it [suggestions.MODEL-ID],
+    and a flat key goes to nomic's table, where every flat knob was measured."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
     toml.write_text("ui = true\n\n[recall]  # the gate\nsemantic_only = 0.3   # measured\nboth = 0.9\n")
     iirc.set_root(tmp_path)
-    assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[recall.nomic-embed-text]" in iirc.CONFIG_ERROR
+    assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[suggestions.nomic-embed-text]" in iirc.CONFIG_ERROR
     assert iirc.knob_error_only()
     iirc.main(["doctor", "--health"])   # the /iirc card still gets its JSON
     assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores"}
@@ -3133,20 +3135,31 @@ def test_flat_recall_moves_on_doctor_fix(tmp_path, monkeypatch, capsys):
     with pytest.raises(SystemExit):
         iirc.main(["doctor", "--fix"])
     out = capsys.readouterr().out
-    assert "moved [recall] to [recall.nomic-embed-text]" in out and "commented out `both = 0.9`" in out and "ok  .claude/iirc.toml loads" in out
-    assert toml.read_text() == ("ui = true\n\n[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\n"
+    assert "moved [recall] to [suggestions.nomic-embed-text]" in out and "commented out `both = 0.9`" in out and "ok  .claude/iirc.toml loads" in out
+    assert toml.read_text() == ("ui = true\n\n[suggestions.nomic-embed-text]  # the gate\nsemantic_only = 0.3   # measured\n"
                                 "# both = 0.9  # iirc doctor --fix: must be a number from 0.1 to 0.6\n")
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}
     # beside an existing nomic table, each flat key moves on its own, and the table's own value stays
-    toml.write_text("[recall]\nsemantic_only = 0.26\nboth = 0.4\n\n[recall.nomic-embed-text]\nsemantic_only = 0.3\n")
+    toml.write_text("[recall]\nsemantic_only = 0.26\nboth = 0.4\n\n[suggestions.nomic-embed-text]\nsemantic_only = 0.3\n")
     iirc.set_root(tmp_path)
     assert iirc.knob_error_only()
     with pytest.raises(SystemExit):
         iirc.main(["doctor", "--fix"])
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
-    assert "# semantic_only = 0.26  # iirc doctor --fix: [recall.nomic-embed-text] has its own" in toml.read_text()
+    assert "# semantic_only = 0.26  # iirc doctor --fix: [suggestions.nomic-embed-text] has its own" in toml.read_text()
+    # a model table under the old name: an error until doctor --fix renames it, comments kept
+    toml.write_text('[recall.nomic-embed-text]  # the gate\nsemantic_only = 0.3\n\n[recall."qwen3-embedding-0.6b"]\nboth = 0.7\n')
+    iirc.set_root(tmp_path)
+    assert "[recall.nomic-embed-text]" in iirc.CONFIG_ERROR and "[suggestions.nomic-embed-text]" in iirc.CONFIG_ERROR and "`iirc doctor --fix`" in iirc.CONFIG_ERROR
+    assert iirc.RECALL == {"semantic_only": 0.28, "both": 0.38} and iirc.knob_error_only()
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor", "--fix"])
+    assert "moved [recall.nomic-embed-text] to [suggestions.nomic-embed-text]" in capsys.readouterr().out
+    assert toml.read_text() == '[suggestions.nomic-embed-text]  # the gate\nsemantic_only = 0.3\n\n[suggestions."qwen3-embedding-0.6b"]\nboth = 0.7\n'
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}
     toml.unlink(); iirc.set_root(tmp_path)
 
 

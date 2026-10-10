@@ -267,7 +267,7 @@ test('/iirc summary-line-visibility off hides the hint-row line, on shows it, an
 test('a plain /iirc prints help with the session line, and does not load the skill', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: 'recall suggests up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'a suggestion line names up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await hookRow($, 'SessionStart', BRIEF, 'h8')
   const text = (await $.command.run({ command: 'iirc:iirc', args: '  ' })).text
   expect(text).toContain(LINE.replace('iirc: ', ''))
@@ -296,7 +296,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
     expect(await panel.find({ text: '/iirc doctor --fix' })).toBeUndefined()   // commands live in /iirc help
     expect(await panel.find({ text: 'ecall' })).toBeDefined()
     expect(await panel.find({ text: '/iirc status' })).toBeDefined()
-    expect(await panel.find({ text: '▲ needs a look: trust, stores, session counts, and recall noise' })).toBeDefined()
+    expect(await panel.find({ text: '▲ needs a look: trust, stores, session counts, and suggestion noise' })).toBeDefined()
     expect(await panel.find({ text: ' ▲ needs a look ' })).toBeUndefined()   // the chip lives in /iirc status
   }
   const demo = await $.ui.mount({
@@ -374,8 +374,8 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
 test('/iirc max-suggested-pages N asks the CLI to keep the number', async ($: Engine, on: On) => {
   engine(on)
   const argv: string[][] = []
-  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'recall suggests up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  expect((await $.command.run({ command: 'iirc:iirc', args: 'max-suggested-pages 5' })).text).toBe('recall suggests up to 5 pages')
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'a suggestion line names up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  expect((await $.command.run({ command: 'iirc:iirc', args: 'max-suggested-pages 5' })).text).toBe('a suggestion line names up to 5 pages')
   expect(argv[0].slice(1)).toEqual(['max-suggested-pages', '5'])
   await $.command.run({ command: 'iirc', args: 'max-suggested-pages' })
   expect(argv[1].slice(1)).toEqual(['max-suggested-pages'])
@@ -463,14 +463,14 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
 
 
 test('a config error reads as hooks off, and a timed-out recall turns the line yellow', () => {
-  const off = parseBrief('iirc: hooks off, .claude/iirc.toml: [recall] semantic_only must be a number from 0.1 to 0.6. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.')!
+  const off = parseBrief('iirc: hooks off, .claude/iirc.toml: [suggestions.nomic-embed-text] semantic_only must be a number from 0.1 to 0.6. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.')!
   expect(off.status.level).toBe('error')
   expect(statusText(off.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: hooks off · run iirc doctor --fix')
   const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.')!.status
   const c = { reads: 1, writes: 0, suggested: 2, used: 1, missed: [], match: { all: null, read: null, unread: null }, timeouts: 2 }
   expect(liveStatus(ok, c).level).toBe('warn')
   expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run iirc doctor')
-  const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. 3 recalls timed out in the last 7 days, past the hook\'s 5 s limit: iirc doctor names the cause.')!
+  const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. 3 suggestion lookups timed out in the last 7 days, past the hook\'s 5 s limit: iirc doctor names the cause.')!
   expect(brief.status.level).toBe('warn')
   expect(brief.status.fix).toBe('iirc doctor')
 })

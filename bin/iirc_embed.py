@@ -101,7 +101,7 @@ def fixed_width(model: Model) -> bool:
 
 
 def table_name(model_id: str) -> str:
-    """The model's [recall.NAME] table in .claude/iirc.toml, and its vector store's file name."""
+    """The model's [suggestions.NAME] table in .claude/iirc.toml, and its vector store's file name."""
     return model_id.replace(":", "-")
 
 
