@@ -1,11 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pyyaml>=6"]
+# dependencies = ["numpy>=2", "pyyaml>=6"]
 # ///
 """Replay judged prompts through `claude -p` with a given recall line, and count the pages the model reads.
 
-  scripts/line-replay.py --replay FILE [--variants today,...] [--sample N] [--seed S] [--passed FILE] [--streams DIR] [--dry-run] [--out FILE]
+  scripts/line-replay.py --replay FILE [--variants current,...] [--sample N] [--seed S] [--passed FILE] [--transcripts DIR] [--streams DIR] [--dry-run] [--out FILE]
   scripts/line-replay.py --repeats [--rule window10|window5|window3|read-only|read-or-window3|session-once] [--transcripts DIR] [--out FILE]
 
 FILE is a replay JSONL file, one judged pair per line:
@@ -17,6 +17,10 @@ For each prompt the passed pages come from bin/iirc's hybrid_search and
 recall_verdicts in the replay's repo, or from --passed FILE when it exists (the
 script writes it when it does not, so a dry run and the real run show the same
 pages). A variant turns those pages into the line a UserPromptSubmit hook prints.
+`followup` searches its own query for a prompt under FOLLOWUP_MAX characters: the
+previous human prompt of the same session, found in its transcript under
+--transcripts DIR (~/.claude/projects), then this one. Its passed pages sit in the
+same file under "QID followup".
 
 Each run: XDG_STATE_HOME is a temporary directory, so its log rows never reach
 the real log; IIRC_RECORDING=1; the iirc plugin is disabled through --settings,
@@ -105,19 +109,60 @@ def sample(prompts: dict[tuple[str, str], dict], n: int | None, seed: int) -> li
 # --- the pages a prompt passes -------------------------------------------------
 
 
-def passed_pages(repo: str, prompt: str) -> list[dict]:
-    """The pages today's search and gate pass for this prompt in this repo, best first: {page, store, summary, distance, rule}."""
+def passed_pages(repo: str, query: str) -> list[dict]:
+    """The pages today's search and gate pass for this query in this repo, best first: {page, store, summary, distance, rule}."""
     m = iirc()
     m.set_root(Path(repo))
     return [{"page": r["filename"], "store": m.row_store(r), "summary": r.get("summary", ""), "distance": r.get("distance"), "rule": r["rule"]}
-            for r in m.recall_verdicts(m.hybrid_search(m.person_text(prompt))) if r["verdict"] == "passed"]
+            for r in m.recall_verdicts(m.hybrid_search(query)) if r["verdict"] == "passed"]
 
 
-def page_rows(prompts: list[dict], cache: Path | None) -> dict[str, list[dict]]:
-    """Passed pages by qid, read from the cache file when it exists, else computed and written to it."""
+FOLLOWUP_MAX = 80        # a prompt shorter than this is searched with the session's previous human prompt (decision 14)
+PREVIOUS_MAX = 300       # the prompts file keeps this much of a prompt, so the hook could compose no more
+
+
+def followup_query(prompt: str, previous: str | None) -> str:
+    """What recall searches for a prompt: the person's words, after the previous human prompt when they are a short follow-up."""
+    text = iirc().person_text(prompt)
+    return f"{previous} {text}" if previous and len(text) < FOLLOWUP_MAX else text
+
+
+def redacted(text: str) -> str:
+    """As replay-files.py stores a prompt: secrets out, then capped."""
+    for pattern in iirc().SECRET_PATTERNS.values():
+        text = pattern.sub("[REDACTED]", text)
+    return text[:8000]
+
+
+def previous_prompt(prompt: dict, transcripts: Path) -> str | None:
+    """The human prompt before this one in its session's transcript, as the prompts file would keep it; None when there is none.
+    The qid's first part is the session's prefix; the prompt is found by its text, the last time the session typed it."""
+    m = iirc()
+    folder = transcripts / re.sub(r"[^A-Za-z0-9]", "-", prompt["repo"])
+    paths = sorted(folder.glob(prompt["qid"].split("/", 1)[0] + "*.jsonl"))
+    if not paths:
+        return None
+    texts = [t["text"] for t in m.read_transcript(paths[0])["prompts"]]
+    at = next((i for i in reversed(range(len(texts))) if prompt["prompt"] in (redacted(texts[i]), m.clean(texts[i], 300))), None)
+    for text in reversed(texts[:at] if at is not None else []):
+        prev = m.person_text(m.clean(text, PREVIOUS_MAX))
+        if prev:
+            return prev
+    return None
+
+
+def page_rows(prompts: list[dict], cache: Path | None, transcripts: Path | None = None) -> dict[str, list[dict]]:
+    """Passed pages by qid, read from the cache file when it exists, else computed and written to it.
+    With transcripts, a short prompt with a previous one also gets the followup query's pages under "QID followup"."""
     if cache and cache.is_file():
         return json.loads(cache.read_text())
-    rows = {p["qid"]: passed_pages(p["repo"], p["prompt"]) for p in prompts}
+    rows = {}
+    for p in prompts:
+        plain = iirc().person_text(p["prompt"])
+        rows[p["qid"]] = passed_pages(p["repo"], plain)
+        query = followup_query(p["prompt"], previous_prompt(p, transcripts)) if transcripts else plain
+        if query != plain:
+            rows[p["qid"] + " followup"] = passed_pages(p["repo"], query)
     if cache:
         cache.write_text(json.dumps(rows, indent=1))
     return rows
@@ -129,6 +174,14 @@ def page_rows(prompts: list[dict], cache: Path | None) -> dict[str, list[dict]]:
 def today(rows: list[dict]) -> str:
     """The line bin/iirc prints now, suspicion markers read from the pages as the hook reads them."""
     return iirc().recall_line([{**r, "filename": r["page"]} for r in rows])
+
+
+current = today   # the name step 13's run uses for the line main prints
+
+
+def twopages(rows: list[dict]) -> str:
+    """Today's line naming at most two of the passed pages (step 13, decision 14)."""
+    return today(rows[:2])
 
 
 def wording(rows: list[dict]) -> str:
@@ -144,7 +197,9 @@ def nopct(rows: list[dict]) -> str:
     return PERCENT_RE.sub("", wording(rows))
 
 
-VARIANTS = {"today": today, "wording": wording, "nopct": nopct}
+VARIANTS = {"today": today, "current": current, "wording": wording, "nopct": nopct, "twopages": twopages, "followup": today}
+# a variant here takes its pages from the passed file's "QID followup" entry when there is one
+OWN_QUERY = {"followup"}
 
 
 # --- counting reads in a stream-json transcript --------------------------------
@@ -358,6 +413,12 @@ def run_once(prompt: dict, line: str, max_turns: int, model: str | None) -> tupl
     return proc.stdout, proc.returncode, cost
 
 
+def variant_rows(variant: str, qid: str, rows: dict[str, list[dict]]) -> list[dict]:
+    """The passed pages a variant's line names: its own query's when it has one for this prompt, else the prompt's."""
+    own = rows.get(f"{qid} {variant}") if variant in OWN_QUERY else None
+    return own if own is not None else rows.get(qid, [])
+
+
 def build_line(variant: str, prompt: dict, rows: list[dict]) -> str | None:
     """The variant's line for this prompt, or None when the variant is a placeholder. Pages resolve in the prompt's repo."""
     iirc().set_root(Path(prompt["repo"]))
@@ -372,7 +433,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--replay", type=Path)
     ap.add_argument("--repeats", action="store_true", help="count what the once-per-session rule leaves out of the real log, and the reads it loses")
     ap.add_argument("--rule", choices=list(REPEAT_RULES), default="window10", help="with --repeats: which repeat rule to apply")
-    ap.add_argument("--transcripts", type=Path, help="with --repeats: take compactions from the session transcripts under this directory, not the log")
+    ap.add_argument("--transcripts", type=Path, help="with --repeats: take compactions from the session transcripts under this directory, not the log; "
+                    "with the followup variant: where to find a prompt's previous one (default ~/.claude/projects)")
     ap.add_argument("--variants", default="today", help=f"comma-separated, from: {', '.join(VARIANTS)}")
     ap.add_argument("--sample", type=int, help="N prompts with a relevant page and N without; default every human prompt")
     ap.add_argument("--seed", type=int, default=1)
@@ -396,11 +458,12 @@ def main(argv: list[str] | None = None) -> int:
     state = tempfile.mkdtemp(prefix="line-replay-state-")
     os.environ["XDG_STATE_HOME"] = state
     prompts = sample(load_replay(args.replay), args.sample, args.seed)
-    rows = page_rows(prompts, args.passed)
+    transcripts = (args.transcripts or Path.home() / ".claude" / "projects") if "followup" in variants else None
+    rows = page_rows(prompts, args.passed, transcripts)
     plan = []
     for p in prompts:
         for v in variants:
-            line = build_line(v, p, rows.get(p["qid"], []))
+            line = build_line(v, p, variant_rows(v, p["qid"], rows))
             plan.append((p, v, line))
     missing = sorted({v for _, v, line in plan if line is None})
 
@@ -410,6 +473,12 @@ def main(argv: list[str] | None = None) -> int:
             shown = "(variant not written)" if line is None else (line[:160] or "(no line)")
             print(f"{p['qid']}\t{v}\t{rel}\t{shown}")
         print(f"{len(plan)} runs: {len(prompts)} prompts x {len(variants)} variants")
+        if "followup" in variants:
+            short = [p for p in prompts if len(iirc().person_text(p["prompt"])) < FOLLOWUP_MAX]
+            composed = [p for p in short if f"{p['qid']} followup" in rows]
+            changed = [p for p in composed if [r["page"] for r in rows[f"{p['qid']} followup"]] != [r["page"] for r in rows.get(p["qid"], [])]]
+            print(f"followup: {len(short)} prompts under {FOLLOWUP_MAX} characters, {len(composed)} with a previous prompt, "
+                  f"{len(changed)} whose passed pages change")
         return 0
     if missing:
         print(f"line-replay: variant {', '.join(missing)} is not written yet", file=sys.stderr)
@@ -429,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         t["runs"] += 1
         t["cost_usd"] += cost or 0.0
         runs.append({"qid": p["qid"], "repo": p["repo"], "variant": v, "has_relevant": "relevant" in p["labels"].values(),
-                     "shown": [r["page"] for r in rows.get(p["qid"], [])], "line": line, "exit": code, "cost_usd": cost, **c})
+                     "shown": [r["page"] for r in variant_rows(v, p["qid"], rows)], "line": line, "exit": code, "cost_usd": cost, **c})
         print(f"{i}/{len(plan)} {p['qid']} {v}: relevant {c['relevant']}, noise {c['noise']}, other {c['other']}, exit {code}", file=sys.stderr)
     result = {"replay": str(args.replay), "sample": args.sample, "seed": args.seed, "max_turns": args.max_turns, "variants": totals, "runs": runs}
     text = json.dumps(result, indent=1)

@@ -3272,3 +3272,39 @@ def test_setup_offers_models(tmp_path, monkeypatch, capsys):
         iirc.main(["setup", "--cpu"])                                      # a file that fails its sha256 is refused
     assert "sha256" in capsys.readouterr().err and iirc.read_config() == {"semantic": False}
     assert iirc.iirc_embed.MINILM_COMMIT == "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+
+
+# p5 step 13
+
+def test_line_replay_two_pages(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    lr = _line_replay()
+    monkeypatch.setattr(lr, "iirc", lambda: iirc)
+    rows = [{"page": f"p{i}.md", "store": "project", "summary": f"page {i}", "distance": 0.2, "rule": "meaning"} for i in range(3)]
+    assert lr.current(rows).count("`iirc read ") == 3
+    line = lr.twopages(rows)
+    assert line.count("`iirc read ") == 2 and line.startswith("iirc: 2 pages may apply.") and "p2" not in line
+
+
+def test_line_replay_followup_query(tmp_path, monkeypatch):
+    lr = _line_replay()
+    monkeypatch.setattr(lr, "iirc", lambda: iirc)
+    short, long = "nice. Lets commit and push what we have.", "x" * 80
+    assert lr.followup_query(short, "add the replay variants") == "add the replay variants " + short
+    assert lr.followup_query(long, "add the replay variants") == long
+    assert lr.followup_query(short, None) == short
+    # the previous human prompt comes from the session's transcript, capped as the prompts file keeps it
+    session = "abcd1234-0000-0000-0000-000000000000"
+    project = tmp_path / "projects" / "-repo"
+    project.mkdir(parents=True)
+
+    def user(text, ts):
+        return json.dumps({"type": "user", "timestamp": ts, "message": {"content": text}})
+    (project / f"{session}.jsonl").write_text("\n".join([
+        user("y" * 400, "2026-10-09T10:00:00Z"),
+        user("<task-notification>done</task-notification>", "2026-10-09T10:01:00Z"),
+        user(short, "2026-10-09T10:02:00Z"),
+    ]) + "\n")
+    p = {"repo": "/repo", "qid": "abcd1234/key", "prompt": short}
+    assert lr.previous_prompt(p, tmp_path / "projects") == "y" * 300
+    assert lr.previous_prompt({**p, "qid": "ffff0000/key"}, tmp_path / "projects") is None
