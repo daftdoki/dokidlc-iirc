@@ -811,8 +811,10 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     assert {e["via"] for e in evals} == {"prompt", "failure"}
     # the prompt's excerpt, in the session's own file, never in the log
     kept = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc" / "prompts").glob("*.jsonl") for line in f.read_text().splitlines()]
-    assert [k.get("skipped") for k in kept] == [None, "short"] and kept[0]["recall_id"] == first["recall_id"]
+    assert [k.get("skipped") for k in kept] == [None, "short", None] and kept[0]["recall_id"] == first["recall_id"]
     assert kept[0]["excerpt"].startswith("why does uv tool install")
+    # the failure's command and error, for tune once the transcript is gone
+    assert (kept[2]["excerpt"], kept[2]["error"]) == ("uv tool install memoryfield-tool", "no wheels for pysqlite3-binary")
 
 
 def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, capsys):
@@ -2503,3 +2505,60 @@ def test_gather_skips_the_tuning_window(tmp_path, monkeypatch, capsys):
     assert iirc.read_log()[-1]["cmd"] == "tune_judge" and "tuning" not in {x["cmd"] for x in iirc.read_log()}
     iirc.main(["tune", "gather"])   # the last judge now follows t3
     assert [x["key"] for x in json.loads((st / "tune" / "tuner.json").read_text())["recalls"]] == ["t1"]
+
+
+# p5 step 21
+
+
+def test_base_adds_md():
+    assert iirc.base("project/a") == iirc.base("a.md") == iirc.base("project/a.md") == "a.md"
+
+
+def test_gather_time_join_within_five_seconds(tmp_path, monkeypatch, capsys):
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+    # recalls from before prompt hashes: the first comes 30 s after its nearest prompt, the second 4 s after
+    _jsonl(st / "log-2026-09.jsonl", [
+        {"ts": "2026-10-08T11:00:30Z", "session": "s4", "repo": r, "cmd": "recall", "via": "prompt", "pages": []},
+        {"ts": "2026-10-08T11:02:04Z", "session": "s4", "repo": r, "cmd": "recall", "via": "prompt", "pages": []},
+    ])
+    tx = tmp_path / "claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", r) / "s4.jsonl"
+    _jsonl(tx, [{"type": "user", "timestamp": "2026-10-08T11:00:00.000Z", "message": {"content": "a subagent's hand-back, long before"}},
+                {"type": "user", "timestamp": "2026-10-08T11:02:00.000Z", "message": {"content": "the prompt this recall searched"}}])
+    iirc.main(["tune", "gather", "--session", "s4"])
+    far, near = json.loads((st / "tune" / "s4.json").read_text())["recalls"]
+    assert far["prompt"] == {"text": None, "from": None}
+    assert near["prompt"] == {"text": "the prompt this recall searched", "from": "transcript by time"}
+
+
+def test_failure_recall_keeps_its_error(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude")); monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "f1")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
+    error = "Exit code 1\nError: Cannot find module 'leftpad' " + "at require " * 60
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "npm test"}, "error": error})))
+    iirc.main(["recall", "--failure"])
+    # no transcript: the prompts file alone fills the evidence
+    iirc.main(["tune", "gather", "--session", "f1"])
+    failed = json.loads((tmp_path / "st" / "dokidlc-iirc" / "tune" / "f1.json").read_text())["recalls"][0]["failed"]
+    assert failed["command"] == "npm test"
+    assert failed["error"].startswith("Error: Cannot find module 'leftpad'") and 250 < len(failed["error"]) <= 300
+
+
+def test_gather_skips_recordings(tmp_path, monkeypatch, capsys):
+    st = _tune_fixture(tmp_path, monkeypatch)
+    r = str((tmp_path / "repo").resolve())
+    monkeypatch.setenv("IIRC_RECORDING", "1")
+    conds = iirc.conditions("semantic", 5)
+    assert conds["recording"] is True
+    _jsonl(st / "log-2026-09.jsonl", [
+        {"ts": "2026-10-08T11:00:00Z", "session": "rec", "repo": r, "cmd": "start", **conds},
+        {"ts": "2026-10-08T11:00:30Z", "session": "rec", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "v1"},
+    ])
+    _jsonl(st / "prompts" / "rec.jsonl", [{"ts": "2026-10-08T11:00:30Z", "prompt_hash": "x", "excerpt": "a demo prompt", "recall_id": "v1"}])
+    iirc.main(["tune", "gather"])
+    assert "2 sessions" in capsys.readouterr().out and not (st / "tune" / "rec.json").exists()
+    monkeypatch.delenv("IIRC_RECORDING")
+    assert "recording" not in iirc.conditions("semantic", 5)

@@ -37,7 +37,7 @@ tape() {
     echo 'Hide'
     # unset the marker a parent Claude Code session leaves, so this one keeps its transcript; no shell commands, so the
     # recorded session's agent cannot reach git, ssh, or anything that asks 1Password
-    echo "Type \"cd $repo && env -u CLAUDE_CODE_CHILD_SESSION claude --disallowedTools Bash\""
+    echo "Type \"cd $repo && env -u CLAUDE_CODE_CHILD_SESSION IIRC_RECORDING=1 claude --disallowedTools Bash\""
     echo 'Enter'
     echo 'Sleep 8s'
     echo 'Show'

@@ -1235,7 +1235,7 @@ def note_timeout() -> None:
         pass
 
 
-def run_recall(query: str, via: str, event: dict, **keys) -> str:
+def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None = None, **keys) -> str:
     """Search, gate, and log one recall; return its line, or "" when no page passed.
 
     The log row says what the line suggested; the eval rows say what every candidate
@@ -1262,6 +1262,9 @@ def run_recall(query: str, via: str, event: dict, **keys) -> str:
               chars=len(query), recall_id=recall_id, transcript=event.get("transcript_path"), ms=ms, **keys)
     if via == "prompt":
         keep_prompt(str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or ""), recall_id=recall_id)
+    elif failed:
+        # the command as the excerpt and the error beside it, so tune can judge the recall after the transcript is gone
+        keep_prompt(failed[0], recall_id=recall_id, error=clean(failed[1], 300))
     eval_event([{
         "cmd": "candidate", "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
         "distance": r.get("distance") if isinstance(r.get("distance"), (int, float)) else None,
@@ -1299,7 +1302,7 @@ def cmd_recall(args: argparse.Namespace) -> None:
             if not terms:
                 return
             query = " ".join([first] + terms).strip()
-            line = run_recall(query, "failure", event, query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
+            line = run_recall(query, "failure", event, failed=(cmd, err), query_hash=prompt_hash(query), tool_use_id=event.get("tool_use_id"))
             if line:
                 print(hook_output("PostToolUseFailure", line))
             return
@@ -2952,8 +2955,10 @@ def install_tool(pin: dict[str, str]) -> bool:
 
 def conditions(mode: str, pages: int) -> dict:
     """What recall ran with: the plugin, the gate's knobs, the line's size, the search mode, the engine, the field's size."""
+    # a recorded demo or screenshot session marks itself, so tune gather leaves its scripted prompts out
     return {"commit": plugin_commit(), "knobs": dict(RECALL), "max_suggested": max_suggested(), "mode": mode,
-            "tool_rev": (read_pin() or {}).get("tool_rev"), "page_count": pages}
+            "tool_rev": (read_pin() or {}).get("tool_rev"), "page_count": pages,
+            **({"recording": True} if os.environ.get("IIRC_RECORDING") == "1" else {})}
 
 
 def suspect_pages(pages: list[Path]) -> list[str]:
@@ -3283,8 +3288,9 @@ TUNE_NEAR = 0.03        # a refused candidate this close to the larger knob is w
 TUNE_NEAR_MAX = 3       # refused candidates worth judging per recall, nearest the knob first
 TUNE_FLOOR = 30         # judged pairs with a distance before the sweep proposes a change
 TUNE_LABELS = ("relevant", "noise", "unsure")
+TUNE_JOIN_SECONDS = 5   # a recall with no prompt hash joins a transcript prompt at most this long before it
 TUNE_UPKEEP = 300       # seconds: a read followed this soon by a write or verify of the page was upkeep
-CONDITION_KEYS = ("ts", "cmd", "source", "trigger", "commit", "knobs", "max_suggested", "mode", "tool_rev", "page_count")
+CONDITION_KEYS = ("ts", "cmd", "source", "trigger", "commit", "knobs", "max_suggested", "mode", "tool_rev", "page_count", "recording")
 NOT_A_PROMPT = ("<command-name>", "<local-command-", "<bash-input>", "<bash-stdout>", "<bash-stderr>")
 
 
@@ -3304,8 +3310,9 @@ def parse_ts(ts) -> float | None:
 
 
 def base(page) -> str:
-    """A page's file name without its store: read rows may say STORE/PAGE.md, eval rows never do."""
-    return str(page).split("/")[-1]
+    """A page's file name without its store: read rows may say STORE/PAGE.md, eval rows never do; `iirc read a` means a.md."""
+    name = str(page).split("/")[-1]
+    return name if name.endswith(".md") else name + ".md"
 
 
 def transcript_for(session: str, rows: list[dict]) -> Path | None:
@@ -3427,8 +3434,10 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
         tx = next((t for t in [tx, *subs] if t and any(u["id"] == r.get("tool_use_id") for u in t["tools"])), tx)
         out["subagent"] = tx.get("agent") if tx else None
         use = next((t for t in (tx or {}).get("tools", []) if t["id"] and t["id"] == r.get("tool_use_id")), None)
-        out["failed"] = {"command": use["input"] if use else None,
-                         "error": clip((tx or {}).get("results", {}).get(r.get("tool_use_id"), ""), 200) if use else None}
+        # the transcript first; once it is gone, the command and error the hook kept in the prompts file
+        kept = next((p for p in pf if r.get("recall_id") and p.get("recall_id") == r["recall_id"]), None) or {}
+        out["failed"] = {"command": use["input"] if use else kept.get("excerpt"),
+                         "error": clip((tx or {}).get("results", {}).get(r.get("tool_use_id"), ""), 300) if use else kept.get("error")}
         start = use["ts"] if use else ts
     else:
         # the prompt: from the prompts file, else the transcript by hash, else the transcript's last prompt before the recall
@@ -3440,7 +3449,8 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
         joined = "hash"
         if in_tx is None and tx and not kept:
             # the log's ts is cut to the second and written after the search, so a prompt row may carry the same second
-            before = [p for p in tx["prompts"] if p["ts"] < ts + 1]
+            # further back than TUNE_JOIN_SECONDS, the nearest prompt is likely another one, such as a subagent's hand-back
+            before = [p for p in tx["prompts"] if ts - TUNE_JOIN_SECONDS <= p["ts"] < ts + 1]
             in_tx = before[-1] if before else None
             joined = "time"
         if kept:
@@ -3526,9 +3536,11 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
             die(f"no log rows for session {args.session} in {ROOT}")
         chosen = [args.session]
     else:
-        tuned = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
+        skip = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
+        # a recording's prompts are a script, not work
+        skip |= {s for s, rows in sessions.items() if any(r["cmd"] in ("start", "session") and r.get("recording") for r in rows)}
         cutoff = time.time() - args.days * 86400 if args.days is not None else -math.inf
-        chosen = [s for s, rows in sessions.items() if s not in tuned
+        chosen = [s for s, rows in sessions.items() if s not in skip
                   and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
                   and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
     if not chosen:

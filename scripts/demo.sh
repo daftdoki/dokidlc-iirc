@@ -24,7 +24,7 @@ Set Width 1600
 Set Height 1000
 Set TypingSpeed 45ms
 Hide
-Type "cd $repo && env -u CLAUDE_CODE_CHILD_SESSION claude --disallowedTools Bash"
+Type "cd $repo && env -u CLAUDE_CODE_CHILD_SESSION IIRC_RECORDING=1 claude --disallowedTools Bash"
 Enter
 Sleep 8s
 Type "/clear"
