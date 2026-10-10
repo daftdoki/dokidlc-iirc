@@ -28,7 +28,7 @@ Install the plugin once per machine ([README](../README.md)). Then open
 a session in a repository and say "set up iirc". The agent asks where
 embeddings come from, and offers five choices:
 
-| Choice | `iirc setup` flag | Needs |
+| Choice | `iirc set-search-backend` flag | Needs |
 |---|---|---|
 | ollama on this machine | `--local` | ollama here; doctor installs it on macOS |
 | ollama on another host | `--host URL` | ollama on that host |
@@ -40,13 +40,13 @@ With ollama, `--model` picks `qwen3-embedding:0.6b` (the default),
 `nomic-embed-text`, or `embeddinggemma`. The agent recommends ollama,
 here or on the host this machine already names, when one answers, and
 this CPU otherwise. String search is the last choice. The agent then
-runs `iirc setup`, `iirc init` if you want pages in this repository, then
+runs `iirc set-search-backend`, `iirc init` if you want pages in this repository, then
 `iirc doctor --fix`, which installs memoryfield-tool and, for a local
 host on macOS, ollama and the model. You see doctor's report.
 [INSTALL.md](../INSTALL.md) has every step as a command.
 
 A machine set up before the model choice keeps nomic until setup runs
-again. A new model embeds every page again: the next `iirc index` does
+again. A new model embeds every page again: the next `iirc rebuild-search-index` does
 it, or the first search that finds the pages missing starts it in the
 background.
 
@@ -75,7 +75,7 @@ your word.
 Ask: "Do you remember anything about installing this on a mac?" The
 agent runs `iirc search` with your question, reads the pages that fit,
 and answers from them. To look yourself, type `/iirc search QUERY`,
-`/iirc read PAGE`, or `/iirc topics`. A page you read this way does not
+`/iirc read PAGE`, or `/iirc show-page-topics`. A page you read this way does not
 count toward the session's reads, which are the agent's.
 
 ### Tell it to remember
@@ -89,21 +89,21 @@ also writes at [the skill's moments](../skills/iirc/SKILL.md#when-to-write).
 
 ### Find and fix what may be out of date
 
-Ask: "What in iirc might be out of date?" The agent runs `iirc suspect-pages`.
+Ask: "What in iirc might be out of date?" The agent runs `iirc find-suspect-pages`.
 It lists the pages with evidence against them, strongest first. A page
 is suspect when a file it cites changed since it cited it, or when its
 check command now fails. For each one, the agent reads the page and
 the diff, then verifies, rewrites, or deletes the page in the same turn.
-`/iirc suspect-pages` prints the same list, and `/iirc suspect-pages --all` adds the
+`/iirc find-suspect-pages` prints the same list, and `/iirc find-suspect-pages --all` adds the
 clean pages. Ask for a doubt pass after a `git pull` and when the line
 under the prompt says `· run iirc suspect-pages`.
 
 Two cases need your yes. A check command that arrived with a clone is
-not approved on this machine, so `suspect-pages` lists it and does not run it.
+not approved on this machine, so `find-suspect-pages` lists it and does not run it.
 The agent shows you the command and asks; on yes it runs
-`iirc approve PAGE`, and Claude Code asks you to approve the command too.
-`suspect-pages` never contacts the URLs in a page's refs. To check them, the
-agent names the URLs `iirc suspect-pages --network` will contact and asks. The
+`iirc approve-page-check PAGE`, and Claude Code asks you to approve the command too.
+`find-suspect-pages` never contacts the URLs in a page's refs. To check them, the
+agent names the URLs `iirc find-suspect-pages --network` will contact and asks. The
 command refuses unless a terminal answers yes or `IIRC_ALLOW_NETWORK=1`
 is set, and only you set it.
 
@@ -141,32 +141,32 @@ On another machine, `iirc doctor --fix` clones a missing remote store.
 
 ### Work without ollama
 
-Say "search on this CPU". The agent runs `iirc setup --cpu`, which
+Say "search on this CPU". The agent runs `iirc set-search-backend --cpu`, which
 fetches all-MiniLM-L6-v2 and runs it once, so onnxruntime installs then
 and not in a hook. Search still matches meaning. If onnxruntime has no
 wheel for this machine, setup says so and writes nothing.
 
 Say "use string search" when nothing else can run. The agent runs
-`iirc setup --substring`. Search then matches exact text only, and the
+`iirc set-search-backend --substring`. Search then matches exact text only, and the
 agent searches for the words a page contains
 ([references/search.md](../skills/iirc/references/search.md)). Recall
 names a page only on a shared identifier, and the line under the prompt
-shows `[keyword] mode`. To go back, ask for `iirc setup` with another
+shows `[keyword] mode`. To go back, ask for `iirc set-search-backend` with another
 choice. If ollama is only down for a while, change nothing: iirc skips a
 host that does not answer a two-second probe and searches by string
 until it answers.
 
 ### Audit the pages
 
-Say "audit the pages", or type `/iirc audit`. The agent runs
-`iirc audit`, which prints one line per page that search shows badly,
+Say "audit the pages", or type `/iirc audit-page-findability`. The agent runs
+`iirc audit-page-findability`, which prints one line per page that search shows badly,
 with its fix: a title over 70 characters, a summary that starts with a
 date or shares no word with the title, a secret, a page that a search
 for its own title does not rank first, a page that tune judged noise
 far more often than relevant, and a page that names its successor but
-keeps its old text. `iirc audit PAGE` checks one page, and `--json`
+keeps its old text. `iirc audit-page-findability PAGE` checks one page, and `--json`
 prints the findings as JSON. The audit changes nothing; the agent
-proposes each fix for your yes. `/iirc tune` runs it after the sweep.
+proposes each fix for your yes. `/iirc tune-suggestions` runs it after the sweep.
 
 ### See exactly what the hooks told the agent
 
@@ -196,32 +196,32 @@ The `command.run` handler in
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
 | `/iirc status-line` | Whether the line under the prompt is on or off. |
 | `/iirc status-line on`, `/iirc status-line off` | Shows or hides that line, on this machine. |
-| `/iirc max-suggested` | How many pages recall suggests at most. |
-| `/iirc max-suggested N` | Sets that number, 1 to 10, on this machine. |
+| `/iirc max-suggested-pages` | How many pages recall suggests at most. |
+| `/iirc max-suggested-pages N` | Sets that number, 1 to 10, on this machine. |
 | `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails, then rebuilds the index. |
-| `/iirc suspect-pages`, `/iirc suspect-pages --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
+| `/iirc find-suspect-pages`, `/iirc find-suspect-pages --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
 | `/iirc sync` | Commits, pulls, and pushes every remote store. |
 | `/iirc stores` | The stores, their page counts, and anything not committed or pushed. |
 | `/iirc stats`, `/iirc stats --days N` | Recall and page use over the last 7 days, or N days. |
-| `/iirc index` | Rebuilds the search index. |
-| `/iirc token-cost` | Bytes and tokens of `index.md` and of a sample search. |
+| `/iirc rebuild-search-index` | Rebuilds the search index. |
+| `/iirc estimate-context-tokens` | Bytes and tokens of `index.md` and of a sample search. |
 | `/iirc thresholds` | The recall distances in force for this machine's model, from `[recall.MODEL-ID]`, and their ranges. |
-| `/iirc topics` | Every topic with its page count. |
+| `/iirc show-page-topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
 | `/iirc unfold-suggestions` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
 | `/iirc reader`, `/iirc reader PAGE` | The reader, a pane with this session's suggested, written, and suspect pages, or open on one page. A click on a page name, here or anywhere iirc draws one, opens the page in the reader's page tab. See [UI.md](UI.md#the-reader). |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
-| `/iirc audit` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
-| `/iirc setup` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc setup`. |
-| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions, sweeps the thresholds, then runs `audit`, and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
+| `/iirc audit-page-findability` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
+| `/iirc set-search-backend` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc set-search-backend`. |
+| `/iirc tune-suggestions` | Goes to the skill: the agent judges the recorded sessions, sweeps the thresholds, then runs `audit-page-findability`, and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,
-`sync`, and `index` may run for up to ten minutes; the rest stop after
+`sync`, and `rebuild-search-index` may run for up to ten minutes; the rest stop after
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
-`stores add`, `setup`, `init`, `write`, `delete`, `approve`,
-`thresholds set`, and `suspect-pages --network`.
+`stores add`, `set-search-backend`, `init`, `write`, `delete`, `approve-page-check`,
+`thresholds set`, and `find-suspect-pages --network`.
 
 ### The agent's commands
 
@@ -230,23 +230,23 @@ describes each one.
 
 | Command | What it does |
 |---|---|
-| `iirc pull QUERY` | Searches, then prints the full text of each matching page, as `read` does. |
-| `iirc write`, `iirc verify`, `iirc delete`, `iirc approve` | Write, confirm, remove, or approve the check of a page. |
-| `iirc audit [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
-| `iirc setup`, `iirc init`, `iirc migrate`, `iirc max-suggested N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
-| `iirc tune gather`, `judge`, `sweep`, `done` | The tune steps. `iirc tune sweep --replay FILE...` replays judged prompts through today's search and gate. |
+| `iirc read-matching-pages QUERY` | Searches, then prints the full text of each matching page, as `read` does. |
+| `iirc write`, `iirc verify`, `iirc delete`, `iirc approve-page-check` | Write, confirm, remove, or approve the check of a page. |
+| `iirc audit-page-findability [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
+| `iirc set-search-backend`, `iirc init`, `iirc migrate`, `iirc max-suggested-pages N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
+| `iirc tune-suggestions gather-suggestion-data`, `judge`, `sweep`, `done` | The tune steps. `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` replays judged prompts through today's search and gate. |
 | `iirc recall`, `iirc nudge` | Hook entries: `recall` names pages for a prompt or a failed command; `nudge --stop` asks for a page at the end of a turn, and the hooks module runs `nudge --compact` near compaction and `nudge --summary` as it runs. |
 
 ## Every setting
 
 | Setting | Where it lives | Default | Range or values | What it changes | When to turn it |
 |---|---|---|---|---|---|
-| `semantic` | `~/.config/dokidlc-iirc/config.toml`, this machine | `true` | `true`, `false` | Semantic and string search, or string search only. | Ask the agent to run `iirc setup` again; it writes the file. |
-| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Recall knobs per model](#recall-knobs-per-model); `url` for `openai` only | Which model embeds pages and queries, and where it runs. | `iirc setup` writes it. |
-| `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc setup --host URL`. |
-| `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested N`, when the row brings too much or too little. |
-| `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc setup`, which warns when this is exported. |
-| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune` proposes a value, and the agent sets it with `iirc thresholds set` on your yes. |
+| `semantic` | `~/.config/dokidlc-iirc/config.toml`, this machine | `true` | `true`, `false` | Semantic and string search, or string search only. | Ask the agent to run `iirc set-search-backend` again; it writes the file. |
+| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Recall knobs per model](#recall-knobs-per-model); `url` for `openai` only | Which model embeds pages and queries, and where it runs. | `iirc set-search-backend` writes it. |
+| `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc set-search-backend --host URL`. |
+| `max_suggested` | the same file | `3` | 1 to 10 | Pages one recall line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested-pages N`, when the row brings too much or too little. |
+| `OLLAMA_HOST` | the environment | unset | host or URL | Turns semantic search on whatever setup chose, and is the first host tried. A host that does not answer loses to one that does. | Rarely. Prefer `iirc set-search-backend`, which warns when this is exported. |
+| `[recall.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune-suggestions` proposes a value, and the agent sets it with `iirc thresholds set` on your yes. |
 | `[recall.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
@@ -255,7 +255,7 @@ describes each one.
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
 | the line under the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc status-line on` or `off`. |
-| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc suspect-pages --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
+| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc find-suspect-pages --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | the environment | `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` | paths | Where the machine config, the index, the remote clones, and the records live. | When your machine moves them. |
 
 Store tables, in `.claude/iirc.toml`, replace the implicit project store.
@@ -310,13 +310,13 @@ change. `iirc doctor --fix` moves flat `[recall]` knobs into
 `[recall.nomic-embed-text]`, the only model there was, and comments out
 each bad knob, with a note, so its default applies; a broken store table
 is yours to fix.
-Every other command except `setup`, `stats`, and `max-suggested` stops
+Every other command except `set-search-backend`, `stats`, and `max-suggested-pages` stops
 with the error.
 
 A bad `~/.config/dokidlc-iirc/config.toml` is ignored, and nothing says
 so. A file that does not parse reads as empty, and a `max_suggested`
-outside 1 to 10 reads as the default, 3. `iirc max-suggested 11` itself
-refuses with "max-suggested must be 1 to 10".
+outside 1 to 10 reads as the default, 3. `iirc max-suggested-pages 11` itself
+refuses with "max-suggested-pages must be 1 to 10".
 
 ## Getting good results over time
 
@@ -355,7 +355,7 @@ Plugin commits `699d710`, `a16668a`, and `fa1ed37` record what recall
 does. The
 cards and `/iirc stats` show it. Each number has a response:
 
-- TRUST is not zero on `/iirc status`: type `/iirc suspect-pages`, or ask the
+- TRUST is not zero on `/iirc status`: type `/iirc find-suspect-pages`, or ask the
   agent for a doubt pass.
 - A page under SUGGESTED, NOT READ keeps coming back: ask the agent to
   read the page once and decide whether to narrow it, split it, or delete
@@ -381,24 +381,24 @@ cards and `/iirc stats` show it. Each number has a response:
 
 ### Turn the knobs on evidence
 
-`/iirc max-suggested N` gives more or fewer pages per prompt. The line's
+`/iirc max-suggested-pages N` gives more or fewer pages per prompt. The line's
 byte cap grows with N, so each extra page allows up to 200 more bytes of
 context. Change the recall knobs only on evidence from the recorded
 sessions.
 
-Say "tune recall", or run `/iirc tune`. The agent follows
+Say "tune recall", or run `/iirc tune-suggestions`. The agent follows
 [the tune reference](../skills/iirc/references/tune.md): it gathers the
 recorded sessions, judges each suggestion against what the session
 needed, and sweeps the knobs over those judgements. You then see each
 proposal with its evidence: a page to narrow, split, or write, or a knob
 value with the counts before and after. The sweep ends with
-`iirc audit`, and for each flagged page the agent writes two prompts of
+`iirc audit-page-findability`, and for each flagged page the agent writes two prompts of
 its own and checks where the page ranks. Nothing changes until you say
 yes. A knob change edits this machine's model table in
 `.claude/iirc.toml`, which you commit.
 
 To measure a change to search or the gate before it lands, the agent
-runs `iirc tune sweep --replay FILE...` on replay files of judged
+runs `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` on replay files of judged
 prompts. It searches each prompt again with the current code and prints
 the same counts. [HOW-IT-WORKS.md](HOW-IT-WORKS.md#the-replays) has the
 file format and the session replay. Expect

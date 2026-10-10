@@ -13,22 +13,24 @@ computes suspicion, and records what recall did so it can be tuned.
 
 Usage:
   iirc search QUERY...       ranked pages; several terms are searched separately and merged
-  iirc pull QUERY            full text of matching pages
+  iirc read-matching-pages QUERY  full text of matching pages
   iirc read PAGE...          print pages
   iirc write PAGE [flags]    body on stdin; see write --help; --store NAME picks the store
   iirc delete PAGE
   iirc verify PAGE           record that the page was re-confirmed
-  iirc suspect-pages [--all] pages with evidence they may be wrong
-  iirc approve PAGE          run a page's check once and approve it on this machine
-  iirc index                 rebuild the search index
-  iirc topics                every topic with its page count
-  iirc token-cost            bytes and tokens of index.md and a search
+  iirc find-suspect-pages [--all]  pages with evidence they may be wrong
+  iirc approve-page-check PAGE  run a page's check once and approve it on this machine
+  iirc rebuild-search-index  rebuild the search index
+  iirc audit-page-findability [PAGE]  pages search shows badly, each with its fix
+  iirc show-page-topics      every topic with its page count
+  iirc estimate-context-tokens  bytes and tokens of index.md and a search
   iirc doctor [--fix|--brief] check or install prerequisites
   iirc stats [--days N]      how the pages are being used
-  iirc max-suggested [N]     pages recall suggests at most; N sets it on this machine
+  iirc max-suggested-pages [N]  pages recall suggests at most; N sets it on this machine
   iirc thresholds [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
-  iirc tune gather|judge|sweep|done  evidence and judgments for tuning recall, and a sweep of the knobs
-  iirc setup                 the embedding model and where it runs, or string search; once per machine
+  iirc tune-suggestions gather-suggestion-data|record-relevance-judgments|evaluate-suggestion-thresholds|mark-session-tuned
+                             evidence and judgments for tuning recall, and an evaluation of the knobs
+  iirc set-search-backend    the embedding model and where it runs, or string search; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
   iirc migrate               move a repository and this machine from the memory plugin's layout
   iirc sync                  commit, pull, and push every remote store
@@ -161,7 +163,7 @@ def write_config_file(values: dict) -> Path:
 
 
 def semantic_enabled() -> bool:
-    """Semantic search is the default. String search is a fallback chosen with `iirc setup --substring`."""
+    """Semantic search is the default. String search is a fallback chosen with `iirc set-search-backend --substring`."""
     if os.environ.get("OLLAMA_HOST"):
         return True
     return bool(read_config().get("semantic", True))
@@ -172,17 +174,17 @@ NO_EMBEDDING_HOST = "http://127.0.0.1:9"
 
 
 def host_candidates() -> list[tuple[str, str]]:
-    """(base url, source) in order of preference: OLLAMA_HOST, then iirc setup, then the local default.
+    """(base url, source) in order of preference: OLLAMA_HOST, then iirc set-search-backend, then the local default.
     An OpenAI-compatible backend has one candidate, the URL setup wrote."""
     if active_model().backend == "openai":
-        return [(openai_url(str(read_config()["embedding"].get("url") or "")), "iirc setup")]
+        return [(openai_url(str(read_config()["embedding"].get("url") or "")), "iirc set-search-backend")]
     out: list[tuple[str, str]] = []
     env = os.environ.get("OLLAMA_HOST")
     if env:
         out.append((normalize_host(env), "OLLAMA_HOST"))
     cfg = read_config().get("embedding_host")
     if cfg:
-        out.append((normalize_host(str(cfg)), "iirc setup"))
+        out.append((normalize_host(str(cfg)), "iirc set-search-backend"))
     out.append((normalize_host(None), "default"))
     seen: set[str] = set()
     return [c for c in out if not (c[0] in seen or seen.add(c[0]))]
@@ -203,7 +205,7 @@ def resolve_host() -> tuple[str, str, bool]:
         backend = active_model().backend
         if backend == "onnx":
             # no host: the model files on this machine are the backend
-            _RESOLVED = (CPU_HOST, "iirc setup", cpu_ready())
+            _RESOLVED = (CPU_HOST, "iirc set-search-backend", cpu_ready())
             return _RESOLVED
         cands = host_candidates()
         _RESOLVED = (cands[0][0], cands[0][1], False)
@@ -255,8 +257,8 @@ def search_mode() -> str:
     if answers:
         return f"semantic via {where}"
     if model.backend == "onnx":
-        return f"string only ({model.id} model files missing; `iirc setup --cpu` to fix)"
-    return f"string only ({where} does not answer; `iirc setup` to fix)"
+        return f"string only ({model.id} model files missing; `iirc set-search-backend --cpu` to fix)"
+    return f"string only ({where} does not answer; `iirc set-search-backend` to fix)"
 HOST_TIMEOUT = 2.0
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -966,10 +968,10 @@ def require_host() -> bool:
     if answers:
         return True
     if active_model().backend == "onnx":
-        print(f"iirc: the {active_model().id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc setup --cpu` to fetch them.", file=sys.stderr)
+        print(f"iirc: the {active_model().id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc set-search-backend --cpu` to fetch them.", file=sys.stderr)
         return False
     tried = ", ".join(f"{u} ({src})" for u, src in host_candidates())
-    print(f"iirc: no embedding host answers (tried {tried}); results are string matches only. Run `iirc setup` to choose a host, or `iirc setup --substring` if ollama cannot run here.", file=sys.stderr)
+    print(f"iirc: no embedding host answers (tried {tried}); results are string matches only. Run `iirc set-search-backend` to choose a host, or `iirc set-search-backend --substring` if ollama cannot run here.", file=sys.stderr)
     return False
 
 
@@ -1019,7 +1021,7 @@ def update_vectors(store: Store, limit: int | None = None, full: bool = False, d
             return iirc_embed.refresh(path, pages, embedding_backend(), limit=limit, full=full, dims=dims)
     except LockTimeout:
         if limit is None:
-            print(f"iirc: another index held the {store.name} vector store for {LOCK_WAIT:.0f} s; changed pages wait for the next search or `iirc index`", file=sys.stderr)
+            print(f"iirc: another index held the {store.name} vector store for {LOCK_WAIT:.0f} s; changed pages wait for the next search or `iirc rebuild-search-index`", file=sys.stderr)
         return iirc_embed.refresh(path, pages, embedding_backend(), limit=0, write=False, dims=dims)
 
 
@@ -1027,7 +1029,7 @@ INDEX_RETRY = 600   # seconds before a search starts another background index fo
 
 
 def index_in_background(store: Store) -> None:
-    """Pages a search could not embed (a new store, a pull, an update) get `iirc index` once, not on every prompt."""
+    """Pages a search could not embed (a new store, a pull, an update) get `iirc rebuild-search-index` once, not on every prompt."""
     marker = state_dir() / "locks" / f"index-started-{store.field}"
     try:
         if marker.exists() and time.time() - marker.stat().st_mtime < INDEX_RETRY:
@@ -1036,7 +1038,7 @@ def index_in_background(store: Store) -> None:
         marker.touch()
     except OSError:
         return
-    start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index", "--vectors"])
+    start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "rebuild-search-index", "--vectors-only"])
 
 
 def semantic_search(query: str) -> list[dict]:
@@ -1045,7 +1047,7 @@ def semantic_search(query: str) -> list[dict]:
     A page changed since the last index is embedded first when at most
     SEARCH_REEMBED changed: on a warm model the five largest agent-builder
     pages took about 0.2 s in one request (2026-10-09). More than that came
-    from a pull, and they stay out until `iirc index`, so a recall never
+    from a pull, and they stay out until `iirc rebuild-search-index`, so a recall never
     spends the hook's 5 s limit on a batch of pages.
     """
     if not require_host():
@@ -1171,7 +1173,7 @@ def row_current(r: dict) -> bool:
 
 
 RECALL_MIN_PROMPT = 40
-MAX_SUGGESTED = 3            # pages a recall line suggests at most; `iirc max-suggested N` changes it per machine
+MAX_SUGGESTED = 3            # pages a recall line suggests at most; `iirc max-suggested-pages N` changes it per machine
 RARE_SHARE = 0.10            # a term in at most this share of pages (and at least two) is rare
 # plain English that is rare in a small store still names nothing; one word per line, # starts a comment
 COMMON_WORDS = frozenset(w for w in (Path(__file__).resolve().parent / "iirc_words.txt").read_text().split("\n") if w and not w.startswith("#"))
@@ -1258,13 +1260,13 @@ def knobs_set(name: str, value: float) -> None:
     print(f"{name} = {value:g} in [{table_header(table)}] of {path}; commit it, it is the repository's config")
 
 
-def cmd_max_suggested(args: argparse.Namespace) -> None:
+def cmd_max_suggested_pages(args: argparse.Namespace) -> None:
     if args.n is None:
         n = max_suggested()
-        print(f"recall suggests up to {n} page{'s' if n != 1 else ''}; `iirc max-suggested N` changes it (1 to 10)")
+        print(f"recall suggests up to {n} page{'s' if n != 1 else ''}; `iirc max-suggested-pages N` changes it (1 to 10)")
         return
     if not 1 <= args.n <= 10:
-        die("max-suggested must be 1 to 10")
+        die("max-suggested-pages must be 1 to 10")
     path = write_config_file({**read_config(), "max_suggested": args.n})
     print(f"recall suggests up to {args.n} page{'s' if args.n != 1 else ''}; written to {path}")
 
@@ -1318,7 +1320,7 @@ def recent_named(session: str, agent: str | None = None) -> set[str]:
 def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None, source: str = "prompt",
                     repeats: bool = False) -> list[dict]:
     """Every candidate, with its verdict: passed, over_max, repeat, or why the gate refused it.
-    `knobs` and `cap` default to RECALL and max_suggested(); `tune sweep --replay` passes others.
+    `knobs` and `cap` default to RECALL and max_suggested(); `tune-suggestions evaluate-suggestion-thresholds --replay-prompts` passes others.
     With `repeats`, a page in recent_named() is left out as `repeat` and its slot goes to the next candidate:
     the hook passes it, the replay sweep does not, since its prompts have no session.
     A failure recall passes one page whatever the cap: one error, one page to read.
@@ -1350,7 +1352,7 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
 def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict[str, float], source: str = "prompt",
          semantic: bool = True) -> tuple[str | None, str | None]:
     """(rule, None) when the gate lets a candidate through under these knobs, else (None, why it refused).
-    `iirc tune sweep` calls it with other knobs, so the sweep and the hook share one gate.
+    `iirc tune-suggestions evaluate-suggestion-thresholds` calls it with other knobs, so the sweep and the hook share one gate.
     `source` is the recall's, "prompt" or "failure"; a failure passes only meaning+term while `semantic` search is on.
     The evidence for that rule (25 failure pairs, none relevant) came from semantic search; string-only installs keep the term rule."""
     d = distance if isinstance(distance, (int, float)) else None
@@ -1609,7 +1611,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(json.dumps(results, indent=2))
         return
     if not results:
-        print("no matching pages" + ("" if semantic_enabled() else " (string search only; try the terms a page would contain, or `iirc setup --local` or `--host URL` for semantic search)"))
+        print("no matching pages" + ("" if semantic_enabled() else " (string search only; try the terms a page would contain, or `iirc set-search-backend --local` or `--host URL` for semantic search)"))
         return
     for r in results:
         print(result_line(r))
@@ -1682,7 +1684,7 @@ def read_pages(pages: list[tuple[Store, str]]) -> subprocess.CompletedProcess[st
     return failed
 
 
-def cmd_pull(args: argparse.Namespace) -> None:
+def cmd_read_matching_pages(args: argparse.Namespace) -> None:
     require_stores()
     results = hybrid_search(args.query)
     log_event("pull", query=args.query[:120], hits=len(results), pages=[page_label(row_store(r), r["filename"]) for r in results])
@@ -1932,7 +1934,7 @@ def stamp_index(field: Path | None = None) -> None:
 
     It once carried a generated topic list, a commit, and a date, rewritten on
     every write: in agent-builder 96 of 149 store commits touched it, and two
-    writers conflicted on it every time. Topics now come from `iirc topics`.
+    writers conflicted on it every time. Topics now come from `iirc show-page-topics`.
     The file is written only when this changes it.
     """
     field = field or project_dir()
@@ -1955,7 +1957,7 @@ def topic_counts() -> list[tuple[str, int]]:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
-def cmd_topics(args: argparse.Namespace) -> None:
+def cmd_show_page_topics(args: argparse.Namespace) -> None:
     require_stores()
     rows = topic_counts()
     if not rows:
@@ -1973,7 +1975,7 @@ CHECK_TIMEOUT = 10
 def url_status(url: str, timeout: float = URL_TIMEOUT) -> tuple[str, str] | None:
     """('ref', reason) when the source is gone, ('url', reason) when it cannot be reached, None when it answers.
 
-    Network access. Only `suspect-pages --network` calls this, and only with the creator's permission.
+    Network access. Only `find-suspect-pages --network` calls this, and only with the creator's permission.
     """
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "dokidlc-iirc doubt"})
     try:
@@ -2226,7 +2228,7 @@ def suspicion(fm: dict, root: Path | None = None, run_checks: bool = False, now:
             if reason:
                 found.append(("check", reason))
         else:
-            found.append(("unapproved", f"check not approved on this machine: `{fm['check']}` (iirc approve PAGE runs it once and approves it)"))
+            found.append(("unapproved", f"check not approved on this machine: `{fm['check']}` (iirc approve-page-check PAGE runs it once and approves it)"))
     hint = age_hint(fm, now)
     if hint:
         found.append(("age", hint))
@@ -2276,7 +2278,7 @@ def page_frontmatter(name: str, store: Store | None = None) -> dict:
     return fm
 
 
-def cmd_suspect_pages(args: argparse.Namespace) -> None:
+def cmd_find_suspect_pages(args: argparse.Namespace) -> None:
     """Pages with evidence they may be wrong, strongest signal first."""
     require_stores()
     if args.network:
@@ -2302,7 +2304,7 @@ def cmd_suspect_pages(args: argparse.Namespace) -> None:
                 rows.append((page_label(store.name, page.name), fm.get("summary", ""), signals))
     log_event("doubt", suspects=sum(1 for r in rows if r[2]), network=bool(args.network))
     if unchecked_urls:
-        print(f"iirc: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `iirc suspect-pages --network` contacts them; ask the creator first.", file=sys.stderr)
+        print(f"iirc: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `iirc find-suspect-pages --network` contacts them; ask the creator first.", file=sys.stderr)
     rows.sort(key=lambda r: (RANK[r[2][0][0]] if r[2] else 99, r[0]))
     if elsewhere:
         print(f"iirc: {len(elsewhere)} page{'s' if len(elsewhere) != 1 else ''} of other projects not checked here" + (": " + ", ".join(elsewhere) if args.all else ""), file=sys.stderr)
@@ -2389,7 +2391,7 @@ def cmd_write(args: argparse.Namespace) -> None:
     save(store, f"iirc: write {args.page}")
 
 
-def cmd_approve(args: argparse.Namespace) -> None:
+def cmd_approve_page_check(args: argparse.Namespace) -> None:
     """Run a page's check once, show the result, and approve it on this machine. Ask the creator first."""
     require_stores()
     store, name = resolve_page(args.page)
@@ -2419,7 +2421,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
         if UNSAFE_CHECK_RE.search(cmd):
             die("refused: this page's check is not read-only in form; rewrite the page")
         if not check_approved(cmd):
-            die(f"this page's check is not approved on this machine. Show it to the creator and, on yes, run `iirc approve {args.page}`; then verify.")
+            die(f"this page's check is not approved on this machine. Show it to the creator and, on yes, run `iirc approve-page-check {args.page}`; then verify.")
         reason = run_check(cmd)
         if reason:
             die(f"cannot verify: {reason}. Fix the page or its check first.")
@@ -2464,9 +2466,9 @@ def cmd_delete(args: argparse.Namespace) -> None:
     save(store, f"iirc: delete {name}")
 
 
-def cmd_index(args: argparse.Namespace) -> None:
+def cmd_rebuild_search_index(args: argparse.Namespace) -> None:
     require_stores()
-    if args.vectors:
+    if args.vectors_only:
         # started by a hook: a commit here would take whatever is loose in a store, and push a remote one
         reindex(full=True)
         return
@@ -2498,7 +2500,7 @@ def tokens(nbytes: int) -> int:
     return (nbytes + 3) // 4
 
 
-def cmd_token_cost(args: argparse.Namespace) -> None:
+def cmd_estimate_context_tokens(args: argparse.Namespace) -> None:
     require_stores()
     rows = []
     n = sum(len((s.dir / "index.md").read_bytes()) for s in live_stores() if (s.dir / "index.md").is_file())
@@ -2575,7 +2577,8 @@ def cmd_init(args: argparse.Namespace) -> None:
 
 OLD_VERBS = "search|pull|read|write|delete|verify|doubt|approve|index|cost|doctor|setup|init|sync|stores|stats|recall|nudge"
 OLD_COMMAND_RE = re.compile(r"`memory (" + OLD_VERBS + r")\b")
-RENAMED_VERBS = {"doubt": "suspect-pages", "cost": "token-cost"}   # the memory plugin's names that iirc changed
+RENAMED_VERBS = {"pull": "read-matching-pages", "doubt": "find-suspect-pages", "approve": "approve-page-check", "index": "rebuild-search-index",
+                 "cost": "estimate-context-tokens", "setup": "set-search-backend"}   # the memory plugin's names that iirc changed
 OLD_SECTION_RE = re.compile(r"## Memory <!-- memory -->\n.*?(?=\n## |\Z)", re.S)
 SUGGESTED_COMMIT = 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
 
@@ -2642,7 +2645,7 @@ def cmd_migrate(args: argparse.Namespace) -> None:
             try:
                 reindex()
             except SystemExit:
-                done.append("the search index was not rebuilt; run iirc index")
+                done.append("the search index was not rebuilt; run iirc rebuild-search-index")
         staged.append(str(store.dir.relative_to(ROOT)))
     notes = []
     local = ROOT / ".claude" / "settings.local.json"
@@ -2764,7 +2767,7 @@ def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]
     return "ollama", host, models[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(models) else models[0]
 
 
-def cmd_setup(args: argparse.Namespace) -> None:
+def cmd_set_search_backend(args: argparse.Namespace) -> None:
     """Choose how search runs on this machine: an ollama model, an OpenAI-compatible host, this CPU, or substring."""
     backend, host, model = setup_choice(args)
     if model and iirc_embed.MODELS.get(model, iirc_embed.MODELS["all-minilm-l6-v2"]).backend != backend:
@@ -2773,14 +2776,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
     values = {**read_config(), "semantic": backend != "substring"}   # keep keys setup does not ask about
     if backend == "substring":
         path = write_config_file(values)
-        print(f"string search (fallback); written to {path}. `iirc setup` switches to semantic search.")
+        print(f"string search (fallback); written to {path}. `iirc set-search-backend` switches to semantic search.")
         return
     if backend == "onnx":
         fetch_minilm()
         ok, out = cpu_check()
         if not ok:
             die(f"bin/iirc-cpu could not run the model, so nothing was written to the setup file: {out[-500:]}\n"
-                "onnxruntime may have no wheel for this machine; `iirc setup --substring` is the fallback.")
+                "onnxruntime may have no wheel for this machine; `iirc set-search-backend --substring` is the fallback.")
     embedding = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
     values["embedding"] = embedding
     if backend == "ollama":
@@ -2790,7 +2793,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
     _RESOLVED = None
     where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
     print(f"semantic search with {model} through {where}; written to {path}")
-    print("Each repository's pages are embedded with this model on its next `iirc index`, or by the first search that finds them missing.")
+    print("Each repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
     if backend == "onnx":
         return
     if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
@@ -3107,7 +3110,7 @@ def pull_at_session_start() -> list[str]:
             notes.append(f"Store {store.name} was not pulled ({reason}); run iirc sync.")
         arrived += n
     if arrived:
-        start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index", "--vectors"])
+        start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "rebuild-search-index", "--vectors-only"])
         notes.append(f"Pulled {arrived} page{'s' if arrived != 1 else ''} from remote stores; reindexing in the background.")
     return notes
 
@@ -3372,7 +3375,7 @@ def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     if local:
         fix = "brew install ollama && brew services start ollama" if platform.system() == "Darwin" else "curl -fsSL https://ollama.com/install.sh | sh"
     else:
-        fix = "start ollama on that host, run `iirc setup` to choose another, or `iirc setup --substring` if ollama cannot run here"
+        fix = "start ollama on that host, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring` if ollama cannot run here"
     report(f"embedding host {base} answers (from {source})", up, fix)
     has_model = up and model_present(base, model.id)
     if up and not has_model and fix_it and shutil.which("ollama"):
@@ -3408,7 +3411,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             emit(MIGRATION_LINE)
             return
         if not config_file().is_file():
-            emit("iirc: not set up on this machine. Ask the creator where embeddings should come from: ollama on this machine (`--local`) or on a remote host (`--host URL`), an OpenAI-compatible host (`--openai URL`), this CPU (`--cpu`, no ollama needed), or none (`--substring`, string search only); then run `iirc setup` with that flag, `iirc init` if this repository has no .iirc/, and `iirc doctor --fix`.")
+            emit("iirc: not set up on this machine. Ask the creator where embeddings should come from: ollama on this machine (`--local`) or on a remote host (`--host URL`), an OpenAI-compatible host (`--openai URL`), this CPU (`--cpu`, no ollama needed), or none (`--substring`, string search only); then run `iirc set-search-backend` with that flag, `iirc init` if this repository has no .iirc/, and `iirc doctor --fix`.")
             return
         if not live_stores():
             if project_store() is None:
@@ -3498,7 +3501,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     report(f"{STORE_CONFIG} loads, so the hooks run", True)
     timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
     report(f"recall finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
-           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc setup")
+           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend")
 
     if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
         sys.exit(1)
@@ -3513,9 +3516,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     model = active_model()
     up = False   # embeddings work, so --fix can reindex
     if not semantic_enabled():
-        report("search mode: string, the fallback (iirc setup --local or --host URL switches to semantic)", True)
+        report("search mode: string, the fallback (iirc set-search-backend --local or --host URL switches to semantic)", True)
     elif model.backend == "onnx":
-        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc setup --cpu")
+        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
     elif model.backend == "openai":
         base, source, up = resolve_host()
         status = host_status(base)
@@ -3523,7 +3526,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         # the host's width, not the table's: it may serve another size of the model under this name
         up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
                     up and why is None,
-                    (f"{why}; " if why else "") + "check the endpoint, run `iirc setup` to choose another, or `iirc setup --substring`")
+                    (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
     else:
         up = doctor_ollama(model, args.fix, report)
 
@@ -3545,14 +3548,14 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if store.kind == "project" and store.dir.name != ".iirc":
             print(f"note store {store.name} at {store.dir.relative_to(ROOT)} is outside the guard, which covers .iirc/ and remote stores")
         n = uncommitted(store)
-        report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "iirc index commits them")
+        report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "iirc rebuild-search-index commits them")
 
     if semantic_enabled():
         for d, first, second in flagged_pairs():
             what = "near-duplicate pages" if d <= active_model().near[1] else "similar pages, below the warning"
             print(f"note {what} (distance {d:.3f}): {first} | {second}")
         if live_stores() and not index_rows():
-            print("note no index to compare pages with (iirc index builds it)")
+            print("note no index to compare pages with (iirc rebuild-search-index builds it)")
 
     claude_md = ROOT / "CLAUDE.md"
     report("CLAUDE.md has the iirc paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "iirc init")
@@ -3565,7 +3568,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if args.fix and up:
             reindex()
     idx = cache_dir() / "dokidlc-iirc" / "vectors"
-    print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc index`)")
+    print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc rebuild-search-index`)")
     if not ok and not args.fix:
         print(FIX_HINT)
 
@@ -3906,7 +3909,7 @@ def recall_evidence(i: int, rows: list[dict], turns: list[int], tx: dict | None,
 
 
 def tuning_window(rows: list[dict]) -> tuple[float, float] | None:
-    """From the session's first `tune gather` row to its last `tune judge` row: its recalls there are about tuning."""
+    """From the session's first gather-suggestion-data row to its last record-relevance-judgments row: its recalls there are about tuning."""
     gathers = [t for r in rows if r["cmd"] == "tune_gather" and (t := parse_ts(r["ts"])) is not None]
     judges = [t for r in rows if r["cmd"] == "tune_judge" and (t := parse_ts(r["ts"])) is not None]
     return (min(gathers), max(judges)) if gathers and judges and max(judges) >= min(gathers) else None
@@ -3962,7 +3965,7 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
                   and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
                   and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
     if not chosen:
-        print("iirc tune: no session to gather; each one with recalls is tuned already, or its transcript and prompts are gone")
+        print("iirc tune-suggestions gather-suggestion-data: no session to gather; each one with recalls is tuned already, or its transcript and prompts are gone")
         return
     evals = eval_rows()
     tune_dir().mkdir(parents=True, exist_ok=True)
@@ -4020,7 +4023,7 @@ def cmd_tune_judge(args: argparse.Namespace) -> None:
         if isinstance(session, str) and session and isinstance(key, str) and key:
             ev = read_evidence(session)
             if ev is None:
-                bad.append(f"no evidence for session {session}; run `iirc tune gather --session {session}` first")
+                bad.append(f"no evidence for session {session}; run `iirc tune-suggestions gather-suggestion-data --session {session}` first")
             else:
                 rec = next((r for r in ev["recalls"] if r["key"] == key), None)
                 if rec is None:
@@ -4032,9 +4035,9 @@ def cmd_tune_judge(args: argparse.Namespace) -> None:
             continue
         rows.append({"ts": now_iso(), "repo": str(ROOT), "session": session, "recall": key, "page": base(page), "label": label, "note": clean(note, 500)})
     if errors:
-        die("tune judge: nothing recorded\n" + "\n".join(errors))
+        die("record-relevance-judgments: nothing recorded\n" + "\n".join(errors))
     if not rows:
-        die("tune judge: no judgments on stdin; one JSON object per line")
+        die("record-relevance-judgments: no judgments on stdin; one JSON object per line")
     tune_dir().mkdir(parents=True, exist_ok=True)
     path = tune_dir() / "judgments.jsonl"
     with path.open("a") as f:
@@ -4163,8 +4166,8 @@ def sweep_report(n: int, count) -> None:
 
 
 def cmd_tune_sweep(args: argparse.Namespace) -> None:
-    if args.replay:
-        cmd_tune_sweep_replay(args.replay)
+    if args.replay_prompts:
+        cmd_tune_sweep_replay(args.replay_prompts)
     else:
         cmd_tune_sweep_judged()
     # the knobs cannot fix a page that search shows badly; references/tune.md has the step for these
@@ -4207,11 +4210,12 @@ def cmd_tune_done(args: argparse.Namespace) -> None:
         die(f"no log rows for session {args.session} in {ROOT}")
     # the target goes in its own field; the row's session stays the one that tuned, so stats never count the old session again
     log_event("tuned", tuned=args.session)
-    print(f"session {args.session} is tuned; `iirc tune gather` skips it from now on")
+    print(f"session {args.session} is tuned; `iirc tune-suggestions gather-suggestion-data` skips it from now on")
 
 
-def cmd_tune(args: argparse.Namespace) -> None:
-    {"gather": cmd_tune_gather, "judge": cmd_tune_judge, "sweep": cmd_tune_sweep, "done": cmd_tune_done}[args.tune_cmd](args)
+def cmd_tune_suggestions(args: argparse.Namespace) -> None:
+    {"gather-suggestion-data": cmd_tune_gather, "record-relevance-judgments": cmd_tune_judge,
+     "evaluate-suggestion-thresholds": cmd_tune_sweep, "mark-session-tuned": cmd_tune_done}[args.tune_cmd](args)
 
 
 # --- audit ------------------------------------------------------------------
@@ -4305,7 +4309,7 @@ def audit_pages(ref: str | None = None) -> list[tuple[Store, Path]]:
     return [(store, store.dir / name)]
 
 
-def cmd_audit(args: argparse.Namespace) -> None:
+def cmd_audit_page_findability(args: argparse.Namespace) -> None:
     """Pages that search shows badly or that carry what they should not. Prints findings; writes nothing; exits 0."""
     require_stores()
     pages = audit_pages(args.page)
@@ -4328,13 +4332,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_search)
 
-    p = sub.add_parser("pull", help="full text of matching pages")
+    p = sub.add_parser("read-matching-pages", help="full text of matching pages")
     p.add_argument("query")
-    p.set_defaults(func=cmd_pull)
+    p.set_defaults(func=cmd_read_matching_pages)
 
     p = sub.add_parser("read", help="print pages")
     p.add_argument("pages", nargs="+")
-    p.add_argument("--for-tune", action="store_true", help="a read to judge a page for `iirc tune`; logged apart from the session's reads")
+    p.add_argument("--for-tune", action="store_true", help="a read to judge a page for `iirc tune-suggestions`; logged apart from the session's reads")
     p.set_defaults(func=cmd_read)
 
     p = sub.add_parser("show", help="one page as JSON, for the person's reader; not counted as the agent's read")
@@ -4358,9 +4362,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--store", help="the store to write to; default: write in .claude/iirc.toml, else the project store")
     p.set_defaults(func=cmd_write)
 
-    p = sub.add_parser("approve", help="run a page's check once and approve it on this machine (ask the creator first)")
+    p = sub.add_parser("approve-page-check", help="run a page's check once and approve it on this machine (ask the creator first)")
     p.add_argument("page")
-    p.set_defaults(func=cmd_approve)
+    p.set_defaults(func=cmd_approve_page_check)
 
     p = sub.add_parser("verify", help="record that a page was re-confirmed just now")
     p.add_argument("page")
@@ -4370,23 +4374,23 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("page")
     p.set_defaults(func=cmd_delete)
 
-    p = sub.add_parser("suspect-pages", help="pages with evidence they may be wrong, strongest first; runs check commands")
+    p = sub.add_parser("find-suspect-pages", help="pages with evidence they may be wrong, strongest first; runs check commands")
     p.add_argument("--all", action="store_true", help="list clean pages too")
     p.add_argument("--network", action="store_true", help="also contact every URL in refs; needs the creator's permission")
-    p.set_defaults(func=cmd_suspect_pages)
+    p.set_defaults(func=cmd_find_suspect_pages)
 
-    p = sub.add_parser("audit", help="pages search shows badly: title and summary shape, secrets, own title, hubs, superseded text")
+    p = sub.add_parser("audit-page-findability", help="pages search shows badly: title and summary shape, secrets, own title, hubs, superseded text")
     p.add_argument("page", nargs="?", help="one page; default: every page")
     p.add_argument("--json", action="store_true")
-    p.set_defaults(func=cmd_audit)
+    p.set_defaults(func=cmd_audit_page_findability)
 
-    p = sub.add_parser("index", help="full reindex")
-    p.add_argument("--vectors", action="store_true", help=argparse.SUPPRESS)   # the vector cache only: no index.md stamp, no commit
-    p.set_defaults(func=cmd_index)
+    p = sub.add_parser("rebuild-search-index", help="full reindex")
+    p.add_argument("--vectors-only", action="store_true", help=argparse.SUPPRESS)   # the vector cache only: no index.md stamp, no commit
+    p.set_defaults(func=cmd_rebuild_search_index)
 
-    p = sub.add_parser("token-cost", help="bytes and tokens of index.md and a search")
+    p = sub.add_parser("estimate-context-tokens", help="bytes and tokens of index.md and a search")
     p.add_argument("--query", default="how to install and configure tools")
-    p.set_defaults(func=cmd_token_cost)
+    p.set_defaults(func=cmd_estimate_context_tokens)
 
     p = sub.add_parser("thresholds", help="the recall gate's distances in .claude/iirc.toml, with their ranges; `thresholds set NAME VALUE` changes one")
     p.add_argument("action", nargs="?", choices=["set"])
@@ -4394,17 +4398,17 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("value", nargs="?", type=float)
     p.set_defaults(func=cmd_thresholds)
 
-    p = sub.add_parser("tune", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
+    p = sub.add_parser("tune-suggestions", help="evidence for judging recall, the judgments, and a sweep of the gate's knobs")
     tsub = p.add_subparsers(dest="tune_cmd", required=True)
-    t = tsub.add_parser("gather", help="write one evidence file per session under the state dir; no model calls")
+    t = tsub.add_parser("gather-suggestion-data", help="write one evidence file per session under the state dir; no model calls")
     t.add_argument("--session", metavar="ID", help="this session only, even when it is tuned already")
     t.add_argument("--days", type=int, metavar="N", help="only sessions with a recall in the last N days")
-    t = tsub.add_parser("judge", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
-    t = tsub.add_parser("sweep", help="the gate's counts on the judged pairs for the current knobs and a grid of others")
-    t.add_argument("--replay", nargs="+", metavar="FILE", help="replay JSONL: run each judged prompt through the current search and gate")
-    t = tsub.add_parser("done", help="mark a session tuned, so gather skips it")
+    t = tsub.add_parser("record-relevance-judgments", help="append judgments, one JSON object per line on stdin: session, recall_id or ts, page, label, note")
+    t = tsub.add_parser("evaluate-suggestion-thresholds", help="the gate's counts on the judged pairs for the current knobs and a grid of others")
+    t.add_argument("--replay-prompts", nargs="+", metavar="FILE", help="replay JSONL: run each judged prompt through the current search and gate")
+    t = tsub.add_parser("mark-session-tuned", help="mark a session tuned, so gather-suggestion-data skips it")
     t.add_argument("session", metavar="SESSION")
-    p.set_defaults(func=cmd_tune)
+    p.set_defaults(func=cmd_tune_suggestions)
 
     p = sub.add_parser("doctor", help="check prerequisites; --fix installs them")
     p.add_argument("--fix", action="store_true")
@@ -4413,7 +4417,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
     p.set_defaults(func=cmd_doctor)
 
-    p = sub.add_parser("setup", help="the embedding model and where it runs, or substring search; prompts if no flags")
+    p = sub.add_parser("set-search-backend", help="the embedding model and where it runs, or substring search; prompts if no flags")
     p.add_argument("--substring", action="store_true", help="string search: exact text only; the fallback where no embedding model can run")
     p.add_argument("--semantic", action="store_true", help="semantic search through ollama, the default; needs --local or --host")
     p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine")
@@ -4422,14 +4426,14 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
     p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
                    help="the model for --local, --host, or --openai; ollama defaults to qwen3-embedding:0.6b, --openai to qwen3-embedding")
-    p.set_defaults(func=cmd_setup)
+    p.set_defaults(func=cmd_set_search_backend)
 
-    p = sub.add_parser("topics", help="every topic with its page count, computed from the pages")
-    p.set_defaults(func=cmd_topics)
+    p = sub.add_parser("show-page-topics", help="every topic with its page count, computed from the pages")
+    p.set_defaults(func=cmd_show_page_topics)
 
-    p = sub.add_parser("max-suggested", help="how many pages a recall line suggests at most, on this machine")
+    p = sub.add_parser("max-suggested-pages", help="how many pages a recall line suggests at most, on this machine")
     p.add_argument("n", nargs="?", type=int, metavar="N", help="1 to 10; without N, print the current number")
-    p.set_defaults(func=cmd_max_suggested)
+    p.set_defaults(func=cmd_max_suggested_pages)
 
     p = sub.add_parser("init", help="create .iirc/ and the CLAUDE.md paragraph")
     p.set_defaults(func=cmd_init)
@@ -4470,9 +4474,9 @@ def main(argv: list[str] | None = None) -> None:
     if CONFIG_ERROR:
         if args.command in ("recall", "nudge"):
             return   # hooks fail open; the session-start brief says why they are quiet
-        if args.command not in ("setup", "stats", "max-suggested", "doctor"):
+        if args.command not in ("set-search-backend", "stats", "max-suggested-pages", "doctor"):
             die(CONFIG_ERROR)
-    if args.command not in ("doctor", "init", "setup", "recall", "nudge", "stats", "migrate", "max-suggested"):
+    if args.command not in ("doctor", "init", "set-search-backend", "recall", "nudge", "stats", "migrate", "max-suggested-pages"):
         check_format()
     args.func(args)
 

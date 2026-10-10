@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6", "numpy>=2"]
 # ///
-"""Build the replay files that `iirc tune sweep --replay` reads, from a quest's judged labels.
+"""Build the replay files that `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts` reads, from a quest's judged labels.
 
 Usage: replay-files.py DATA_DIR
        replay-files.py --pool MODEL... --replay SET=FILE...
@@ -155,7 +155,7 @@ def model_machine(model_id: str, tmp: Path):
     for k in POOL_ENV:
         os.environ[k] = str(base / k.lower())
     real_background = iirc.index_in_background
-    # a search that finds pages missing starts `iirc index`, which stamps and commits the repository's index
+    # a search that finds pages missing starts `iirc rebuild-search-index`, which stamps and commits the repository's index
     iirc.index_in_background = lambda store: None
     try:
         iirc.write_config_file({"semantic": True, "embedding": {"backend": model.backend, "model": model_id}})

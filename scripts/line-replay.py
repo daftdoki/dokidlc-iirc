@@ -25,7 +25,7 @@ same file under "QID followup".
 Each run: XDG_STATE_HOME is a temporary directory, so its log rows never reach
 the real log; IIRC_RECORDING=1; the iirc plugin is disabled through --settings,
 so its own recall hook stays silent; this checkout's bin/ is first on PATH, so
-`iirc read` still runs. The model may run only `iirc read`, `iirc pull`, and
+`iirc read` still runs. The model may run only `iirc read`, `iirc read-matching-pages`, and
 `iirc search` in Bash, plus Read, Grep, and Glob: the prompts are real tasks and
 the run's cwd is a real checkout.
 
@@ -61,7 +61,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parents[1]
 DISABLE = {"iirc@iirc-dev": False, "iirc@dokidlc": False}
 TOOLS = "Bash,Read,Grep,Glob"
-ALLOWED = ["Bash(iirc read:*)", "Bash(iirc pull:*)", "Bash(iirc search:*)"]
+ALLOWED = ["Bash(iirc read:*)", "Bash(iirc read-matching-pages:*)", "Bash(iirc search:*)"]
 SEPARATORS_RE = re.compile(r"&&|\|\||[;|\n]")
 
 _IIRC = None
@@ -226,7 +226,7 @@ def page_name(arg: str) -> str:
 
 
 def iirc_calls(command: str) -> list[tuple[str, list[str]]]:
-    """(verb, args) for each `iirc read` or `iirc pull` in a shell command, chained ones included."""
+    """(verb, args) for each `iirc read` or `iirc read-matching-pages` in a shell command, chained ones included."""
     out = []
     for part in SEPARATORS_RE.split(command):
         try:
@@ -234,7 +234,7 @@ def iirc_calls(command: str) -> list[tuple[str, list[str]]]:
         except ValueError:
             toks = part.split()
         for i, t in enumerate(toks[:-1]):
-            if t.rsplit("/", 1)[-1] == "iirc" and toks[i + 1] in ("read", "pull"):
+            if t.rsplit("/", 1)[-1] == "iirc" and toks[i + 1] in ("read", "read-matching-pages"):
                 out.append((toks[i + 1], [a for a in toks[i + 2:] if not a.startswith("-")]))
                 break
     return out
@@ -247,7 +247,7 @@ def count_reads(stream: str, labels: dict[str, str]) -> dict:
     counts = {"relevant": 0, "noise": 0, "other": 0, "pulls": 0, "pages": {}}
     for command in bash_commands(stream):
         for verb, args in iirc_calls(command):
-            if verb == "pull":
+            if verb == "read-matching-pages":
                 name = page_name(" ".join(args)) if args else ""
                 pages = [name] if name in labels else []
                 counts["pulls"] += not pages

@@ -92,14 +92,14 @@ test('parses the recovery nudge and the brief', () => {
     status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: 'iirc doctor' },
     warnings: ['1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.'],
   })
-  const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc setup` with their answer.')!.status
+  const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc set-search-backend` with their answer.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc setup')
-  const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc setup` to fix). Topics: x 5.')!
-  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc setup' })
+  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc set-search-backend')
+  const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc set-search-backend` to fix). Topics: x 5.')!
+  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc set-search-backend' })
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc suspect-pages')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc find-suspect-pages')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
@@ -273,14 +273,14 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
-  expect(helpText).toContain('status-line on · max-suggested 4')
-  expect(helpText).toContain('/iirc max-suggested N')
-  for (const cmd of ['tune', 'audit', 'setup', 'token-cost', 'suspect-pages', 'unfold-suggestions', 'thresholds']) expect(helpText).toContain(`/iirc ${cmd} `)
-  expect(helpText).toContain('status-line on · max-suggested 4 · search semantic+keyword')
+  expect(helpText).toContain('status-line on · max-suggested-pages 4')
+  expect(helpText).toContain('/iirc max-suggested-pages N')
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'thresholds']) expect(helpText).toContain(`/iirc ${cmd} `)
+  expect(helpText).toContain('status-line on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
-  expect(helpText).toMatch(/\/iirc tune .*then audit/)
+  expect(helpText).toMatch(/\/iirc tune-suggestions .*then audit/)
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
-  expect((helpText ?? '').indexOf('/iirc setup')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
+  expect((helpText ?? '').indexOf('/iirc set-search-backend')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({
       plugin: 'iirc',
@@ -362,21 +362,21 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
     plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'help',
     props: { command: 'iirc', args: 'help', text: 'x', isErrored: false },
   })
-  expect(await help.find({ text: '/iirc max-suggested N' })).toBeDefined()
+  expect(await help.find({ text: '/iirc max-suggested-pages N' })).toBeDefined()
   // tune and audit are maintenance; setup is a setting, shown with the search mode in force
   expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
-  for (const cmd of ['tune', 'audit', 'setup', 'token-cost', 'suspect-pages', 'unfold-suggestions', 'thresholds', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggestions', 'thresholds', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
   expect(await help.find({ text: 'search' })).toBeDefined()
 })
 
-test('/iirc max-suggested N asks the CLI to keep the number', async ($: Engine, on: On) => {
+test('/iirc max-suggested-pages N asks the CLI to keep the number', async ($: Engine, on: On) => {
   engine(on)
   const argv: string[][] = []
   on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 0, stdout: 'recall suggests up to 5 pages\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  expect((await $.command.run({ command: 'iirc:iirc', args: 'max-suggested 5' })).text).toBe('recall suggests up to 5 pages')
-  expect(argv[0].slice(1)).toEqual(['max-suggested', '5'])
-  await $.command.run({ command: 'iirc', args: 'max-suggested' })
-  expect(argv[1].slice(1)).toEqual(['max-suggested'])
+  expect((await $.command.run({ command: 'iirc:iirc', args: 'max-suggested-pages 5' })).text).toBe('recall suggests up to 5 pages')
+  expect(argv[0].slice(1)).toEqual(['max-suggested-pages', '5'])
+  await $.command.run({ command: 'iirc', args: 'max-suggested-pages' })
+  expect(argv[1].slice(1)).toEqual(['max-suggested-pages'])
 })
 
 test('ui = false in iirc.toml draws nothing', async ($: Engine, on: On) => {
@@ -440,7 +440,7 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   await clock.settle()
   await hookRow($, 'SessionStart', BRIEF, 'h9')
   const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
-  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc suspect-pages')
+  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc find-suspect-pages')
   expect(text).toContain('stores: shared 5 pages, 2 not pushed; fix with iirc sync')
   expect(text).toContain('suggested, not read: noisy.md ×4')
   expect(text).toContain('average match: 62% · read 75% · not read 49%')

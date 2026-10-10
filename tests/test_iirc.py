@@ -195,7 +195,7 @@ def test_topics_counts_every_topic(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
     (tmp_path / ".iirc" / "a.md").write_text("---\ntopics:\n- install\n- ollama\n---\nx\n")
     (tmp_path / ".iirc" / "b.md").write_text("---\ntopics:\n- install\n---\ny\n")
-    iirc.main(["topics"])
+    iirc.main(["show-page-topics"])
     assert capsys.readouterr().out.splitlines() == ["install (2)", "ollama (1)"]
 
 
@@ -315,7 +315,7 @@ def test_doctor_brief_guides_setup(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     iirc.main(["doctor", "--brief"])
     assert "not set up on this machine" in capsys.readouterr().out
-    iirc.main(["setup", "--substring"]); capsys.readouterr()
+    iirc.main(["set-search-backend", "--substring"]); capsys.readouterr()
     iirc.main(["doctor", "--brief"])
     assert "no .iirc/" in capsys.readouterr().out
     monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
@@ -335,7 +335,7 @@ def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, cap
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
-    iirc.main(["setup", "--substring"]); iirc.main(["init"]); capsys.readouterr()
+    iirc.main(["set-search-backend", "--substring"]); iirc.main(["init"]); capsys.readouterr()
     monkeypatch.setattr(iirc, "suspicion", lambda fm, *a, **k: [("ref", "x")])
     (tmp_path / ".iirc" / "old.md").write_text("---\ntitle: t\n---\nbody\n")
     iirc.main(["doctor", "--health"])
@@ -368,9 +368,9 @@ def test_host_candidates_order(tmp_path, monkeypatch):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     assert iirc.host_candidates() == [("http://127.0.0.1:11434", "default")]
     iirc.write_config_file({"embedding_host": "http://frame:11434"})
-    assert iirc.host_candidates() == [("http://frame:11434", "iirc setup"), ("http://127.0.0.1:11434", "default")]
+    assert iirc.host_candidates() == [("http://frame:11434", "iirc set-search-backend"), ("http://127.0.0.1:11434", "default")]
     monkeypatch.setenv("OLLAMA_HOST", "other:1")
-    assert [c[1] for c in iirc.host_candidates()] == ["OLLAMA_HOST", "iirc setup", "default"]
+    assert [c[1] for c in iirc.host_candidates()] == ["OLLAMA_HOST", "iirc set-search-backend", "default"]
 
 
 def test_resolve_host_skips_a_dead_env_host(tmp_path, monkeypatch):
@@ -379,7 +379,7 @@ def test_resolve_host_skips_a_dead_env_host(tmp_path, monkeypatch):
     iirc.write_config_file({"embedding_host": "http://frame:11434"})
     monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: url == "http://frame:11434")
     iirc._RESOLVED = None
-    assert iirc.resolve_host() == ("http://frame:11434", "iirc setup", True)
+    assert iirc.resolve_host() == ("http://frame:11434", "iirc set-search-backend", True)
     iirc._RESOLVED = None
     monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: False)
     assert iirc.resolve_host() == ("http://dead:11434", "OLLAMA_HOST", False)
@@ -404,21 +404,21 @@ def test_setup_writes_config(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False: False)
-    iirc.main(["setup", "--host", "frame:11434"])
+    iirc.main(["set-search-backend", "--host", "frame:11434"])
     assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
     assert "does not answer yet" in capsys.readouterr().out
-    iirc.main(["setup", "--local"])
+    iirc.main(["set-search-backend", "--local"])
     assert iirc.read_config()["embedding_host"] == "http://127.0.0.1:11434"
-    iirc.main(["setup", "--substring"])
+    iirc.main(["set-search-backend", "--substring"])
     assert iirc.read_config()["semantic"] is False and iirc.semantic_enabled() is False
     assert iirc.tool_env()["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST
     monkeypatch.setenv("OLLAMA_HOST", "x:1")
     assert iirc.semantic_enabled() is True
     monkeypatch.delenv("OLLAMA_HOST")
     with pytest.raises(SystemExit):
-        iirc.main(["setup", "--local", "--host", "x"])
+        iirc.main(["set-search-backend", "--local", "--host", "x"])
     with pytest.raises(SystemExit):
-        iirc.main(["setup", "--semantic", "--substring"])
+        iirc.main(["set-search-backend", "--semantic", "--substring"])
 
 
 def test_semantic_is_on_by_default(tmp_path, monkeypatch):
@@ -574,7 +574,7 @@ def test_pull_prints_the_marker_above_each_page(tmp_path, monkeypatch, capsys):
         {"filename": "clean.md", "summary": "clean page", "distance": 0.3, "via": ["semantic"]},
     ])
     monkeypatch.setattr(iirc, "tool", lambda *a, **k: pytest.fail("pull renders a page it can parse"))
-    iirc.main(["pull", "anything"])
+    iirc.main(["read-matching-pages", "anything"])
     out = capsys.readouterr().out
     assert out.startswith(iirc.READ_HEAD) and out.endswith(iirc.read_tail([(iirc.STORES[0], "cited.md"), (iirc.STORES[0], "clean.md")]))
     lines = out.splitlines()
@@ -649,13 +649,13 @@ def test_guard_asks_for_approve_too():
     shim = ROOT / "scripts" / "guard.sh"
     def run(cmd):
         return subprocess.run(["sh", str(shim)], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": "/tmp/iirc-doubt-notes"}), capture_output=True, text=True)
-    assert "ask" in run("iirc approve x.md").stdout
+    assert "ask" in run("iirc approve-page-check x.md").stdout
     assert run("ls").stdout == ""               # a cwd containing the words does not trigger it
-    for cmd in ("bin/iirc approve x.md", 'cd /r && "/p/bin/iirc" approve x.md'):
+    for cmd in ("bin/iirc approve-page-check x.md", 'cd /r && "/p/bin/iirc" approve-page-check x.md'):
         assert "ask" in run(cmd).stdout, cmd
     # only iirc running the verb asks; a command that merely holds both words does not
-    for cmd in ("grep -n approve bin/iirc", "cd ~/Code/agents/dokidlc-iirc && grep -rn approve scripts",
-                "uv run pytest -q tests/test_iirc.py -k approve", "iirc read approve-notes.md"):
+    for cmd in ("grep -n approve-page-check bin/iirc", "cd ~/Code/agents/dokidlc-iirc && grep -rn approve-page-check scripts",
+                "uv run pytest -q tests/test_iirc.py -k approve", "iirc read approve-page-check-notes.md"):
         assert run(cmd).stdout == "", cmd
 
 
@@ -687,11 +687,11 @@ def test_guard_asks_only_for_network_suspect_pages():
     shim = ROOT / "scripts" / "guard.sh"
     def run(cmd):
         return subprocess.run(["sh", str(shim)], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), capture_output=True, text=True)
-    assert run("iirc suspect-pages").stdout == ""
+    assert run("iirc find-suspect-pages").stdout == ""
     assert run("git status").stdout == ""
-    out = json.loads(run("iirc suspect-pages --network").stdout)
+    out = json.loads(run("iirc find-suspect-pages --network").stdout)
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert run("grep -n -- --network bin/iirc; grep -n suspect-pages docs/USAGE.md").stdout == ""
+    assert run("grep -n -- --network bin/iirc; grep -n find-suspect-pages docs/USAGE.md").stdout == ""
 
 
 def test_recall_gates_and_filter(monkeypatch):
@@ -779,14 +779,14 @@ def test_max_suggested_sets_how_many_pages_recall_suggests(tmp_path, monkeypatch
     assert iirc.max_suggested() == 3
     rows = [{"filename": f"p{i}.md", "summary": "s", "distance": 0.1, "via": ["semantic"]} for i in range(6)]
     assert len(iirc.recall_filter(rows)) == 3
-    iirc.main(["max-suggested", "5"])
+    iirc.main(["max-suggested-pages", "5"])
     assert "suggests up to 5 pages" in capsys.readouterr().out
     assert iirc.max_suggested() == 5 and len(iirc.recall_filter(rows)) == 5
     assert iirc.read_config()["embedding_host"] == "http://h:1"   # the other settings stay
-    iirc.main(["max-suggested"])
+    iirc.main(["max-suggested-pages"])
     assert "suggests up to 5 pages" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        iirc.main(["max-suggested", "0"])
+        iirc.main(["max-suggested-pages", "0"])
     iirc.write_config_file({"max_suggested": "lots"})
     assert iirc.max_suggested() == 3
 
@@ -969,7 +969,12 @@ def test_commands_carry_their_plain_names():
     import subprocess
     out = subprocess.run([str(ROOT / "bin" / "iirc"), "--help"], capture_output=True, text=True).stdout
     names = set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
-    assert {"suspect-pages", "token-cost", "thresholds"} <= names and not {"doubt", "cost", "knobs"} & names
+    new = {"read-matching-pages", "approve-page-check", "rebuild-search-index", "find-suspect-pages", "audit-page-findability",
+           "estimate-context-tokens", "tune-suggestions", "set-search-backend", "show-page-topics", "max-suggested-pages"}
+    old = {"doubt", "cost", "knobs", "pull", "approve", "index", "suspect-pages", "audit", "token-cost", "tune", "setup", "topics", "max-suggested"}
+    assert new - names == set() and old & names == set()
+    out = subprocess.run([str(ROOT / "bin" / "iirc"), "tune-suggestions", "--help"], capture_output=True, text=True).stdout
+    assert {"gather-suggestion-data", "record-relevance-judgments", "evaluate-suggestion-thresholds", "mark-session-tuned"} <= set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
 
 
 def test_brief_channels(tmp_path, monkeypatch, capsys):
@@ -1244,7 +1249,7 @@ def test_read_and_pull_pass_the_field(tmp_path, monkeypatch, capsys):
     assert [(a[0], a[-1], f) for a, f in calls] == [("read", "raw.md", project.field), ("read", "raw.md", agent.field)]
     calls.clear(); capsys.readouterr()
     monkeypatch.setattr(iirc, "hybrid_search", lambda q: [{"filename": "raw.md", "store": "agent", "summary": "s", "distance": 0.2, "via": ["semantic"]}])
-    iirc.main(["pull", "x"])
+    iirc.main(["read-matching-pages", "x"])
     assert calls == [(("read", "--no-line-numbers", "raw.md"), agent.field)]
 
 
@@ -1342,7 +1347,7 @@ def test_verify_delete_index_commit(tmp_path, monkeypatch):
     assert _git(tmp_path, "log", "-1", "--format=%s") == "iirc: delete life.md\n"
     assert not (field / "life.md").exists() and "life.md" not in _git(tmp_path, "ls-files")
     (field / "index.md").write_text("intro\n")
-    iirc.main(["index"])
+    iirc.main(["rebuild-search-index"])
     assert _git(tmp_path, "log", "-1", "--format=%s") == "iirc: index\n"
 
 
@@ -1615,7 +1620,7 @@ def test_brief_pulls_only_at_session_start(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup"})))
     iirc.main(["doctor", "--brief", "--hook"])
     assert (agent.dir / "theirs.md").is_file() and "Pulled 1 page" in capsys.readouterr().out
-    assert started and started[0][-2:] == ["index", "--vectors"]
+    assert started and started[0][-2:] == ["rebuild-search-index", "--vectors-only"]
 
 
 def test_doctor_brief_counts_unpushed(tmp_path, monkeypatch, capsys):
@@ -1652,7 +1657,7 @@ def test_ref_in_another_project_gives_no_signal(tmp_path, monkeypatch, capsys):
     _page(agent.dir, "theirs.md", extra=f"project: github.com/x/other\nrefs:\n- github.com/x/other:docs/a.md@deadbee\ncheck: touch {marker}\n")
     fm = iirc.page_frontmatter("theirs.md", agent)
     assert iirc.suspicion(fm, run_checks=True) == []
-    iirc.main(["suspect-pages"])
+    iirc.main(["find-suspect-pages"])
     assert "not checked here" in capsys.readouterr().err and not marker.exists()
     iirc.main(["verify", "agent/theirs.md"])
     assert "verified agent/theirs.md" in capsys.readouterr().out and not marker.exists()
@@ -1727,7 +1732,7 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
         assert p.poll() is None and os.getsid(p.pid) != os.getsid(0)   # still running, in its own session
     finally:
         p.kill()
-    assert "Pulled 1 page" in capsys.readouterr().out and asked[0][-2:] == ["index", "--vectors"]
+    assert "Pulled 1 page" in capsys.readouterr().out and asked[0][-2:] == ["rebuild-search-index", "--vectors-only"]
 
 
 def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, monkeypatch, capsys):
@@ -1853,7 +1858,7 @@ def _old_layout(root):
     """A repository as the memory plugin left it: store, config, CLAUDE.md section, and settings."""
     (root / ".memory").mkdir()
     (root / ".memory" / "index.md").write_text("---\ntitle: Memory\n---\n\n<!-- memory format 1, written by memory abc1234 on 2026-10-01 -->\n")
-    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`; memory as a word stays.\n")
+    (root / ".memory" / "a-page.md").write_text("---\ntitle: A\nsummary: a\n---\nRun `memory read b.md` and `memory doctor --fix`, then `memory doubt` and `memory cost`, `memory pull x`, `memory approve p.md`, `memory index`, and `memory setup --local`; memory as a word stays.\n")
     (root / ".claude").mkdir()
     (root / ".claude" / "memory.toml").write_text('ui = true\n\n[stores.project]\nkind = "project"\npath = ".memory"\n')
     (root / ".claude" / "settings.json").write_text(json.dumps({"enabledPlugins": {"memory@dokidlc": True, "questlog@dokidlc": True}}, indent=2) + "\n")
@@ -1908,7 +1913,8 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     assert "memory@memory-dev" in (repo / ".claude" / "settings.local.json").read_text()
     page = (repo / ".iirc" / "a-page.md").read_text()
     assert "`iirc read b.md`" in page and "`iirc doctor --fix`" in page and "memory as a word stays" in page
-    assert "`iirc suspect-pages`" in page and "`iirc token-cost`" in page   # renamed since the memory plugin
+    assert "`iirc find-suspect-pages`" in page and "`iirc estimate-context-tokens`" in page   # renamed since the memory plugin
+    assert "`iirc read-matching-pages x`" in page and "`iirc approve-page-check p.md`" in page and "`iirc rebuild-search-index`" in page and "`iirc set-search-backend --local`" in page
     assert "iirc format" in (repo / ".iirc" / "index.md").read_text() and reindexed
     for b in bases:
         assert not (b / "dokidlc-memory").exists() and (b / "dokidlc-iirc" / "kept.txt").is_file()
@@ -2075,7 +2081,7 @@ def _tune_fixture(tmp_path, monkeypatch):
 
 def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
-    iirc.main(["tune", "gather"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])
     out = capsys.readouterr().out
     assert "2 sessions, 4 recalls" in out and "s1.json: 3 recalls, 2 pages suggested, 5 candidates to judge (transcript)" in out
     text = (st / "tune" / "s1.json").read_text()
@@ -2105,27 +2111,27 @@ def test_tune_gather_writes_evidence(tmp_path, monkeypatch, capsys):
 
 def test_tune_done_makes_gather_skip_a_session(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
-    iirc.main(["tune", "done", "s0"])
+    iirc.main(["tune-suggestions", "mark-session-tuned", "s0"])
     assert "s0 is tuned" in capsys.readouterr().out
     row = iirc.read_log()[-1]
     assert (row["cmd"], row["tuned"], row["session"]) == ("tuned", "s0", "tuner")
-    iirc.main(["tune", "gather"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])
     assert "1 session, 3 recalls" in capsys.readouterr().out and not (st / "tune" / "s0.json").exists()
-    iirc.main(["tune", "gather", "--session", "s0"])   # named, a tuned session is gathered again
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s0"])   # named, a tuned session is gathered again
     assert "1 session, 1 recalls" in capsys.readouterr().out
     with pytest.raises(SystemExit):
-        iirc.main(["tune", "done", "nope"])
+        iirc.main(["tune-suggestions", "mark-session-tuned", "nope"])
 
 
 def test_tune_judge_validates_and_later_lines_supersede(tmp_path, monkeypatch, capsys):
     import io
     st = _tune_fixture(tmp_path, monkeypatch)
-    iirc.main(["tune", "gather"]); capsys.readouterr()
+    iirc.main(["tune-suggestions", "gather-suggestion-data"]); capsys.readouterr()
     lines = [{"session": "s1", "recall_id": "r1", "page": "a.md", "label": "noise", "note": "off topic"},
              {"session": "s0", "ts": "2026-10-01T09:00:05Z", "page": "a.md", "label": "relevant"},
              {"session": "s1", "recall_id": "r1", "page": "project/a.md", "label": "relevant", "note": "on reflection"}]
     monkeypatch.setattr("sys.stdin", io.StringIO("".join(json.dumps(x) + "\n" for x in lines)))
-    iirc.main(["tune", "judge"])
+    iirc.main(["tune-suggestions", "record-relevance-judgments"])
     assert "recorded 3 judgments" in capsys.readouterr().out
     latest = iirc.judgments()
     assert len(latest) == 2 and latest[(str((tmp_path / "repo").resolve()), "s1", "r1", "a.md")]["label"] == "relevant"
@@ -2133,7 +2139,7 @@ def test_tune_judge_validates_and_later_lines_supersede(tmp_path, monkeypatch, c
            {"session": "s1", "recall_id": "r9", "page": "b.md", "label": "maybe"}]
     monkeypatch.setattr("sys.stdin", io.StringIO("".join(json.dumps(x) + "\n" for x in bad)))
     with pytest.raises(SystemExit):
-        iirc.main(["tune", "judge"])
+        iirc.main(["tune-suggestions", "record-relevance-judgments"])
     err = capsys.readouterr().err
     assert "line 2" in err and "label must be one of" in err and "no recall r9" in err
     assert len((st / "tune" / "judgments.jsonl").read_text().splitlines()) == 3   # the good line went unwritten too
@@ -2153,7 +2159,7 @@ def _sweep_fixture(tmp_path, monkeypatch, pairs):
 
 def test_tune_sweep_says_when_too_few_pairs_were_judged(tmp_path, monkeypatch, capsys):
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.3, "unsure")])
-    iirc.main(["tune", "sweep"])
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds"])
     out = capsys.readouterr().out
     assert "judged pairs with a distance: 2 (1 relevant, 1 noise)" in out
     assert "1 unsure; 1 with no candidate row" in out and "0 with no distance" in out and "1 from other repositories" in out
@@ -2165,7 +2171,7 @@ def test_tune_sweep_finds_knobs_that_change_the_counts(tmp_path, monkeypatch, ca
     monkeypatch.setitem(iirc.iirc_embed.MODELS["nomic-embed-text"].knobs, "both", (0.34, 0.10, 0.60))   # the fixtures sit around this knob, not the default
     monkeypatch.setattr(iirc, "TUNE_FLOOR", 3)
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.30, "relevant"), ("p3.md", 0.33, "noise")])
-    iirc.main(["tune", "sweep"])
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds"])
     out = capsys.readouterr().out
     assert "current  semantic_only 0.28 both 0.34: relevant passed 1, noise passed 0, relevant refused 1" in out
     best = out.split("best by F1:\n")[1].splitlines()[0]
@@ -2202,7 +2208,7 @@ def test_knobs_set_writes_only_its_line(tmp_path, monkeypatch, capsys):
 def test_tune_gather_finds_the_prompt_by_hash_once_the_prompts_file_is_gone(tmp_path, monkeypatch, capsys):
     st = _tune_fixture(tmp_path, monkeypatch)
     (st / "prompts" / "s1.jsonl").unlink()
-    iirc.main(["tune", "gather", "--session", "s1"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s1"])
     r1 = json.loads((st / "tune" / "s1.json").read_text())["recalls"][0]
     assert r1["prompt"]["from"] == "transcript by hash" and r1["prompt"]["text"].startswith("why does the build fail")
 
@@ -2235,7 +2241,7 @@ def test_tune_gather_joins_a_repeated_prompt_to_its_last_occurrence(tmp_path, mo
         return {"type": "assistant", "timestamp": ts, "message": {"content": [{"type": "tool_use", "id": command, "name": "Bash", "input": {"command": command}}]}}
     _jsonl(tx, [user("2026-10-08T11:01:40.000Z", again), tool("2026-10-08T11:01:45.000Z", "first run"),
                 user("2026-10-08T11:05:00.000Z", again), tool("2026-10-08T11:05:05.000Z", "second run")])
-    iirc.main(["tune", "gather", "--session", "s2"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s2"])
     q1, q2 = json.loads((st / "tune" / "s2.json").read_text())["recalls"]
     assert q1["prompt"]["from"] == q2["prompt"]["from"] == "transcript by hash"
     assert [t["input"] for t in q1["next_tools"]] == ["first run"] and [t["input"] for t in q2["next_tools"]] == ["second run"]
@@ -2244,10 +2250,10 @@ def test_tune_gather_joins_a_repeated_prompt_to_its_last_occurrence(tmp_path, mo
 def test_tune_judge_refuses_a_page_the_recall_never_listed(tmp_path, monkeypatch, capsys):
     import io
     st = _tune_fixture(tmp_path, monkeypatch)
-    iirc.main(["tune", "gather"]); capsys.readouterr()
+    iirc.main(["tune-suggestions", "gather-suggestion-data"]); capsys.readouterr()
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a-typo.md", "label": "noise"}) + "\n"))
     with pytest.raises(SystemExit):
-        iirc.main(["tune", "judge"])
+        iirc.main(["tune-suggestions", "record-relevance-judgments"])
     assert "line 1: recall r1 lists no page a-typo.md" in capsys.readouterr().err
     assert not (st / "tune" / "judgments.jsonl").exists()
 
@@ -2256,7 +2262,7 @@ def test_tune_gather_skips_rows_that_are_not_objects(tmp_path, monkeypatch, caps
     st = _tune_fixture(tmp_path, monkeypatch)
     for f in (st / "log.jsonl", st / "eval-2026-10.jsonl", st / "prompts" / "s1.jsonl"):
         f.write_text(f.read_text() + "42\n[1, 2]\n\"text\"\n")
-    iirc.main(["tune", "gather"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])
     assert "2 sessions, 4 recalls" in capsys.readouterr().out
 
 
@@ -2335,7 +2341,7 @@ def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
     calls = []
     real = iirc.hybrid_search
     monkeypatch.setattr(iirc, "hybrid_search", lambda q: calls.append(q) or real(q))
-    iirc.main(["tune", "sweep", "--replay", str(tmp_path / "a.jsonl"), str(tmp_path / "b.jsonl")])
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds", "--replay-prompts", str(tmp_path / "a.jsonl"), str(tmp_path / "b.jsonl")])
     out = capsys.readouterr().out
     assert len(calls) == 2   # one search per prompt, none for another repository's
     assert "judged pairs: 4 (2 relevant, 2 noise) from 2 prompts; 2 of them from excerpts" in out
@@ -2431,8 +2437,8 @@ def test_line_replay_counts_reads(tmp_path):
         bash("iirc read project/host-hang && iirc read unlabelled.md"),
         json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "iirc read host-hang.md"},
                                                                  {"type": "tool_use", "name": "Read", "input": {"file_path": ".iirc/host-hang.md"}}]}}),
-        bash("iirc pull hook-timeout"),
-        bash("iirc pull ollama keep_alive"),
+        bash("iirc read-matching-pages hook-timeout"),
+        bash("iirc read-matching-pages ollama keep_alive"),
         bash("git status"),
         "not json",
     ])
@@ -2508,7 +2514,7 @@ def test_write_warns_and_succeeds(tmp_path, monkeypatch, capsys):
 
 def test_doctor_brief_calls_git_once_per_sha(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.main(["setup", "--substring"]); capsys.readouterr()
+    iirc.main(["set-search-backend", "--substring"]); capsys.readouterr()
     docs = tmp_path / "docs"
     for name in ("b.md", "c.md"):
         (docs / name).write_text(f"{name}\n\n## Alpha\n\nalpha\n")
@@ -2542,7 +2548,7 @@ def test_read_unsuggested_skips_maintenance_reads(tmp_path, monkeypatch, capsys)
     # the 10:00:30 read of c.md, then a write of it within five minutes: the read was for the write, not for guidance
     with (st / "log.jsonl").open("a") as f:
         f.write(json.dumps({"ts": "2026-10-08T10:04:00Z", "session": "s1", "repo": r, "cmd": "write", "page": "project/c.md", "kind": "finding"}) + "\n")
-    iirc.main(["tune", "gather", "--session", "s1"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s1"])
     r1 = json.loads((st / "tune" / "s1.json").read_text())["recalls"][0]
     assert r1["read_unsuggested"] == []
 
@@ -2563,14 +2569,14 @@ def test_gather_skips_the_tuning_window(tmp_path, monkeypatch, capsys):
         recall("2026-10-08T12:10:00Z", "t3"),
     ])
     _jsonl(st / "prompts" / "tuner.jsonl", [{"ts": "2026-10-08T12:00:00Z", "prompt_hash": "x", "excerpt": "real work", "recall_id": "t1"}])
-    iirc.main(["tune", "gather"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])
     assert "3 sessions" in capsys.readouterr().out
     assert [x["key"] for x in json.loads((st / "tune" / "tuner.json").read_text())["recalls"]] == ["t1", "t3"]
     assert iirc.read_log()[-1]["cmd"] == "tune_gather"
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"session": "s1", "recall_id": "r1", "page": "a.md", "label": "noise"}) + "\n"))
-    iirc.main(["tune", "judge"]); capsys.readouterr()
+    iirc.main(["tune-suggestions", "record-relevance-judgments"]); capsys.readouterr()
     assert iirc.read_log()[-1]["cmd"] == "tune_judge" and "tuning" not in {x["cmd"] for x in iirc.read_log()}
-    iirc.main(["tune", "gather"])   # the last judge now follows t3
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])   # the last judge now follows t3
     assert [x["key"] for x in json.loads((st / "tune" / "tuner.json").read_text())["recalls"]] == ["t1"]
 
 
@@ -2592,7 +2598,7 @@ def test_gather_time_join_within_five_seconds(tmp_path, monkeypatch, capsys):
     tx = tmp_path / "claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", r) / "s4.jsonl"
     _jsonl(tx, [{"type": "user", "timestamp": "2026-10-08T11:00:00.000Z", "message": {"content": "a subagent's hand-back, long before"}},
                 {"type": "user", "timestamp": "2026-10-08T11:02:00.000Z", "message": {"content": "the prompt this recall searched"}}])
-    iirc.main(["tune", "gather", "--session", "s4"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "s4"])
     far, near = json.loads((st / "tune" / "s4.json").read_text())["recalls"]
     assert far["prompt"] == {"text": None, "from": None}
     assert near["prompt"] == {"text": "the prompt this recall searched", "from": "transcript by time"}
@@ -2608,7 +2614,7 @@ def test_failure_recall_keeps_its_error(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "npm test"}, "error": error})))
     iirc.main(["recall", "--failure"])
     # no transcript: the prompts file alone fills the evidence
-    iirc.main(["tune", "gather", "--session", "f1"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data", "--session", "f1"])
     failed = json.loads((tmp_path / "st" / "dokidlc-iirc" / "tune" / "f1.json").read_text())["recalls"][0]["failed"]
     assert failed["command"] == "npm test"
     assert failed["error"].startswith("Error: Cannot find module 'leftpad'") and 250 < len(failed["error"]) <= 300
@@ -2625,7 +2631,7 @@ def test_gather_skips_recordings(tmp_path, monkeypatch, capsys):
         {"ts": "2026-10-08T11:00:30Z", "session": "rec", "repo": r, "cmd": "recall", "via": "prompt", "pages": [], "recall_id": "v1"},
     ])
     _jsonl(st / "prompts" / "rec.jsonl", [{"ts": "2026-10-08T11:00:30Z", "prompt_hash": "x", "excerpt": "a demo prompt", "recall_id": "v1"}])
-    iirc.main(["tune", "gather"])
+    iirc.main(["tune-suggestions", "gather-suggestion-data"])
     assert "2 sessions" in capsys.readouterr().out and not (st / "tune" / "rec.json").exists()
     monkeypatch.delenv("IIRC_RECORDING")
     assert "recording" not in iirc.conditions("semantic", 5)
@@ -2780,7 +2786,7 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
     _audit_host_answers(monkeypatch)
     before = sorted(str(p) for p in tmp_path.rglob("*"))
-    iirc.main(["audit"])
+    iirc.main(["audit-page-findability"])
     out = capsys.readouterr().out
     lines = out.splitlines()
     found = {tuple(line.split(": ", 2)[:2]) for line in lines[:-1]}
@@ -2793,13 +2799,13 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     assert 'says "replaced by" and keeps 2 paragraphs' in out
     assert lines[-1] == f"7 findings in 11 pages; vectors checked with {iirc.active_model().id}"
     assert sorted(str(p) for p in tmp_path.rglob("*")) == before   # the audit never writes
-    iirc.main(["audit", "--json"])
+    iirc.main(["audit-page-findability", "--json"])
     rows = json.loads(capsys.readouterr().out)
     assert len(rows) == 7 and all(set(r) == {"page", "check", "what", "fix"} for r in rows)
-    iirc.main(["audit", "old.md"])
+    iirc.main(["audit-page-findability", "old.md"])
     assert capsys.readouterr().out.splitlines()[-1] == f"1 finding in 1 page; vectors checked with {iirc.active_model().id}"
     monkeypatch.setattr(iirc, "page_vectors", lambda: {})
-    iirc.main(["audit"])
+    iirc.main(["audit-page-findability"])
     out = capsys.readouterr().out
     assert ": own-title: " not in out and "hub.md: hub: " in out
     assert out.splitlines()[-1] == "6 findings in 11 pages; no vectors: own-title skipped"
@@ -2813,12 +2819,12 @@ def test_tune_sweep_prints_audit(tmp_path, monkeypatch, capsys):
     (field / "wordy.md").write_text("---\ntitle: Wombat burrows collapse after heavy rain when the soil holds too much clay underneath\n"
                                     "summary: Wombat burrows collapse in rain\ntopics: [t]\nkind: finding\n---\nx\n\n## Sources\n\n- y\n")
     flagged = "wordy.md: title: the title is 85 characters, over 70; shorten it"
-    iirc.main(["tune", "sweep"])
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds"])
     out = capsys.readouterr().out
     assert "\naudit:\n" in out and out.index("\naudit:\n") < out.index(flagged)
     assert out.rstrip().endswith("1 finding in 1 page; no vectors: own-title skipped")
     (tmp_path / "empty.jsonl").write_text("")
-    iirc.main(["tune", "sweep", "--replay", str(tmp_path / "empty.jsonl")])
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds", "--replay-prompts", str(tmp_path / "empty.jsonl")])
     out = capsys.readouterr().out
     assert "\naudit:\n" in out and flagged in out
 
@@ -3041,7 +3047,7 @@ def test_search_starts_one_background_index_when_many_pages_changed(tmp_path, mo
             (field / f"gamma-{i}.md").write_text(f"---\ntitle: Gamma {i}\nsummary: g\n---\ngamma\n")
         iirc.hybrid_search("gamma")
         iirc.hybrid_search("gamma")
-    assert [a[-2:] for a in started] == [["index", "--vectors"]]   # once, not on every prompt
+    assert [a[-2:] for a in started] == [["rebuild-search-index", "--vectors-only"]]   # once, not on every prompt
 
 
 def test_hybrid_search_in_process(tmp_path, monkeypatch):
@@ -3300,19 +3306,19 @@ def test_setup_offers_models(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
     answers = iter(["1", "1"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
-    iirc.main(["setup"])
+    iirc.main(["set-search-backend"])
     menu = capsys.readouterr().out
     for offer in ("ollama on this machine", "a remote ollama host", "OpenAI-compatible", "this CPU", "all-minilm-l6-v2", "string search",
                   "nomic-embed-text", "qwen3-embedding:0.6b", "embeddinggemma"):
         assert offer in menu
     assert iirc.read_config() == {"semantic": True, "embedding_host": "http://127.0.0.1:11434",
                                   "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
-    iirc.main(["setup", "--openai", "https://llm.example.net/v1/"])
+    iirc.main(["set-search-backend", "--openai", "https://llm.example.net/v1/"])
     assert iirc.read_config()["embedding"] == {"backend": "openai", "model": "qwen3-embedding", "url": "https://llm.example.net"}
-    iirc.main(["setup", "--host", "frame:11434", "--model", "embeddinggemma"])
+    iirc.main(["set-search-backend", "--host", "frame:11434", "--model", "embeddinggemma"])
     assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "embeddinggemma"} and iirc.active_model().id == "embeddinggemma"
     with pytest.raises(SystemExit):
-        iirc.main(["setup", "--local", "--model", "all-minilm-l6-v2"])   # not an ollama model
+        iirc.main(["set-search-backend", "--local", "--model", "all-minilm-l6-v2"])   # not an ollama model
     # the CPU tier fetches its files at the pinned commit, checks each sha256, and runs bin/iirc-cpu once
     fetched, checked = [], []
     blobs = {"onnx/model.onnx": b"model bytes", "tokenizer.json": b"{}"}
@@ -3320,17 +3326,17 @@ def test_setup_offers_models(tmp_path, monkeypatch, capsys):
                                                           for name, (src, _) in iirc.iirc_embed.MINILM_FILES.items()})
     monkeypatch.setattr(iirc, "fetch_url", lambda url, dest: fetched.append(url) or dest.write_bytes(blobs[url.split(f"/{iirc.iirc_embed.MINILM_COMMIT}/")[1]]))
     monkeypatch.setattr(iirc, "cpu_check", lambda: checked.append(1) or (True, ""))
-    iirc.main(["setup", "--cpu"])
+    iirc.main(["set-search-backend", "--cpu"])
     assert iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"} and checked == [1]
     assert all(u.startswith(f"https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{iirc.iirc_embed.MINILM_COMMIT}/") for u in fetched)
     assert len(fetched) == 2 and iirc.cpu_ready()
-    iirc.main(["setup", "--cpu"])
+    iirc.main(["set-search-backend", "--cpu"])
     assert len(fetched) == 2                                               # files whose sha matches are not fetched again
     (iirc.minilm_dir() / "tokenizer.json").write_bytes(b"tampered")
     blobs["tokenizer.json"] = b"tampered too"
     iirc.write_config_file({"semantic": False})
     with pytest.raises(SystemExit):
-        iirc.main(["setup", "--cpu"])                                      # a file that fails its sha256 is refused
+        iirc.main(["set-search-backend", "--cpu"])                                      # a file that fails its sha256 is refused
     assert "sha256" in capsys.readouterr().err and iirc.read_config() == {"semantic": False}
     assert iirc.iirc_embed.MINILM_COMMIT == "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
@@ -3434,19 +3440,19 @@ def test_setup_default_order(tmp_path, monkeypatch, capsys):
     up = {"http://127.0.0.1:11434"}
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: base in up)
     answers[:] = ["", ""]                                                   # Enter, Enter: ollama here, its first model
-    iirc.main(["setup"])
+    iirc.main(["set-search-backend"])
     out = capsys.readouterr().out
     assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
     assert asked[0].endswith("[1]: ") and out.index("1. qwen3-embedding:0.6b") < out.index("nomic-embed-text")
     menu = [line for line in out.splitlines() if re.match(r"\s+\d\. ", line)]
     assert "string search" in menu[len(iirc.SETUP_MENU.splitlines()) - 2]   # the last choice of the menu
-    iirc.main(["setup", "--local"])
+    iirc.main(["set-search-backend", "--local"])
     assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
     # the machine's own ollama host answers and this one does not: Enter takes that host
     up.clear(); up.add("http://frame:11434")
     iirc.write_config_file({"embedding_host": "http://frame:11434"})
     answers[:] = ["", "", ""]; asked.clear()
-    iirc.main(["setup"])
+    iirc.main(["set-search-backend"])
     assert asked[0].endswith("[2]: ") and iirc.read_config()["embedding_host"] == "http://frame:11434"
     assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
     # nothing answers: Enter takes this CPU
@@ -3454,7 +3460,7 @@ def test_setup_default_order(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc, "fetch_minilm", lambda: None)
     monkeypatch.setattr(iirc, "cpu_check", lambda: (True, ""))
     answers[:] = [""]; asked.clear()
-    iirc.main(["setup"])
+    iirc.main(["set-search-backend"])
     assert asked[0].endswith("[4]: ") and iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"}
 
 
@@ -3500,7 +3506,7 @@ def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
     _audit_host_answers(monkeypatch)
     iirc.write_config_file({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
-    iirc.main(["audit", "old.md"])
+    iirc.main(["audit-page-findability", "old.md"])
     assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"
 
 
@@ -3657,7 +3663,7 @@ def test_audit_skips_own_title_when_no_host_answers(tmp_path, monkeypatch, capsy
     iirc.write_config_file({"semantic": True})
     monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
     monkeypatch.setattr(iirc, "_RESOLVED", None)
-    iirc.main(["audit"])
+    iirc.main(["audit-page-findability"])
     out, err = capsys.readouterr()
     assert ": own-title: " not in out and "hub.md: hub: " in out
     assert err == ""                                                    # no line per page
@@ -3695,11 +3701,11 @@ def test_openai_host_that_refuses_is_down(tmp_path, monkeypatch, capsys, status)
     _vector_project(tmp_path, monkeypatch)
     with _refusing_openai(monkeypatch, status) as where:
         assert iirc.resolve_host()[2] is False
-        assert iirc.search_mode() == f"string only ({where} does not answer; `iirc setup` to fix)"
+        assert iirc.search_mode() == f"string only ({where} does not answer; `iirc set-search-backend` to fix)"
         capsys.readouterr()
         assert iirc.semantic_search("alpha") == []
         assert "no embedding host answers" in capsys.readouterr().err
-        iirc.main(["index"])
+        iirc.main(["rebuild-search-index"])
         out, err = capsys.readouterr()
         assert "no embedding host answers" in err
         assert "index current" not in out and "have no vectors" in out   # nothing was embedded
@@ -3763,7 +3769,7 @@ def test_openai_host_sets_its_own_width(tmp_path, monkeypatch, capsys):
         iirc.reindex()
         assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
         assert [r["filename"] for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == ["alpha-notes.md"]
-        iirc.main(["index"])
+        iirc.main(["rebuild-search-index"])
         assert "index current" in capsys.readouterr().out
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
@@ -3775,7 +3781,7 @@ def test_openai_host_sets_its_own_width(tmp_path, monkeypatch, capsys):
         assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
         # and so does an index
         iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
-        iirc.main(["index"])
+        iirc.main(["rebuild-search-index"])
         assert "index current" in capsys.readouterr().out
         assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
 
