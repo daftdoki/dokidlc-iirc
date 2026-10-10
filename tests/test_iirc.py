@@ -804,6 +804,7 @@ def test_clip_cuts_at_a_word_boundary():
 
 
 def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     field = tmp_path / ".iirc"; field.mkdir()
@@ -816,6 +817,7 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     assert "`iirc read pysqlite3-install-override.md`" in out
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "yes"})))
     iirc.main(["recall"]); assert capsys.readouterr().out == ""
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s2")   # in s1 the page is a repeat now
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "uv tool install memoryfield-tool"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"})))
     iirc.main(["recall", "--failure"])
     out = json.loads(capsys.readouterr().out)
@@ -835,7 +837,7 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     assert mine and mine[0]["page"] == "pysqlite3-install-override.md" and mine[0]["verdict"] == "passed" and mine[0]["rule"] == "term"
     assert {e["via"] for e in evals} == {"prompt", "failure"}
     # the prompt's excerpt, in the session's own file, never in the log
-    kept = [json.loads(line) for f in (tmp_path / "st" / "dokidlc-iirc" / "prompts").glob("*.jsonl") for line in f.read_text().splitlines()]
+    kept = [json.loads(line) for f in sorted((tmp_path / "st" / "dokidlc-iirc" / "prompts").glob("*.jsonl")) for line in f.read_text().splitlines()]
     assert [k.get("skipped") for k in kept] == [None, "short", None] and kept[0]["recall_id"] == first["recall_id"]
     assert kept[0]["excerpt"].startswith("why does uv tool install")
     # the failure's command and error, for tune once the transcript is gone
@@ -859,10 +861,11 @@ def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, caps
     assert out["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit" and "pysqlite3-install-override.md" in out["systemMessage"]
     out = json.loads(run(["doctor", "--brief", "--hook"], {"hook_event_name": "SessionStart", "session_id": "s5"}))
     assert out["systemMessage"].startswith("iirc: 1 page") and out["hookSpecificOutput"]["hookEventName"] == "SessionStart"
-    fail = {"session_id": "s5", "tool_name": "Bash", "tool_input": {"command": "uv tool install x"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s6")   # in s5 the page is a repeat now
+    fail = {"session_id": "s6", "tool_name": "Bash", "tool_input": {"command": "uv tool install x"}, "error": "Exit code 1\nno wheels for pysqlite3-binary"}
     assert "pysqlite3" in json.loads(run(["recall", "--failure"], fail))["systemMessage"]
     run(["recall", "--failure"], fail)
-    out = json.loads(run(["recall", "--success"], {"session_id": "s5", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}))
+    out = json.loads(run(["recall", "--success"], {"session_id": "s6", "tool_name": "Bash", "tool_input": {"command": "uv tool install x --overrides o"}}))
     assert "`uv tool` failed 2 times" in out["systemMessage"]
     assert not run(["doctor", "--brief"], {}).startswith("{")      # a person at the terminal gets plain text
 
@@ -2820,3 +2823,38 @@ def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
         assert lr.main(["--repeats", "--rule", rule, "--out", str(out)]) == 0
         t = json.loads(out.read_text())["totals"]
         assert (t["suppressed"], t["lost_reads"]) == counts, rule
+
+
+def test_recall_names_a_page_once_per_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s10"); iirc.set_root(tmp_path)
+    iirc.write_config_file({"max_suggested": 1})
+    found = []
+
+    def hit(*names):
+        found[:] = [{"filename": f"{n}.md", "via": ["semantic"], "distance": 0.1, "summary": "s", "fm": {}} for n in names]
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [dict(r) for r in found])
+
+    def named(*names):
+        hit(*names)
+        line = iirc.run_recall("why does the hook time out on a cold start?", "prompt", {})
+        return [n for n in names if f"`iirc read {n}.md`" in line]
+    assert named("a", "b") == ["a"]
+    assert named("a", "b") == ["b"]   # a was named: its slot goes to b
+    evals = [json.loads(l) for l in next((tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl")).read_text().splitlines()]
+    assert [e["verdict"] for e in evals[-2:]] == ["repeat", "passed"]
+    # another session starts clean
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s11")
+    assert named("a") == ["a"]
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s10")
+    for i in range(8):
+        assert named(f"x{i}") == [f"x{i}"]
+    assert named("a", "c") == ["c"]    # the recall that named a is the 10th-last
+    assert named("a") == ["a"]         # 10 recalls without it: a returns
+    # a page read since the 10th-last recall is left out too, STORE/PAGE or bare
+    iirc.log_event("read", pages=["project/d"])
+    assert named("d", "e") == ["e"]
+    # the replay sweep sees no history
+    hit("a")
+    assert [r["verdict"] for r in iirc.recall_verdicts(iirc.hybrid_search(""), cap=1)] == ["passed"]

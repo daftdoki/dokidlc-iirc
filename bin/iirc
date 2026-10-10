@@ -1080,9 +1080,26 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     return [r for r in recall_verdicts(rows) if r["verdict"] == "passed"]
 
 
-def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None, source: str = "prompt") -> list[dict]:
-    """Every candidate, with its verdict: passed, over_max, or why the gate refused it.
+REPEAT_RECALLS = 10   # a page a recall named stays off the line for this many of the session's recalls
+
+
+def recent_named(session: str) -> set[str]:
+    """Pages this session's last REPEAT_RECALLS recalls named, and pages it read or pulled since the oldest of them."""
+    if session == "no-session":
+        return set()   # recalls run outside Claude Code share this id; they are not one session
+    rows = read_log(session=session)
+    recalls = [i for i, r in enumerate(rows) if r["cmd"] == "recall"][-REPEAT_RECALLS:]
+    since = recalls[0] if len(recalls) == REPEAT_RECALLS else -1
+    named = {base(p) for i in recalls for p in rows[i].get("pages") or []}
+    return named | {base(p) for r in rows[since + 1:] if r["cmd"] in ("read", "pull") for p in r.get("pages") or []}
+
+
+def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None, source: str = "prompt",
+                    repeats: bool = False) -> list[dict]:
+    """Every candidate, with its verdict: passed, over_max, repeat, or why the gate refused it.
     `knobs` and `cap` default to RECALL and max_suggested(); `tune sweep --replay` passes others.
+    With `repeats`, a page in recent_named() is left out as `repeat` and its slot goes to the next candidate:
+    the hook passes it, the replay sweep does not, since its prompts have no session.
     A failure recall passes one page whatever the cap: one error, one page to read.
     It needs meaning+term only when semantic search is on; string-only search keeps the term rule.
 
@@ -1098,11 +1115,12 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
     kept = 0
     cap = 1 if source == "failure" else max_suggested() if cap is None else cap
     semantic = semantic_enabled()
+    seen = recent_named(session_id()) if repeats else set()
     for rank, r in enumerate(rows):
         rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], knobs or RECALL, source,
                             semantic)
         if rule is not None:
-            reason = "passed" if kept < cap else "over_max"
+            reason = "repeat" if base(r["filename"]) in seen else "passed" if kept < cap else "over_max"
             kept += reason == "passed"
         out.append({**r, "rank": rank, "rule": rule, "verdict": reason})
     return out
@@ -1268,7 +1286,7 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
         marker.write_text(now_iso())
     except OSError:
         pass
-    verdicts = recall_verdicts(hybrid_search(query), source=via)
+    verdicts = recall_verdicts(hybrid_search(query), source=via, repeats=True)
     passed = [r for r in verdicts if r["verdict"] == "passed"]
     line = recall_line(passed)
     named = line.count("`iirc read ")
