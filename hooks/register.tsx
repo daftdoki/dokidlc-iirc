@@ -97,7 +97,7 @@ const LIST_MAX = 3
 // tune and audit go to the skill, which runs them and asks for each fix; the rest run directly
 const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
-  ['doctor --fix', 'install or repair what doctor finds', 'MAINTENANCE'],
+  ['doctor --fix', 'install or repair, then rebuild the index', 'MAINTENANCE'],
   ['doubt', 'pages that may be wrong', 'MAINTENANCE'],
   ['audit', 'pages search shows badly, each with its fix', 'MAINTENANCE'],
   ['sync', 'commit, pull, and push remote stores', 'MAINTENANCE'],
@@ -105,7 +105,7 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
   ['index', 'rebuild the search index', 'MAINTENANCE'],
   ['knobs', "the recall gate's distances and ranges", 'MAINTENANCE'],
-  ['tune', 'judge what recall suggested, then tune it', 'MAINTENANCE'],
+  ['tune', 'judge recall, sweep the knobs, then audit', 'MAINTENANCE'],
   ['cost', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],

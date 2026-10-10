@@ -277,6 +277,9 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).toContain('/iirc max-suggested N')
   for (const cmd of ['tune', 'audit', 'setup', 'cost']) expect(helpText).toContain(`/iirc ${cmd} `)
   expect(helpText).toContain('status-line on · max-suggested 4 · search semantic+keyword')
+  // where a command runs another one, the help says so
+  expect(helpText).toMatch(/\/iirc tune .*then audit/)
+  expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
   expect((helpText ?? '').indexOf('/iirc setup')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({

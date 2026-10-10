@@ -198,7 +198,7 @@ The `command.run` handler in
 | `/iirc status-line on`, `/iirc status-line off` | Shows or hides that line, on this machine. |
 | `/iirc max-suggested` | How many pages recall suggests at most. |
 | `/iirc max-suggested N` | Sets that number, 1 to 10, on this machine. |
-| `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails. |
+| `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails, then rebuilds the index. |
 | `/iirc doubt`, `/iirc doubt --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
 | `/iirc sync` | Commits, pulls, and pushes every remote store. |
 | `/iirc stores` | The stores, their page counts, and anything not committed or pushed. |
@@ -214,7 +214,7 @@ The `command.run` handler in
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
 | `/iirc audit` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
 | `/iirc setup` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc setup`. |
-| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
+| `/iirc tune` | Goes to the skill: the agent judges the recorded sessions, sweeps the knobs, then runs `audit`, and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,
 `sync`, and `index` may run for up to ten minutes; the rest stop after
