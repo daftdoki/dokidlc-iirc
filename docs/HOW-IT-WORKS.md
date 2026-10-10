@@ -548,8 +548,11 @@ the background, at most once every ten minutes per store. That index, and
 the one the session start runs after a pull, writes the vector store only:
 it never commits or pushes. `iirc write`,
 `delete`, and `verify` update the store, and `iirc index` rebuilds it in
-full. You can delete it at any time; the pages are the only source of
-truth.
+full. Each update holds a lock per store, so a search that started
+before an index saved never saves its older copy over the index's. A
+search does not wait for that lock: while an index holds it, the search
+uses the vectors on disk. You can delete the store at any time; the
+pages are the only source of truth.
 
 ## What iirc records
 

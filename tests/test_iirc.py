@@ -3543,3 +3543,48 @@ def test_background_index_never_commits(tmp_path, monkeypatch):
     assert f"?? .iirc/{loose}" in _git(tmp_path, "status", "--porcelain", "-uall").splitlines()
     names = iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0])).names
     assert {loose, "gamma-0.md", f"gamma-{iirc.SEARCH_REEMBED}.md"} <= set(names)   # it did index
+
+
+def test_recall_refresh_never_overwrites_a_fuller_store(tmp_path, monkeypatch):
+    """A recall's small refresh that runs while an index embeds never saves its older copy over the index's store."""
+    field = _vector_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "start_background", lambda argv: None)
+    store = iirc.STORES[0]
+    path = iirc.vector_path(store)
+    E = iirc.iirc_embed
+    with _fake_ollama(monkeypatch) as seen:
+        for i in range(6):
+            (field / f"page-{i}.md").write_text(f"---\ntitle: Page {i}\nsummary: p\n---\nbeta {i}\n")
+        iirc.update_vectors(store, full=True)
+        assert len(E.load(path).names) == 8
+
+        def changes(tag):
+            """More changed pages than a recall embeds: alpha-notes edited, and new pages."""
+            (field / "alpha-notes.md").write_text((field / "alpha-notes.md").read_text() + f"\n{tag}\n")
+            for i in range(iirc.SEARCH_REEMBED + 1):
+                (field / f"{tag}-{i}.md").write_text(f"---\ntitle: {tag} {i}\nsummary: m\n---\ngamma {i}\n")
+        changes("more")
+        # an index holds the lock: the recall searches what is on disk, embeds nothing, and saves nothing
+        before = path.read_bytes()
+        seen.clear()
+        with iirc.store_lock(f"vectors-{store.field}", wait=0):
+            got = iirc.update_vectors(store, limit=iirc.SEARCH_REEMBED)
+        assert seen == [] and path.read_bytes() == before
+        assert "alpha-notes.md" not in got.names and len(got.names) == 7     # the changed page waits, as it would unlocked
+        # the finding's interleaving: the recall loads, an index runs to its save, then the recall goes on
+        iirc.update_vectors(store, full=True)
+        changes("late")
+        real_load, index = E.load, []
+
+        def load_then_index(p):
+            snap = real_load(p)
+            if not index:
+                index.append(threading.Thread(target=lambda: iirc.update_vectors(store, full=True)))
+                index[0].start(); index[0].join(timeout=1.0)
+            return snap
+        monkeypatch.setattr(E, "load", load_then_index)
+        iirc.update_vectors(store, limit=iirc.SEARCH_REEMBED)
+        index[0].join(timeout=30)
+        monkeypatch.setattr(E, "load", real_load)
+    names = E.load(path).names
+    assert len(names) == len(iirc.list_pages(field)) == 20 and "alpha-notes.md" in names

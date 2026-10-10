@@ -992,8 +992,22 @@ def store_pages(store: Store) -> dict[str, bytes]:
 
 
 def update_vectors(store: Store, limit: int | None = None, full: bool = False):
-    """The store's vectors after embedding its new and changed pages (see iirc_embed.refresh)."""
-    return iirc_embed.refresh(vector_path(store), store_pages(store), embedding_backend(), limit=limit, full=full)
+    """The store's vectors after embedding its new and changed pages (see iirc_embed.refresh).
+
+    Under the store's vectors lock, so a recall that loaded the store before an
+    index saved never saves its older copy over the index's. A recall (`limit`)
+    does not wait for the lock: while an index holds it, the recall searches the
+    vectors on disk and embeds and saves nothing. Its own key, not the commit
+    lock, so a long index never holds up a write's commit.
+    """
+    path, pages = vector_path(store), store_pages(store)
+    try:
+        with store_lock(f"vectors-{store.field}", wait=0 if limit is not None else LOCK_WAIT):
+            return iirc_embed.refresh(path, pages, embedding_backend(), limit=limit, full=full)
+    except LockTimeout:
+        if limit is None:
+            print(f"iirc: another index held the {store.name} vector store for {LOCK_WAIT:.0f} s; changed pages wait for the next search or `iirc index`", file=sys.stderr)
+        return iirc_embed.refresh(path, pages, embedding_backend(), limit=0, write=False)
 
 
 INDEX_RETRY = 600   # seconds before a search starts another background index for the same store

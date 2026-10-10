@@ -244,13 +244,15 @@ def build(rows: list[tuple[str, str, object]], dims: int) -> Vectors:
     return Vectors([n for n, _, _ in rows], [s for _, s, _ in rows], vecs, owner)
 
 
-def refresh(path: Path, pages: dict[str, bytes], backend: Backend, limit: int | None = None, full: bool = False) -> Vectors:
+def refresh(path: Path, pages: dict[str, bytes], backend: Backend, limit: int | None = None, full: bool = False,
+            write: bool = True) -> Vectors:
     """The store for these pages: a page whose sha changed, or that is new, is embedded; a page gone is dropped.
 
     With `limit`, more changed pages than that are embedded not at all and left
     out of the result. With `full`, every page is embedded again, and a page the
     embed failed for keeps its old vector if its file has not changed. A failed
-    embed leaves a changed page out.
+    embed leaves a changed page out. With `write` false, the store on disk is
+    not saved.
     """
     old = load(path)
     have = page_blocks(old) if old else {}
@@ -273,7 +275,7 @@ def refresh(path: Path, pages: dict[str, bytes], backend: Backend, limit: int | 
     dims = rows[0][2].shape[1] if rows else (old.vecs.shape[1] if old else 0)
     current = build(rows, dims)
     # a changed page left unembedded is dropped: with no row it reads as new, which is the same thing
-    if fresh or (old is not None and old.names != current.names):
+    if write and (fresh or (old is not None and old.names != current.names)):
         save(path, current)
     return current
 
