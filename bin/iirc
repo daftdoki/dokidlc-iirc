@@ -1009,7 +1009,7 @@ def index_in_background(store: Store) -> None:
         marker.touch()
     except OSError:
         return
-    start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index"])
+    start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index", "--vectors"])
 
 
 def semantic_search(query: str) -> list[dict]:
@@ -2436,6 +2436,10 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
 def cmd_index(args: argparse.Namespace) -> None:
     require_stores()
+    if args.vectors:
+        # started by a hook: a commit here would take whatever is loose in a store, and push a remote one
+        reindex(full=True)
+        return
     for store in live_stores():
         stamp_index(store.dir)
     reindex(full=True)
@@ -3060,7 +3064,7 @@ def pull_at_session_start() -> list[str]:
             notes.append(f"Store {store.name} was not pulled ({reason}); run iirc sync.")
         arrived += n
     if arrived:
-        start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index"])
+        start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index", "--vectors"])
         notes.append(f"Pulled {arrived} page{'s' if arrived != 1 else ''} from remote stores; reindexing in the background.")
     return notes
 
@@ -4284,6 +4288,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_audit)
 
     p = sub.add_parser("index", help="full reindex")
+    p.add_argument("--vectors", action="store_true", help=argparse.SUPPRESS)   # the vector cache only: no index.md stamp, no commit
     p.set_defaults(func=cmd_index)
 
     p = sub.add_parser("cost", help="bytes and tokens of index.md and a search")

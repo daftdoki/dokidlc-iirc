@@ -544,7 +544,9 @@ to within 1.1e-6.
 A search first embeds the pages changed since the last index, when 5 or
 fewer changed (`SEARCH_REEMBED`). More than that came from a pull or an
 update: the search leaves those pages out and starts one `iirc index` in
-the background, at most once every ten minutes per store. `iirc write`,
+the background, at most once every ten minutes per store. That index, and
+the one the session start runs after a pull, writes the vector store only:
+it never commits or pushes. `iirc write`,
 `delete`, and `verify` update the store, and `iirc index` rebuilds it in
 full. You can delete it at any time; the pages are the only source of
 truth.

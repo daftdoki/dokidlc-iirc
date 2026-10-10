@@ -1568,7 +1568,7 @@ def test_brief_pulls_only_at_session_start(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "startup"})))
     iirc.main(["doctor", "--brief", "--hook"])
     assert (agent.dir / "theirs.md").is_file() and "Pulled 1 page" in capsys.readouterr().out
-    assert started and started[0][-1] == "index"
+    assert started and started[0][-2:] == ["index", "--vectors"]
 
 
 def test_doctor_brief_counts_unpushed(tmp_path, monkeypatch, capsys):
@@ -1680,7 +1680,7 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
         assert p.poll() is None and os.getsid(p.pid) != os.getsid(0)   # still running, in its own session
     finally:
         p.kill()
-    assert "Pulled 1 page" in capsys.readouterr().out and asked[0][-1] == "index"
+    assert "Pulled 1 page" in capsys.readouterr().out and asked[0][-2:] == ["index", "--vectors"]
 
 
 def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, monkeypatch, capsys):
@@ -2985,7 +2985,7 @@ def test_search_starts_one_background_index_when_many_pages_changed(tmp_path, mo
             (field / f"gamma-{i}.md").write_text(f"---\ntitle: Gamma {i}\nsummary: g\n---\ngamma\n")
         iirc.hybrid_search("gamma")
         iirc.hybrid_search("gamma")
-    assert [a[-1] for a in started] == ["index"]                           # once, not on every prompt
+    assert [a[-2:] for a in started] == [["index", "--vectors"]]   # once, not on every prompt
 
 
 def test_hybrid_search_in_process(tmp_path, monkeypatch):
@@ -3519,3 +3519,27 @@ def test_subagent_recall_keeps_its_own_repeat_history(tmp_path, monkeypatch):
         iirc.main(["recall", *flag])
     recalls = [(r.get("agent"), r["pages"]) for r in iirc.read_log() if r["cmd"] == "recall"]
     assert recalls == [(None, ["a.md"]), ("ag1", ["a.md"]), ("ag1", []), (None, [])]
+
+
+# p5 review fixes, R2
+
+
+def test_background_index_never_commits(tmp_path, monkeypatch):
+    """The `iirc index` a search starts writes the vector cache and nothing else: a loose file in .iirc stays uncommitted."""
+    field = _vector_project(tmp_path, monkeypatch)
+    _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "pages")
+    real, procs = iirc.start_background, []
+    monkeypatch.setattr(iirc, "start_background", lambda argv: procs.append(real(argv)))
+    with _fake_ollama(monkeypatch):
+        iirc.reindex()
+        head = _git(tmp_path, "rev-parse", "HEAD")
+        loose = "half-written.md"
+        (field / loose).write_text("---\ntitle: Draft\nsummary: not done\n---\nTODO\n")
+        for i in range(iirc.SEARCH_REEMBED + 1):
+            (field / f"gamma-{i}.md").write_text(f"---\ntitle: Gamma {i}\nsummary: g\n---\ngamma\n")
+        iirc.hybrid_search("gamma")
+        assert len(procs) == 1 and procs[0].wait(timeout=120) == 0
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+    assert f"?? .iirc/{loose}" in _git(tmp_path, "status", "--porcelain", "-uall").splitlines()
+    names = iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0])).names
+    assert {loose, "gamma-0.md", f"gamma-{iirc.SEARCH_REEMBED}.md"} <= set(names)   # it did index
