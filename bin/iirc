@@ -837,6 +837,22 @@ def update_vectors(store: Store, limit: int | None = None, full: bool = False):
     return iirc_embed.refresh(vector_path(store), store_pages(store), embedding_host()[0], limit=limit, full=full)
 
 
+INDEX_RETRY = 600   # seconds before a search starts another background index for the same store
+
+
+def index_in_background(store: Store) -> None:
+    """Pages a search could not embed (a new store, a pull, an update) get `iirc index` once, not on every prompt."""
+    marker = state_dir() / "locks" / f"index-started-{store.field}"
+    try:
+        if marker.exists() and time.time() - marker.stat().st_mtime < INDEX_RETRY:
+            return
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+    except OSError:
+        return
+    start_background([str(PLUGIN_ROOT / "bin" / "iirc"), "index"])
+
+
 def semantic_search(query: str) -> list[dict]:
     """Pages within the tool's 0.45 of the query, nearest first, or nothing when no embedding host answers.
 
@@ -853,7 +869,10 @@ def semantic_search(query: str) -> list[dict]:
         return []
     rows = []
     for store in live_stores():
-        for d, name in iirc_embed.distances(update_vectors(store, limit=SEARCH_REEMBED), qvec[0]):
+        vectors = update_vectors(store, limit=SEARCH_REEMBED)
+        if len(vectors.names) < len(list_pages(store.dir)):
+            index_in_background(store)
+        for d, name in iirc_embed.distances(vectors, qvec[0]):
             fm, _ = parse_page((store.dir / name).read_text())
             rows.append({"field": store.field, "filename": name, "summary": fm.get("summary", ""), "distance": d, "store": store.name, "fm": fm})
     return rows

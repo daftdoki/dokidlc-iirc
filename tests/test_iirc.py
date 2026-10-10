@@ -2940,6 +2940,7 @@ def test_vector_store_round_trip(tmp_path, monkeypatch):
 
 def test_changed_page_reembeds(tmp_path, monkeypatch):
     field = _vector_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "start_background", lambda argv: None)      # the background index has its own test
     with _fake_ollama(monkeypatch) as seen:
         iirc.reindex()
         seen.clear()
@@ -2966,6 +2967,22 @@ def test_changed_page_reembeds(tmp_path, monkeypatch):
         rows = iirc.hybrid_search("gamma")
         assert seen == ["search_query: gamma"]
         assert not [r for r in rows if "semantic" in r["via"] and r["filename"].startswith("gamma-") and r["filename"] != "gamma-notes.md"]
+
+
+def test_search_starts_one_background_index_when_many_pages_changed(tmp_path, monkeypatch):
+    """A missing store, or a pull of many pages, heals itself: the search that finds them starts `iirc index` once."""
+    field = _vector_project(tmp_path, monkeypatch)
+    started = []
+    monkeypatch.setattr(iirc, "start_background", lambda argv: started.append(argv))
+    with _fake_ollama(monkeypatch):
+        iirc.reindex()
+        iirc.hybrid_search("gamma")
+        assert started == []                                               # nothing waiting
+        for i in range(iirc.SEARCH_REEMBED + 1):
+            (field / f"gamma-{i}.md").write_text(f"---\ntitle: Gamma {i}\nsummary: g\n---\ngamma\n")
+        iirc.hybrid_search("gamma")
+        iirc.hybrid_search("gamma")
+    assert [a[-1] for a in started] == ["index"]                           # once, not on every prompt
 
 
 def test_hybrid_search_in_process(tmp_path, monkeypatch):
