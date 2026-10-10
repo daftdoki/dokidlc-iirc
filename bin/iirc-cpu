@@ -1,0 +1,108 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.12,<3.14"
+# dependencies = ["numpy>=2", "onnxruntime>=1.23", "tokenizers>=0.20"]
+# ///
+"""all-minilm-l6-v2 on this CPU: iirc's onnx backend. bin/iirc runs it only when that backend is chosen.
+
+Usage:
+  iirc-cpu embed doc|query MODEL_DIR   a JSON list of texts on stdin; an npz on stdout with vecs
+                                       (float32, one L2-normalized row per window) and owner (each row's text)
+  iirc-cpu check MODEL_DIR             load the model and embed one word; exit 0 when that works
+
+A document is cut into windows of WINDOW tokens at a stride of STRIDE, by the
+tokenizer's offsets, so a page past MiniLM's 256 tokens is embedded whole; a
+query is one window. Each window is encoded with truncation at MAX_TOKENS and
+mean pooling over the attention mask (evidence 7-cpu-tier.md, "How it would fit").
+Python 3.14 is excluded because onnxruntime has no 3.14 wheel for macOS before 14.
+onnxruntime and tokenizers are imported in load(), so the tests can load this file with stubs.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import sys
+from pathlib import Path
+
+WINDOW = 200
+STRIDE = 150
+MAX_TOKENS = 256
+BATCH = 16           # windows per session run
+
+
+def windows(text: str, tok) -> list[str]:
+    """The text cut into windows of WINDOW tokens starting every STRIDE tokens; the last window ends the text."""
+    tok.no_truncation()
+    tok.no_padding()
+    offsets = tok.encode(text, add_special_tokens=False).offsets
+    if len(offsets) <= WINDOW:
+        return [text]
+    out = []
+    for start in range(0, len(offsets), STRIDE):
+        end = min(start + WINDOW, len(offsets)) - 1
+        out.append(text[offsets[start][0]:offsets[end][1]])
+        if start + WINDOW >= len(offsets):
+            break
+    return out
+
+
+def encode(texts: list[str], tok, sess):
+    """One L2-normalized row per text: the model's last hidden state, mean-pooled over the attention mask."""
+    import numpy as np
+    tok.enable_truncation(MAX_TOKENS)
+    tok.enable_padding()
+    rows = []
+    for start in range(0, len(texts), BATCH):
+        enc = tok.encode_batch(texts[start:start + BATCH])
+        ids = np.array([e.ids for e in enc], dtype=np.int64)
+        mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
+        hidden = sess.run(None, {"input_ids": ids, "attention_mask": mask, "token_type_ids": np.zeros_like(ids)})[0]
+        v = (hidden * mask[..., None]).sum(1) / np.maximum(mask.sum(1, keepdims=True), 1)
+        rows.append(v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12))
+    return np.concatenate(rows).astype(np.float32)
+
+
+def embed_texts(texts: list[str], kind: str, tok, sess):
+    """(vecs, owner): documents become windows, a query stays one text; owner maps each row to its text."""
+    import numpy as np
+    pieces, owner = [], []
+    for i, text in enumerate(texts):
+        for piece in (windows(text, tok) if kind == "doc" else [text]):
+            pieces.append(piece)
+            owner.append(i)
+    return encode(pieces, tok, sess), np.asarray(owner, dtype=np.int64)
+
+
+def load(model_dir: Path, kind: str):
+    """The tokenizer and the session. A query runs on one thread, as a hook should; a document batch may use them all."""
+    import onnxruntime as ort
+    from tokenizers import Tokenizer
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = 1 if kind == "query" else 0
+    opts.inter_op_num_threads = 1
+    sess = ort.InferenceSession(str(model_dir / "model.onnx"), opts, providers=["CPUExecutionProvider"])
+    return Tokenizer.from_file(str(model_dir / "tokenizer.json")), sess
+
+
+def main(argv: list[str]) -> int:
+    import numpy as np
+    if len(argv) == 3 and argv[0] == "embed" and argv[1] in ("doc", "query"):
+        texts = json.load(sys.stdin)
+        tok, sess = load(Path(argv[2]), argv[1])
+        vecs, owner = embed_texts(texts, argv[1], tok, sess)
+        buf = io.BytesIO()
+        np.savez(buf, vecs=vecs, owner=owner)
+        sys.stdout.buffer.write(buf.getvalue())
+        return 0
+    if len(argv) == 2 and argv[0] == "check":
+        tok, sess = load(Path(argv[1]), "query")
+        vecs, _ = embed_texts(["check"], "query", tok, sess)
+        print(f"all-minilm-l6-v2 answers: {vecs.shape[1]} dims")
+        return 0
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

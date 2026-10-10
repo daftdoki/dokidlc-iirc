@@ -28,7 +28,7 @@ Usage:
   iirc max-suggested [N]     pages recall suggests at most; N sets it on this machine
   iirc knobs [set NAME VALUE] the recall gate's distances; set writes one into .claude/iirc.toml
   iirc tune gather|judge|sweep|done  evidence and judgments for tuning recall, and a sweep of the knobs
-  iirc setup                 semantic (default) or string search, and the embedding host; once per machine
+  iirc setup                 the embedding model and where it runs, or string search; once per machine
   iirc init                  create .iirc/ and the CLAUDE.md paragraph
   iirc migrate               move a repository and this machine from the memory plugin's layout
   iirc sync                  commit, pull, and push every remote store
@@ -141,10 +141,19 @@ def read_config() -> dict:
     return _CONFIG[1]
 
 
+def toml_value(v) -> str:
+    """A string, bool, int, or a table of them as an inline table; JSON's string escapes are TOML's."""
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{k} = {toml_value(x)}" for k, x in v.items()) + "}"
+    if isinstance(v, str):
+        return json.dumps(v)
+    return str(v).lower()
+
+
 def write_config_file(values: dict) -> Path:
     path = config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f'{k} = "{v}"' if isinstance(v, str) else f"{k} = {str(v).lower()}" for k, v in values.items()]
+    lines = [f"{k} = {toml_value(v)}" for k, v in values.items()]
     path.write_text("\n".join(lines) + "\n")
     global _CONFIG
     _CONFIG = None
@@ -163,7 +172,10 @@ NO_EMBEDDING_HOST = "http://127.0.0.1:9"
 
 
 def host_candidates() -> list[tuple[str, str]]:
-    """(base url, source) in order of preference: OLLAMA_HOST, then iirc setup, then the local default."""
+    """(base url, source) in order of preference: OLLAMA_HOST, then iirc setup, then the local default.
+    An OpenAI-compatible backend has one candidate, the URL setup wrote."""
+    if active_model().backend == "openai":
+        return [(openai_url(str(read_config()["embedding"].get("url") or "")), "iirc setup")]
     out: list[tuple[str, str]] = []
     env = os.environ.get("OLLAMA_HOST")
     if env:
@@ -188,10 +200,16 @@ def resolve_host() -> tuple[str, str, bool]:
     """
     global _RESOLVED
     if _RESOLVED is None:
+        backend = active_model().backend
+        if backend == "onnx":
+            # no host: the model files on this machine are the backend
+            _RESOLVED = (CPU_HOST, "iirc setup", cpu_ready())
+            return _RESOLVED
         cands = host_candidates()
         _RESOLVED = (cands[0][0], cands[0][1], False)
         for url, source in cands:
-            if host_answers(url):
+            # an OpenAI-compatible server may refuse a GET it has no route for; any answer within the timeout is alive
+            if host_answers(url, any_status=True) if backend == "openai" else host_answers(url):
                 _RESOLVED = (url, source, True)
                 break
     return _RESOLVED
@@ -201,6 +219,45 @@ def embedding_host() -> tuple[str, str]:
     """(base url, where it came from). The first configured host that answers."""
     url, source, _ = resolve_host()
     return url, source
+
+
+CPU_HOST = "this CPU"   # resolve_host's url for the onnx backend, which has no host
+
+
+def openai_url(url: str) -> str:
+    """An OpenAI-compatible base URL without a trailing /v1, which the backend adds."""
+    return re.sub(r"/v1/?$", "", normalize_host(url) if url else "")
+
+
+def minilm_dir() -> Path:
+    return data_dir() / "models" / "all-minilm-l6-v2"
+
+
+def cpu_ready() -> bool:
+    """True when the MiniLM files are on this machine. Their sha256 is checked by setup and doctor, not on every search."""
+    return all((minilm_dir() / name).is_file() for name in iirc_embed.MINILM_FILES)
+
+
+def embedding_backend() -> iirc_embed.Backend:
+    model = active_model()
+    if model.backend == "onnx":
+        return iirc_embed.Backend(model, cpu=(str(PLUGIN_ROOT / "bin" / "iirc-cpu"), str(minilm_dir())))
+    return iirc_embed.Backend(model, embedding_host()[0])
+
+
+def search_mode() -> str:
+    """How search runs here, for the brief: semantic and where, or string only and why."""
+    if not semantic_enabled():
+        return "string search"
+    model = active_model()
+    url, _, answers = resolve_host()
+    where = re.sub(r"^https?://", "", url)
+    # no model name: hooks/register.tsx reads the mode up to the first dot, and qwen3-embedding:0.6b has one
+    if answers:
+        return f"semantic via {where}"
+    if model.backend == "onnx":
+        return f"string only ({model.id} model files missing; `iirc setup --cpu` to fix)"
+    return f"string only ({where} does not answer; `iirc setup` to fix)"
 HOST_TIMEOUT = 2.0
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -752,8 +809,9 @@ PROBE_TTL_DEAD = 600     # a dead host is not re-probed on every prompt
 PROBE_TTL_ALIVE = 60     # a live host is re-checked often enough to notice it went down
 
 
-def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = False) -> bool:
-    """One GET with a short timeout, cached per host. A silent host returns False, never hangs. fresh=True skips the cache."""
+def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = False, any_status: bool = False) -> bool:
+    """One GET with a short timeout, cached per host. A silent host returns False, never hangs. fresh=True skips the cache.
+    any_status=True counts an HTTP error status as an answer, for a server with no route at the URL probed."""
     data = read_state_json("hosts.json")
     now = datetime.now(UTC).timestamp()
     hit = data.get(base_url)
@@ -761,16 +819,18 @@ def host_answers(base_url: str, timeout: float = HOST_TIMEOUT, fresh: bool = Fal
         ttl = PROBE_TTL_ALIVE if hit.get("answers") else PROBE_TTL_DEAD
         if now - float(hit.get("ts", 0)) < ttl:
             return bool(hit.get("answers"))
-    answers = _probe(base_url, timeout)
+    answers = _probe(base_url, timeout, any_status)
     data[base_url] = {"answers": answers, "ts": now}
     write_state_json("hosts.json", data)
     return answers
 
 
-def _probe(base_url: str, timeout: float) -> bool:
+def _probe(base_url: str, timeout: float, any_status: bool = False) -> bool:
     try:
         with urllib.request.urlopen(base_url + "/", timeout=timeout) as resp:
             return resp.status == 200
+    except urllib.error.HTTPError:
+        return any_status
     except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, ValueError):
         return False
 
@@ -781,8 +841,9 @@ def model_present(base_url: str, model: str, timeout: float = HOST_TIMEOUT) -> b
             tags = json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
         return False
-    names = {m.get("name", "").split(":")[0] for m in tags.get("models", [])}
-    return model in names
+    names = {m.get("name", "") for m in tags.get("models", [])}
+    # a tagged model must match its tag; an untagged one matches any tag of that name
+    return model in names if ":" in model else model in {n.split(":")[0] for n in names}
 
 
 # --- pin --------------------------------------------------------------------
@@ -881,6 +942,9 @@ def require_host() -> bool:
     base, source, answers = resolve_host()
     if answers:
         return True
+    if active_model().backend == "onnx":
+        print(f"iirc: the {active_model().id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc setup --cpu` to fetch them.", file=sys.stderr)
+        return False
     tried = ", ".join(f"{u} ({src})" for u, src in host_candidates())
     print(f"iirc: no embedding host answers (tried {tried}); results are string matches only. Run `iirc setup` to choose a host, or `iirc setup --substring` if ollama cannot run here.", file=sys.stderr)
     return False
@@ -909,7 +973,8 @@ SEARCH_REEMBED = 5     # changed pages a search embeds before it runs; more wait
 
 
 def vector_path(store: Store) -> Path:
-    return iirc_embed.store_path(cache_dir(), store.field)
+    """Per store and model, so a model change starts a store of its own and every page is embedded again."""
+    return iirc_embed.store_path(cache_dir(), store.field, active_model().id)
 
 
 def store_pages(store: Store) -> dict[str, bytes]:
@@ -918,7 +983,7 @@ def store_pages(store: Store) -> dict[str, bytes]:
 
 def update_vectors(store: Store, limit: int | None = None, full: bool = False):
     """The store's vectors after embedding its new and changed pages (see iirc_embed.refresh)."""
-    return iirc_embed.refresh(vector_path(store), store_pages(store), embedding_host()[0], limit=limit, full=full)
+    return iirc_embed.refresh(vector_path(store), store_pages(store), embedding_backend(), limit=limit, full=full)
 
 
 INDEX_RETRY = 600   # seconds before a search starts another background index for the same store
@@ -938,7 +1003,7 @@ def index_in_background(store: Store) -> None:
 
 
 def semantic_search(query: str) -> list[dict]:
-    """Pages within the tool's 0.45 of the query, nearest first, or nothing when no embedding host answers.
+    """Pages within the active model's cut of the query (nomic: the tool's 0.45), nearest first, or nothing when no embedding host answers.
 
     A page changed since the last index is embedded first when at most
     SEARCH_REEMBED changed: on a warm model the five largest agent-builder
@@ -948,7 +1013,7 @@ def semantic_search(query: str) -> list[dict]:
     """
     if not require_host():
         return []
-    qvec = iirc_embed.embed(embedding_host()[0], [iirc_embed.query_text(query)])
+    qvec = iirc_embed.embed_query(embedding_backend(), query)
     if qvec is None:
         return []
     rows = []
@@ -956,7 +1021,7 @@ def semantic_search(query: str) -> list[dict]:
         vectors = update_vectors(store, limit=SEARCH_REEMBED)
         if len(vectors.names) < len(list_pages(store.dir)):
             index_in_background(store)
-        for d, name in iirc_embed.distances(vectors, qvec[0]):
+        for d, name in iirc_embed.distances(vectors, qvec, active_model().cut):
             fm, _ = parse_page((store.dir / name).read_text())
             rows.append({"field": store.field, "filename": name, "summary": fm.get("summary", ""), "distance": d, "store": store.name, "fm": fm})
     return rows
@@ -2528,48 +2593,132 @@ def cmd_migrate(args: argparse.Namespace) -> None:
 # --- setup ------------------------------------------------------------------
 
 
-def cmd_setup(args: argparse.Namespace) -> None:
-    """Choose substring or semantic search and, for semantic, where embeddings come from."""
-    pin = read_pin()
+def fetch_url(url: str, dest: Path) -> None:
+    with urllib.request.urlopen(url, timeout=60) as resp, dest.open("wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
+def minilm_files_ok() -> bool:
+    return all((minilm_dir() / name).is_file() and iirc_embed.sha((minilm_dir() / name).read_bytes()) == want
+               for name, (_, want) in iirc_embed.MINILM_FILES.items())
+
+
+def fetch_minilm() -> None:
+    """Fetch each MiniLM file whose sha256 does not match its pin, from the pinned commit; die on a mismatch after the fetch."""
+    folder = minilm_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, (src, want) in iirc_embed.MINILM_FILES.items():
+        dest = folder / name
+        if dest.is_file() and iirc_embed.sha(dest.read_bytes()) == want:
+            continue
+        url = f"https://huggingface.co/{iirc_embed.MINILM_REPO}/resolve/{iirc_embed.MINILM_COMMIT}/{src}"
+        print(f"fetching {url}")
+        tmp = folder / f".{name}.part"
+        try:
+            fetch_url(url, tmp)
+        except (urllib.error.URLError, OSError) as e:
+            tmp.unlink(missing_ok=True)
+            die(f"could not fetch {url}: {e}; nothing was written to the setup file")
+        got = iirc_embed.sha(tmp.read_bytes())
+        if got != want:
+            tmp.unlink()
+            die(f"{src} has sha256 {got}, and the pin is {want}; it was removed, and nothing was written to the setup file")
+        os.replace(tmp, dest)
+
+
+def cpu_check() -> tuple[bool, str]:
+    """Run bin/iirc-cpu once: its first run installs onnxruntime and tokenizers, so no hook pays for that. (ok, its output)"""
+    try:
+        proc = subprocess.run([str(PLUGIN_ROOT / "bin" / "iirc-cpu"), "check", str(minilm_dir())], capture_output=True, text=True, timeout=900)
+    except (subprocess.SubprocessError, OSError) as e:
+        return False, str(e)
+    return proc.returncode == 0, strip_ansi(proc.stdout + proc.stderr).strip()
+
+
+SETUP_MENU = f"""How should iirc search pages?
+  1. ollama on this machine ({normalize_host(DEFAULT_HOST)})
+  2. a remote ollama host
+  3. an OpenAI-compatible host, such as vLLM serving qwen3-embedding
+  4. this CPU: all-minilm-l6-v2 through onnxruntime; fetches about 90 MB of model files, no ollama needed
+  5. string search: exact text only, the fallback where none of these can run"""
+
+
+def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
+    """(backend or "substring", host or URL, model) from the flags, or from questions on a terminal."""
+    chosen = [flag for flag, on in (("--substring", args.substring), ("--local or --host", args.local or args.host or args.semantic),
+                                    ("--openai", args.openai), ("--cpu", args.cpu)) if on]
+    if len(chosen) > 1:
+        die(f"choose one of {', '.join(chosen)}")
     if args.local and args.host:
         die("choose --local or --host URL, not both")
-    if args.semantic and args.substring:
-        die("choose --semantic or --substring, not both")
-    semantic: bool | None = True if (args.semantic or args.local or args.host) else (False if args.substring else None)
-    host: str | None = normalize_host(args.host) if args.host else (normalize_host(DEFAULT_HOST) if args.local else None)
-    if semantic is None:
-        if not sys.stdin.isatty():
-            die("not a terminal; pass --substring, or --semantic with --local or --host URL")
-        print("Semantic search is the default: it matches meaning and needs ollama with an embedding model.")
-        print("String search is a fallback for environments where ollama cannot run: it matches exact text only.")
-        semantic = not input("Use semantic search? [Y/n]: ").strip().lower().startswith("n")
-    if semantic and host is None:
-        if not sys.stdin.isatty():
-            die("semantic search needs --local or --host URL")
-        print("Where should embeddings come from?")
-        print(f"  1. ollama on this machine ({normalize_host(DEFAULT_HOST)})")
-        print("  2. a remote ollama host")
-        choice = input("1 or 2: ").strip()
-        host = normalize_host(input("host, like http://frame:11434: ").strip()) if choice == "2" else normalize_host(DEFAULT_HOST)
-    values = {**read_config(), "semantic": semantic}   # keep keys setup does not ask about
-    if host:
+    if args.substring:
+        return "substring", None, None
+    if args.cpu:
+        return "onnx", None, "all-minilm-l6-v2"
+    if args.openai:
+        return "openai", openai_url(args.openai), args.model or "qwen3-embedding"
+    if args.local or args.host:
+        return "ollama", normalize_host(args.host) if args.host else normalize_host(DEFAULT_HOST), args.model or iirc_embed.DEFAULT_MODEL
+    if not sys.stdin.isatty():
+        die("not a terminal; pass --local, --host URL, --openai URL, --cpu, or --substring" if not args.semantic else "semantic search needs --local or --host URL")
+    print(SETUP_MENU)
+    choice = input("1-5: ").strip()
+    if choice == "5":
+        return "substring", None, None
+    if choice == "4":
+        return "onnx", None, "all-minilm-l6-v2"
+    if choice == "3":
+        return "openai", openai_url(input("base URL, like https://llm.example.net: ").strip()), "qwen3-embedding"
+    host = normalize_host(input("host, like http://frame:11434: ").strip()) if choice == "2" else normalize_host(DEFAULT_HOST)
+    models = [m.id for m in iirc_embed.MODELS.values() if m.backend == "ollama"]
+    print("Which ollama model?\n" + "\n".join(f"  {i}. {m}" for i, m in enumerate(models, 1)))
+    pick = input(f"1-{len(models)} [1]: ").strip()
+    return "ollama", host, models[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(models) else models[0]
+
+
+def cmd_setup(args: argparse.Namespace) -> None:
+    """Choose how search runs on this machine: an ollama model, an OpenAI-compatible host, this CPU, or substring."""
+    backend, host, model = setup_choice(args)
+    if model and iirc_embed.MODELS.get(model, iirc_embed.MODELS["all-minilm-l6-v2"]).backend != backend:
+        die(f"{model} is not a model for this backend; the {backend} models are "
+            + ", ".join(m.id for m in iirc_embed.MODELS.values() if m.backend == backend))
+    values = {**read_config(), "semantic": backend != "substring"}   # keep keys setup does not ask about
+    if backend == "substring":
+        path = write_config_file(values)
+        print(f"string search (fallback); written to {path}. `iirc setup` switches to semantic search.")
+        return
+    if backend == "onnx":
+        fetch_minilm()
+        ok, out = cpu_check()
+        if not ok:
+            die(f"bin/iirc-cpu could not run the model, so nothing was written to the setup file: {out[-500:]}\n"
+                "onnxruntime may have no wheel for this machine; `iirc setup --substring` is the fallback.")
+    embedding = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
+    values["embedding"] = embedding
+    if backend == "ollama":
         values["embedding_host"] = host
-    elif read_config().get("embedding_host"):
-        values["embedding_host"] = read_config()["embedding_host"]
     path = write_config_file(values)
-    if not semantic:
-        print(f"string search (fallback); written to {path}. `iirc setup --local` or `--host URL` switches to semantic search.")
+    global _RESOLVED
+    _RESOLVED = None
+    where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
+    print(f"semantic search with {model} through {where}; written to {path}")
+    print("Each repository's pages are embedded with this model on its next `iirc index`, or by the first search that finds them missing.")
+    if backend == "onnx":
         return
-    print(f"semantic search with embedding host {host} written to {path}")
-    if os.environ.get("OLLAMA_HOST"):
+    if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
         print("note: OLLAMA_HOST is exported in this shell and wins over the setup file")
-    if not host_answers(host, fresh=True):
-        print(f"{host} does not answer yet. " + ("Run `iirc doctor --fix` to install ollama here." if host == normalize_host(DEFAULT_HOST) else "Start ollama there, then run `iirc doctor`."))
+    if not (host_answers(host, fresh=True, any_status=True) if backend == "openai" else host_answers(host, fresh=True)):
+        if backend == "openai":
+            print(f"{host} does not answer yet. Start the server there, then run `iirc doctor`.")
+        else:
+            print(f"{host} does not answer yet. " + ("Run `iirc doctor --fix` to install ollama here." if host == normalize_host(DEFAULT_HOST) else "Start ollama there, then run `iirc doctor`."))
         return
-    if model_present(host, pin["model"]):
-        print(f"{pin['model']} is present. Run `iirc doctor` to confirm everything.")
+    if backend == "openai":
+        print("Run `iirc doctor` to confirm everything.")
+    elif model_present(host, model):
+        print(f"{model} is present. Run `iirc doctor` to confirm everything.")
     else:
-        print(f"{pin['model']} is not on {host}. Pull it there: OLLAMA_HOST={host} ollama pull {pin['model']}")
+        print(f"{model} is not on {host}. Pull it there: OLLAMA_HOST={host} ollama pull {model}")
 
 
 # --- git ---------------------------------------------------------------------
@@ -2998,7 +3147,7 @@ def index_rows() -> list[tuple[str, str, object]]:
     for store in live_stores():
         v = iirc_embed.load(vector_path(store))
         if v is not None:
-            rows += [(page_label(store.name, n), h, vec) for n, h, vec in zip(v.names, v.sha, v.vecs)]
+            rows += [(page_label(store.name, n), h, vec) for n, h, vec in iirc_embed.page_rows(v)]
     return rows
 
 
@@ -3107,6 +3256,32 @@ def suspect_pages(pages: list[Path]) -> list[str]:
         return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
 
 
+def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
+    """The ollama host answers and has the model; with --fix, start ollama here and pull the model. True when the host answers."""
+    base, source, up = resolve_host()
+    local = any(h in base for h in ("127.0.0.1", "localhost", "[::1]"))
+    if not up and fix_it and local and platform.system() == "Darwin" and shutil.which("brew"):
+        if shutil.which("ollama") is None:
+            subprocess.run(["brew", "install", "ollama"])
+        subprocess.run(["brew", "services", "start", "ollama"])
+        for _ in range(15):
+            if host_answers(base, fresh=True):
+                up = True
+                break
+            time.sleep(1)
+    if local:
+        fix = "brew install ollama && brew services start ollama" if platform.system() == "Darwin" else "curl -fsSL https://ollama.com/install.sh | sh"
+    else:
+        fix = "start ollama on that host, run `iirc setup` to choose another, or `iirc setup --substring` if ollama cannot run here"
+    report(f"embedding host {base} answers (from {source})", up, fix)
+    has_model = up and model_present(base, model.id)
+    if up and not has_model and fix_it and shutil.which("ollama"):
+        env = dict(os.environ, OLLAMA_HOST=base)
+        has_model = subprocess.run(["ollama", "pull", model.id], env=env).returncode == 0
+    report(f"model {model.id} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {model.id}")
+    return up
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     if args.health:
         # for the /iirc card: trust and store state as JSON, no host probe and no pull
@@ -3133,7 +3308,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             emit(MIGRATION_LINE)
             return
         if not config_file().is_file():
-            emit("iirc: not set up on this machine. Ask the creator whether embeddings come from ollama on this machine or on a remote host (semantic search, the default), or whether ollama cannot run here at all (string search fallback); then run `iirc setup` with their answer, `iirc init` if this repository has no .iirc/, and `iirc doctor --fix`.")
+            emit("iirc: not set up on this machine. Ask the creator where embeddings should come from: ollama on this machine (`--local`) or on a remote host (`--host URL`), an OpenAI-compatible host (`--openai URL`), this CPU (`--cpu`, no ollama needed), or none (`--substring`, string search only); then run `iirc setup` with that flag, `iirc init` if this repository has no .iirc/, and `iirc doctor --fix`.")
             return
         if not live_stores():
             if project_store() is None:
@@ -3149,11 +3324,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         per_store = [(s, list_pages(s.dir)) for s in live_stores()]
         pages = [p for _, ps in per_store for p in ps]
         n = len(pages)
-        if semantic_enabled():
-            url, _, answers = resolve_host()   # not `source`: that is the hook's, and the compact nudge reads it
-            mode = f"semantic via {url.replace('http://', '')}" if answers else f"string only ({url.replace('http://', '')} does not answer; `iirc setup` to fix)"
-        else:
-            mode = "string search"
+        mode = search_mode()
         counts: dict[str, int] = {}
         cited = 0
         scan_start = time.monotonic()
@@ -3239,34 +3410,18 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         pinned = install_tool(pin) and pin_matches(pin, installed_rev())
     report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
 
+    model = active_model()
+    up = False   # embeddings work, so --fix can reindex
     if not semantic_enabled():
         report("search mode: string, the fallback (iirc setup --local or --host URL switches to semantic)", True)
-        up = False
-    base, source, answers = resolve_host()
-    up = semantic_enabled() and answers
-    local = any(h in base for h in ("127.0.0.1", "localhost", "[::1]"))
-    if not up and args.fix and local and platform.system() == "Darwin" and shutil.which("brew"):
-        if shutil.which("ollama") is None:
-            subprocess.run(["brew", "install", "ollama"])
-        subprocess.run(["brew", "services", "start", "ollama"])
-        for _ in range(15):
-            if host_answers(base, fresh=True):
-                up = True
-                break
-            time.sleep(1)
-    if local:
-        fix = "brew install ollama && brew services start ollama" if platform.system() == "Darwin" else "curl -fsSL https://ollama.com/install.sh | sh"
+    elif model.backend == "onnx":
+        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc setup --cpu")
+    elif model.backend == "openai":
+        base, source, up = resolve_host()
+        report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id})", up,
+               "check the endpoint, run `iirc setup` to choose another, or `iirc setup --substring`")
     else:
-        fix = "start ollama on that host, run `iirc setup` to choose another, or `iirc setup --substring` if ollama cannot run here"
-    if semantic_enabled():
-        report(f"embedding host {base} answers (from {source})", up, fix)
-
-    has_model = up and model_present(base, pin["model"])
-    if up and not has_model and args.fix and shutil.which("ollama"):
-        env = dict(os.environ, OLLAMA_HOST=base)
-        has_model = subprocess.run(["ollama", "pull", pin["model"]], env=env).returncode == 0
-    if semantic_enabled():
-        report(f"model {pin['model']} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {pin['model']}")
+        up = doctor_ollama(model, args.fix, report)
 
     for store in STORES:
         if store.kind == "remote" and not store.dir.is_dir() and args.fix:
@@ -4118,11 +4273,15 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
     p.set_defaults(func=cmd_doctor)
 
-    p = sub.add_parser("setup", help="substring or semantic search, and the embedding host; prompts if no flags")
-    p.add_argument("--substring", action="store_true", help="string search: exact text only; a fallback for environments without ollama")
-    p.add_argument("--semantic", action="store_true", help="semantic search, the default: matches meaning through ollama")
-    p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine (implies --semantic)")
-    p.add_argument("--host", help="embeddings from a remote ollama host (implies --semantic)")
+    p = sub.add_parser("setup", help="the embedding model and where it runs, or substring search; prompts if no flags")
+    p.add_argument("--substring", action="store_true", help="string search: exact text only; the fallback where no embedding model can run")
+    p.add_argument("--semantic", action="store_true", help="semantic search through ollama, the default; needs --local or --host")
+    p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine")
+    p.add_argument("--host", help="embeddings from a remote ollama host")
+    p.add_argument("--openai", metavar="URL", help="embeddings from an OpenAI-compatible host (POST URL/v1/embeddings)")
+    p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
+    p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
+                   help="the model for --local, --host, or --openai; ollama defaults to nomic-embed-text, --openai to qwen3-embedding")
     p.set_defaults(func=cmd_setup)
 
     p = sub.add_parser("topics", help="every topic with its page count, computed from the pages")

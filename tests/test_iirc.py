@@ -405,7 +405,7 @@ def test_setup_writes_config(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False: False)
     iirc.main(["setup", "--host", "frame:11434"])
-    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434"}
+    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}}
     assert "does not answer yet" in capsys.readouterr().out
     iirc.main(["setup", "--local"])
     assert iirc.read_config()["embedding_host"] == "http://127.0.0.1:11434"
@@ -2879,7 +2879,7 @@ _WORDS = ("alpha", "beta", "gamma")
 
 
 @contextlib.contextmanager
-def _fake_ollama(monkeypatch):
+def _fake_ollama(monkeypatch, model="nomic-embed-text"):
     """An ollama that answers / and /api/embed: each text's vector counts the _WORDS in it. Yields the inputs it embedded."""
     import http.server
     seen: list[str] = []
@@ -2890,7 +2890,7 @@ def _fake_ollama(monkeypatch):
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            assert self.path == "/api/embed" and body["model"] == "nomic-embed-text" and body["truncate"] is True
+            assert self.path == "/api/embed" and body["model"] == model and body["truncate"] is True
             seen.extend(body["input"])
             vecs = [[t.count(w) + 0.0 for w in _WORDS] + [0.01] for t in body["input"]]
             out = json.dumps({"embeddings": vecs}).encode()
@@ -3078,3 +3078,197 @@ def test_flat_recall_moves_on_doctor_fix(tmp_path, monkeypatch, capsys):
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.4}
     assert "# semantic_only = 0.26  # iirc doctor --fix: [recall.nomic-embed-text] has its own" in toml.read_text()
     toml.unlink(); iirc.set_root(tmp_path)
+
+
+# p5 step 25
+
+@contextlib.contextmanager
+def _fake_openai(monkeypatch, model):
+    """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order. Yields the inputs."""
+    import http.server
+    seen: list[str] = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(404); self.end_headers()
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            assert self.path == "/v1/embeddings" and set(body) == {"model", "input"} and body["model"] == model
+            seen.extend(body["input"])
+            data = [{"index": i, "embedding": [t.count(w) + 0.0 for w in _WORDS] + [0.01]} for i, t in enumerate(body["input"])]
+            out = json.dumps({"data": data[::-1], "model": model}).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+
+        def log_message(self, *a): pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
+    iirc._RESOLVED = None
+    try:
+        yield seen
+    finally:
+        srv.shutdown()
+        iirc._RESOLVED = None
+
+
+@pytest.mark.parametrize("model", ["nomic-embed-text", "qwen3-embedding:0.6b", "embeddinggemma", "qwen3-embedding"])
+def test_backend_prefixes(tmp_path, monkeypatch, capsys, model):
+    """Each model gets its own query and document prefixes over the raw page file, through its own backend, into its own store."""
+    field = _vector_project(tmp_path, monkeypatch)
+    m = iirc.iirc_embed.MODELS[model]
+    if m.backend == "ollama":
+        iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": model}})
+        server = _fake_ollama(monkeypatch, model)
+    else:
+        server = _fake_openai(monkeypatch, model)
+    with server as seen:
+        assert iirc.active_model() == m
+        iirc.reindex()
+        assert sorted(seen) == sorted(m.doc_prefix + (field / n).read_text() for n in ("alpha-notes.md", "beta-notes.md"))
+        path = iirc.vector_path(iirc.STORES[0])
+        assert path.name == iirc.iirc_embed.table_name(model) + ".npz" and iirc.iirc_embed.load(path).names == ["alpha-notes.md", "beta-notes.md"]
+        seen.clear()
+        rows = iirc.hybrid_search("alpha")
+        assert seen == [m.query_prefix + "alpha"]
+        assert [r["filename"] for r in rows if "semantic" in r["via"]] == ["alpha-notes.md"]
+    if m.backend == "openai":
+        # a hosted endpoint that does not answer is a dead host: string search, and the brief says so
+        s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+        iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{port}"}})
+        iirc._RESOLVED = None
+        assert iirc.semantic_search("alpha") == []
+        capsys.readouterr()
+        iirc.main(["doctor", "--brief"])
+        assert f"string only (127.0.0.1:{port} does not answer" in capsys.readouterr().out
+        iirc._RESOLVED = None
+    assert iirc.iirc_embed.MODELS["qwen3-embedding:0.6b"].query_prefix == \
+        "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
+    assert (iirc.iirc_embed.MODELS["embeddinggemma"].query_prefix, iirc.iirc_embed.MODELS["embeddinggemma"].doc_prefix) == \
+        ("task: search result | query: ", "title: none | text: ")
+
+
+def _load_cpu():
+    loader = SourceFileLoader("iirc_cpu", str(ROOT / "bin" / "iirc-cpu"))
+    spec = importlib.util.spec_from_loader("iirc_cpu", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+class _StubTokenizer:
+    """Whitespace tokens with character offsets; a token's id is 1 + its index in _WORDS, else 4."""
+    def __init__(self):
+        self.truncate, self.pad = None, False
+    def no_truncation(self): self.truncate = None
+    def no_padding(self): self.pad = False
+    def enable_truncation(self, n): self.truncate = n
+    def enable_padding(self): self.pad = True
+
+    def encode(self, text, add_special_tokens=True):
+        import types
+        offsets = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)][:self.truncate]
+        ids = [(_WORDS.index(text[a:b]) + 1) if text[a:b] in _WORDS else 4 for a, b in offsets]
+        return types.SimpleNamespace(offsets=offsets, ids=ids, attention_mask=[1] * len(ids))
+
+    def encode_batch(self, texts):
+        out = [self.encode(t) for t in texts]
+        width = max(len(e.ids) for e in out)
+        for e in out:
+            e.ids += [0] * (width - len(e.ids)); e.attention_mask += [0] * (width - len(e.attention_mask))
+        return out
+
+
+class _StubSession:
+    """A token's hidden state is the one-hot of its id, so a mean-pooled window counts its _WORDS. Records each batch."""
+    def __init__(self):
+        self.batches = []
+
+    def run(self, outputs, feeds):
+        import numpy as np
+        ids = feeds["input_ids"]
+        assert set(feeds) == {"input_ids", "attention_mask", "token_type_ids"} and ids.dtype == np.int64
+        self.batches.append(ids.shape)
+        return [np.eye(5, dtype=np.float32)[ids]]
+
+
+def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
+    import numpy as np
+    cpu = _load_cpu()
+    tok, sess = _StubTokenizer(), _StubSession()
+    text = " ".join(["alpha"] * 160 + ["beta"] * 140 + ["gamma"] * 150)   # 450 tokens
+    wins = cpu.windows(text, tok)
+    assert [len(w.split()) for w in wins] == [200, 200, 150]               # windows of 200 at a stride of 150; the last one ends the text
+    assert wins[0].startswith("alpha") and wins[2] == " ".join(["beta"] * 0 + ["gamma"] * 150)
+    assert cpu.windows("", tok) == [""] and cpu.windows("one two", tok) == ["one two"]
+    vecs, owner = cpu.embed_texts([text, "beta beta"], "doc", tok, sess)
+    assert list(owner) == [0, 0, 0, 1] and vecs.shape == (4, 5) and np.allclose(np.linalg.norm(vecs, axis=1), 1)
+    qv, qo = cpu.embed_texts(["gamma " * 300], "query", tok, sess)            # a query is one window, cut at 256 tokens
+    assert list(qo) == [0] and sess.batches[-1] == (1, 256)
+    # bin/iirc: the onnx backend sends the plain page text and keeps each page's best window
+    field = _vector_project(tmp_path, monkeypatch)
+    (field / "long-notes.md").write_text(f"---\ntitle: Long notes\nsummary: mostly alpha\ntopics:\n- greek\nkind: finding\n---\n{text}\n\n## Sources\n- gamma gamma\n")
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "onnx", "model": "all-minilm-l6-v2"}})
+    sent = []
+
+    def run_cpu(backend, texts, kind):
+        sent.append((kind, texts))
+        return cpu.embed_texts(texts, kind, tok, sess)
+    monkeypatch.setattr(iirc.iirc_embed, "run_cpu", run_cpu)
+    monkeypatch.setattr(iirc, "cpu_ready", lambda: True)
+    iirc._RESOLVED = None
+    iirc.reindex()
+    docs = dict(zip(sorted(p.name for p in iirc.list_pages(field)), sent[0][1]))
+    assert docs["long-notes.md"] == f"Long notes\nmostly alpha\nTopics: greek\n\n{text}\n"   # no YAML, no Sources
+    v = iirc.iirc_embed.load(iirc.vector_path(iirc.STORES[0]))
+    assert v.vecs.shape[1] == 5 and list(v.owner).count(v.names.index("long-notes.md")) == 3
+    rows = {r["filename"]: r["distance"] for r in iirc.semantic_search("gamma")}
+    wv, _ = cpu.embed_texts([docs["long-notes.md"]], "doc", tok, sess)
+    qv, _ = cpu.embed_texts(["gamma"], "query", tok, sess)
+    best, mean = 1 - float((wv @ qv[0]).max()), 1 - float(wv.mean(axis=0) @ qv[0] / np.linalg.norm(wv.mean(axis=0)))
+    assert abs(rows["long-notes.md"] - best) < 1e-6 and best < 0.01 < mean   # its last window is nearly all gamma
+    assert sent[-1] == ("query", ["gamma"])
+    assert "long-notes.md" in [label for label, _, _ in iirc.index_rows()]  # one vector per page for near-duplicates
+    iirc._RESOLVED = None
+
+
+def test_setup_offers_models(tmp_path, monkeypatch, capsys):
+    import hashlib
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, any_status=False: False)
+    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
+    answers = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    iirc.main(["setup"])
+    menu = capsys.readouterr().out
+    for offer in ("ollama on this machine", "a remote ollama host", "OpenAI-compatible", "this CPU", "all-minilm-l6-v2", "string search",
+                  "nomic-embed-text", "qwen3-embedding:0.6b", "embeddinggemma"):
+        assert offer in menu
+    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://127.0.0.1:11434",
+                                  "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
+    iirc.main(["setup", "--openai", "https://llm.example.net/v1/"])
+    assert iirc.read_config()["embedding"] == {"backend": "openai", "model": "qwen3-embedding", "url": "https://llm.example.net"}
+    iirc.main(["setup", "--host", "frame:11434", "--model", "embeddinggemma"])
+    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "embeddinggemma"} and iirc.active_model().id == "embeddinggemma"
+    with pytest.raises(SystemExit):
+        iirc.main(["setup", "--local", "--model", "all-minilm-l6-v2"])   # not an ollama model
+    # the CPU tier fetches its files at the pinned commit, checks each sha256, and runs bin/iirc-cpu once
+    fetched, checked = [], []
+    blobs = {"onnx/model.onnx": b"model bytes", "tokenizer.json": b"{}"}
+    monkeypatch.setattr(iirc.iirc_embed, "MINILM_FILES", {name: (src, hashlib.sha256(blobs[src]).hexdigest())
+                                                          for name, (src, _) in iirc.iirc_embed.MINILM_FILES.items()})
+    monkeypatch.setattr(iirc, "fetch_url", lambda url, dest: fetched.append(url) or dest.write_bytes(blobs[url.split(f"/{iirc.iirc_embed.MINILM_COMMIT}/")[1]]))
+    monkeypatch.setattr(iirc, "cpu_check", lambda: checked.append(1) or (True, ""))
+    iirc.main(["setup", "--cpu"])
+    assert iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"} and checked == [1]
+    assert all(u.startswith(f"https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{iirc.iirc_embed.MINILM_COMMIT}/") for u in fetched)
+    assert len(fetched) == 2 and iirc.cpu_ready()
+    iirc.main(["setup", "--cpu"])
+    assert len(fetched) == 2                                               # files whose sha matches are not fetched again
+    (iirc.minilm_dir() / "tokenizer.json").write_bytes(b"tampered")
+    blobs["tokenizer.json"] = b"tampered too"
+    iirc.write_config_file({"semantic": False})
+    with pytest.raises(SystemExit):
+        iirc.main(["setup", "--cpu"])                                      # a file that fails its sha256 is refused
+    assert "sha256" in capsys.readouterr().err and iirc.read_config() == {"semantic": False}
+    assert iirc.iirc_embed.MINILM_COMMIT == "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
