@@ -45,9 +45,7 @@ NECKBEARD = [Path.home() / "Code" / "agents" / "agent-neckbeard", Path.home() / 
 
 def redact(text: str) -> str:
     """Secrets out first, then the cap, so the cap never leaves half a token behind."""
-    for pattern in iirc.SECRET_PATTERNS.values():
-        text = pattern.sub("[REDACTED]", text)
-    return text[:PROMPT_MAX]
+    return iirc.redact(text)[:PROMPT_MAX]
 
 
 def join(labels: list[dict], prompts: dict[str, dict], repo: str) -> tuple[list[dict], list[str]]:

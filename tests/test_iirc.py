@@ -3442,3 +3442,23 @@ def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
     iirc.write_config_file({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
     iirc.main(["audit", "old.md"])
     assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"
+
+
+# p5 review fixes, R3
+
+
+def test_failure_recall_saves_redacted_text(tmp_path, monkeypatch):
+    """A token in a failed command or its error never reaches the prompts file."""
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "f1")
+    (tmp_path / ".iirc").mkdir(); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [])
+    token = "ghp_" + "A1b2C3d4E5" * 4
+    command = f'curl -fsS -H "Authorization: Bearer {token}" https://api.github.com/user'
+    error = f"Exit code 22\ncurl: (22) The requested URL returned error: 401 for {token}"
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "error": error})))
+    iirc.main(["recall", "--failure"])
+    kept = (tmp_path / "st" / "dokidlc-iirc" / "prompts" / "f1.jsonl").read_text()
+    assert "[REDACTED]" in kept
+    assert token not in kept

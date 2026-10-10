@@ -275,6 +275,13 @@ SECRET_PATTERNS: dict[str, re.Pattern] = {name: re.compile(r"(?<![A-Za-z0-9_-])"
     "slack token": r"xox[abpr]-[A-Za-z0-9-]{10,}",
     "private key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
 }.items()}
+
+
+def redact(text: str) -> str:
+    """The text with each SECRET_PATTERNS match replaced by [REDACTED]; cut it after this, so no half token is left."""
+    for pattern in SECRET_PATTERNS.values():
+        text = pattern.sub("[REDACTED]", text)
+    return text
 # kind -> days after which an unverified page earns a "glance" hint. None: never.
 KINDS: dict[str, int | None] = {"environment": 30, "procedure": 90, "finding": 180, "decision": None}
 STORE_CONFIG = ".claude/iirc.toml"
@@ -1483,7 +1490,7 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
         keep_prompt(str(event.get("prompt") or event.get("user_input") or event.get("user_prompt") or ""), recall_id=recall_id)
     elif failed:
         # the command as the excerpt and the error beside it, so tune can judge the recall after the transcript is gone
-        keep_prompt(failed[0], recall_id=recall_id, error=clean(failed[1], 300))
+        keep_prompt(redact(failed[0]), recall_id=recall_id, error=clean(redact(failed[1]), 300))
     eval_event([{
         "cmd": "candidate", "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
         "distance": r.get("distance") if isinstance(r.get("distance"), (int, float)) else None,

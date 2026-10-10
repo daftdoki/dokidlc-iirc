@@ -129,9 +129,7 @@ def followup_query(prompt: str, previous: str | None) -> str:
 
 def redacted(text: str) -> str:
     """As replay-files.py stores a prompt: secrets out, then capped."""
-    for pattern in iirc().SECRET_PATTERNS.values():
-        text = pattern.sub("[REDACTED]", text)
-    return text[:8000]
+    return iirc().redact(text)[:8000]
 
 
 def previous_prompt(prompt: dict, transcripts: Path) -> str | None:
