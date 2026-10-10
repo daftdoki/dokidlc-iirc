@@ -183,7 +183,10 @@ gets the verdict `repeat`, and its slot goes to the next candidate.
 While the first line is in context, the agent has the name, the summary,
 and the read command. A compaction removes that line, so the record
 starts again after the `PreCompact` hook's `session` row. Recalls with no
-session id share `no-session` and get no repeat check. The rule left out
+session id share `no-session` and get no repeat check. A subagent's hook
+input carries its `agent_id`, so a subagent's recalls keep a record of
+their own. `iirc read` runs in Bash with no hook input, so a read counts
+for the main thread. The rule left out
 70% of suggestions over 123 logged sessions, at a cost of at most 206
 later reads of a page it left out.
 
@@ -567,6 +570,9 @@ committed or pushed. `iirc stats` and the `/iirc` cards read it. Commits
 | `log.jsonl` | command and hook | reads, writes, searches, verifies, failures, nudges, and the rows below |
 | `eval-YYYY-MM.jsonl` | candidate page | the 25 best candidates of each recall, passed or not |
 | `prompts/SESSION.jsonl` | prompt | the first 300 characters of each prompt, its hash, and its `recall_id` or skip reason |
+
+A row that a subagent's hook writes also holds `agent`, the subagent's
+id.
 
 The log rows that matter for tuning:
 

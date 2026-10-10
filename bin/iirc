@@ -281,6 +281,8 @@ def redact(text: str) -> str:
     for pattern in SECRET_PATTERNS.values():
         text = pattern.sub("[REDACTED]", text)
     return text
+
+
 # kind -> days after which an unverified page earns a "glance" hint. None: never.
 KINDS: dict[str, int | None] = {"environment": 30, "procedure": 90, "finding": 180, "decision": None}
 STORE_CONFIG = ".claude/iirc.toml"
