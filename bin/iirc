@@ -206,6 +206,16 @@ PAGE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 FIX_HINT = "Run `iirc doctor --fix` to repair what it can."
 PAGE_LIMIT = 8192
+# a page or a replay prompt matching one is refused or redacted; each starts at a word, so "task-..." is not "sk-..."
+SECRET_PATTERNS: dict[str, re.Pattern] = {name: re.compile(r"(?<![A-Za-z0-9_-])" + source) for name, source in {
+    "tailscale key": r"tskey-[A-Za-z0-9-]{10,}",
+    "github token": r"gh[pousr]_[A-Za-z0-9]{30,}",
+    "github fine-grained token": r"github_pat_[A-Za-z0-9_]{30,}",
+    "sk- api key": r"sk-[A-Za-z0-9_-]{20,}",
+    "aws access key": r"AKIA[0-9A-Z]{16}",
+    "slack token": r"xox[abpr]-[A-Za-z0-9-]{10,}",
+    "private key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+}.items()}
 # kind -> days after which an unverified page earns a "glance" hint. None: never.
 KINDS: dict[str, int | None] = {"environment": 30, "procedure": 90, "finding": 180, "decision": None}
 STORE_CONFIG = ".claude/iirc.toml"

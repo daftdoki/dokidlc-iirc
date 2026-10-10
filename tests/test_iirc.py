@@ -2343,6 +2343,26 @@ def _line_replay():
     return mod
 
 
+# p5 step 2
+
+def test_secret_patterns_anchor_at_a_word():
+    def hits(text):
+        return [name for name, pattern in iirc.SECRET_PATTERNS.items() if pattern.search(text)]
+    token = "sk-" + "Ab3dEf6hIj9kLm2nOp5qRs8t"   # built in two parts so no scanner takes the file for a leak
+    assert len(hits(f"key: {token}")) == 1
+    assert hits("ghp_" + "a1B2" * 9) and hits("-----BEGIN OPENSSH PRIVATE KEY-----")
+    assert hits("task-notification-something-long-enough") == []
+    assert hits("risk-" + "x" * 30) == [] and hits("my_sk-" + "x" * 30) == []
+
+
+def _replay_files():
+    loader = SourceFileLoader("replay_files", str(ROOT / "scripts" / "replay-files.py"))
+    spec = importlib.util.spec_from_loader("replay_files", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
 def test_line_replay_counts_reads(tmp_path):
     lr = _line_replay()
     replay = tmp_path / "replay.jsonl"
@@ -2367,3 +2387,32 @@ def test_line_replay_counts_reads(tmp_path):
     counts = lr.count_reads(stream, labels)
     assert (counts["relevant"], counts["noise"], counts["other"], counts["pulls"]) == (2, 1, 1, 1)
     assert counts["pages"] == {"hook-timeout.md": 2, "host-hang.md": 1, "unlabelled.md": 1}
+
+
+def test_replay_files_join_labels_to_prompts():
+    rf = _replay_files()
+    prompts = rf.neckbeard_prompts([
+        {"session": "aaaaaaaa-1111", "uuid": "bbbbbbbb-2222", "text": "why is the vm down? " + "sk-" + "x" * 24},
+        {"session": "cccccccc-3333", "uuid": "dddddddd-4444", "text": "y" * 9000},
+    ])
+    labels = [{"qid": "aaaaaaaa/bbbbbbbb", "page": "vm.md", "label": "relevant"},
+              {"qid": "cccccccc/dddddddd", "page": "long.md", "label": "noise"},
+              {"qid": "eeeeeeee/ffffffff", "page": "gone.md", "label": "noise"}]
+    rows, missing = rf.join(labels, prompts, "/repo")
+    assert missing == ["eeeeeeee/ffffffff"]
+    assert rows[0] == {"repo": "/repo", "qid": "aaaaaaaa/bbbbbbbb", "prompt": "why is the vm down? [REDACTED]",
+                       "via": "prompt", "page": "vm.md", "label": "relevant"}
+    assert len(rows[1]["prompt"]) == 8000 and "excerpt" not in rows[1]
+
+    # agent-builder: the transcript by hash first, then by the excerpt, else the excerpt itself
+    tx = [{"ts": 10.0, "hash": iirc.prompt_hash("full\ntext"), "text": "full\ntext"},
+          {"ts": 20.0, "hash": "h2", "text": "second\nprompt " + "z" * 400}]
+    assert rf.recall_prompt({"via": "prompt", "ts": "x", "prompt": {"text": "nope"}}, iirc.prompt_hash("full\ntext"), tx) \
+        == {"prompt": "full\ntext", "via": "prompt"}
+    excerpt = iirc.clean(tx[1]["text"], 300)
+    assert rf.recall_prompt({"via": "prompt", "prompt": {"text": excerpt}}, None, tx)["prompt"] == tx[1]["text"]
+    assert rf.recall_prompt({"via": "prompt", "prompt": {"text": "lost"}}, None, tx) == {"prompt": "lost", "via": "prompt", "excerpt": True}
+    assert rf.recall_prompt({"via": "failure", "failed": {"command": "make", "error": "boom"}}, None, None) == {"prompt": "make\nboom", "via": "failure"}
+    assert rf.recall_prompt({"via": "prompt", "prompt": {"text": None}}, None, None) is None
+    rows, _ = rf.join([{"qid": "q", "page": "p.md", "label": "unsure"}], {"q": {"prompt": "lost", "via": "prompt", "excerpt": True}}, "/r")
+    assert rows[0]["excerpt"] is True
