@@ -1,0 +1,7 @@
+iirc is MIT-licensed (see LICENSE), with one exception:
+
+bin/iirc_words.txt is derived from wordfreq's English word list and is licensed
+CC-BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Source: wordfreq
+by Robyn Speer, https://github.com/rspeer/wordfreq, whose data includes SUBTLEX
+word lists by Marc Brysbaert et al. and Google Books Ngrams. The file's header
+says how it was made; scripts/common-words.py rebuilds it.

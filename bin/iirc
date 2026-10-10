@@ -886,12 +886,12 @@ def string_search(terms: list[str]) -> list[dict]:
         head = f"{page.name} {fm.get('title', '')} {fm.get('summary', '')}".lower()
         texts.append((store, page, fm, head, head + " " + body.lower()))
     per_page = [(store, page, fm, head, [t for t in terms if t in text]) for store, page, fm, head, text in texts]
-    # a term in more than a third of pages, and in more than three, says nothing about any one of them
+    # a term in more than RARE_SHARE of pages, and in more than two, says little about any one of them
     counts: dict[str, int] = {}
     for *_, hits in per_page:
         for t in hits:
             counts[t] = counts.get(t, 0) + 1
-    common = {t for t, n in counts.items() if n > max(3, len(pages) / 3)}
+    common = {t for t, n in counts.items() if n > max(2, round(len(pages) * RARE_SHARE))}
     for store, page, fm, head, hits in per_page:
         if hits:
             # a head term must match as a whole word, so "add" does not hit "adds" and "lets" does not hit "lets the tool run"
@@ -960,6 +960,9 @@ def row_current(r: dict) -> bool:
 
 RECALL_MIN_PROMPT = 40
 MAX_SUGGESTED = 3            # pages a recall line suggests at most; `iirc max-suggested N` changes it per machine
+RARE_SHARE = 0.10            # a term in at most this share of pages (and at least two) is rare
+# plain English that is rare in a small store still names nothing; one word per line, # starts a comment
+COMMON_WORDS = frozenset(w for w in (Path(__file__).resolve().parent / "iirc_words.txt").read_text().split("\n") if w and not w.startswith("#"))
 IDENTIFIER_RE = re.compile(r"[0-9._-]")
 # Text Claude Code wraps around what the person typed, or sends with no person at all: a subagent's
 # hand-back, a task finishing, another session's message, a system reminder. Recall searches what is left.
@@ -1113,8 +1116,8 @@ def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict
     The evidence for that rule (25 failure pairs, none relevant) came from semantic search; string-only installs keep the term rule."""
     d = distance if isinstance(distance, (int, float)) else None
     sem = "semantic" in via and d is not None   # the tool's own fallback rows carry no distance
-    # an identifier, or a rare word of five letters or more that names the page itself
-    strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 for t in head)
+    # an identifier, or a rare word of five letters or more, not common English, that names the page itself
+    strong_term = any(IDENTIFIER_RE.search(t) for t in rare) or any(t in rare and len(t) >= 5 and t not in COMMON_WORDS for t in head)
     if sem and strong_term and d <= knobs["both"]:
         return "meaning+term", None
     if sem and d <= knobs["semantic_only"]:

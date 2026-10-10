@@ -2604,6 +2604,26 @@ def test_string_search_ignores_sources_and_links(tmp_path):
     assert sorted(r["filename"] for r in iirc.string_search(["five"])) == ["cited.md", "plain.md"]   # the body before Sources still counts
 
 
+# p5 step 6
+
+
+def test_rarity_by_share_and_common_words(tmp_path):
+    knobs = {"semantic_only": 0.28, "both": 0.34}
+    # a plain English head word is never strong, however rare it is in the store
+    assert iirc.gate(["semantic", "people"], 0.33, ["people"], ["people"], knobs) == (None, "needs_term")
+    assert iirc.gate(["semantic", "pysqlite3"], 0.33, ["pysqlite3"], [], knobs) == ("meaning+term", None)
+    assert iirc.gate(["semantic", "ollama"], 0.33, ["ollama"], ["ollama"], knobs) == ("meaning+term", None)
+    assert len(iirc.COMMON_WORDS) == 1000 and "people" in iirc.COMMON_WORDS
+    # 20 pages: rare is at most max(2, round(20 * 0.10)) = 2 pages; the old cut let 6 through
+    field = tmp_path / ".iirc"; field.mkdir()
+    for i in range(20):
+        words = ["zebrafish"] * (i < 2) + ["quokka"] * (i < 3)
+        (field / f"p{i:02}.md").write_text(f"---\ntitle: Page {i}\nsummary: s\n---\n{' '.join(words)}\n")
+    iirc.set_root(tmp_path)
+    rare = {r["filename"]: r["rare_terms"] for r in iirc.string_search(["zebrafish", "quokka"])}
+    assert rare == {"p00.md": ["zebrafish"], "p01.md": ["zebrafish"], "p02.md": []}
+
+
 # p5 step 22
 
 
