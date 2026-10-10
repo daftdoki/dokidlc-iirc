@@ -1080,18 +1080,18 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     return [r for r in recall_verdicts(rows) if r["verdict"] == "passed"]
 
 
-REPEAT_RECALLS = 10   # a page a recall named stays off the line for this many of the session's recalls
+def compaction(row: dict) -> bool:
+    """The PreCompact hook's snapshot row: the hook writes it before the context is compacted, so a later recall sees it."""
+    return row["cmd"] == "session" and row.get("trigger") == "PreCompact"
 
 
 def recent_named(session: str) -> set[str]:
-    """Pages this session's last REPEAT_RECALLS recalls named, and pages it read or pulled since the oldest of them."""
+    """Pages this session's recalls named, read, or pulled since its last compaction: the earlier lines are still in context."""
     if session == "no-session":
         return set()   # recalls run outside Claude Code share this id; they are not one session
     rows = read_log(session=session)
-    recalls = [i for i, r in enumerate(rows) if r["cmd"] == "recall"][-REPEAT_RECALLS:]
-    since = recalls[0] if len(recalls) == REPEAT_RECALLS else -1
-    named = {base(p) for i in recalls for p in rows[i].get("pages") or []}
-    return named | {base(p) for r in rows[since + 1:] if r["cmd"] in ("read", "pull") for p in r.get("pages") or []}
+    since = max((i for i, r in enumerate(rows) if compaction(r)), default=-1)
+    return {base(p) for r in rows[since + 1:] if r["cmd"] in ("recall", "read", "pull") for p in r.get("pages") or []}
 
 
 def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None, source: str = "prompt",

@@ -2866,11 +2866,18 @@ def test_recall_names_a_page_once_per_session(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s10")
     for i in range(8):
         assert named(f"x{i}") == [f"x{i}"]
-    assert named("a", "c") == ["c"]    # the recall that named a is the 10th-last
-    assert named("a") == ["a"]         # 10 recalls without it: a returns
-    # a page read since the 10th-last recall is left out too, STORE/PAGE or bare
+    assert named("a", "c") == ["c"]
+    assert named("a") == []            # 10 recalls without it: a stays out
+    # a page read is left out too, STORE/PAGE or bare
     iirc.log_event("read", pages=["project/d"])
     assert named("d", "e") == ["e"]
+    iirc.log_event("session", trigger="SessionEnd")   # a snapshot that is not a compaction
+    assert named("a", "d") == []
+    # the PreCompact hook's row: the context was compacted, so a and d come back, once each
+    iirc.log_event("session", trigger="PreCompact")
+    assert named("a", "d") == ["a"]
+    assert named("a", "d") == ["d"]
+    assert named("a", "d") == []
     # the replay sweep sees no history
     hit("a")
     assert [r["verdict"] for r in iirc.recall_verdicts(iirc.hybrid_search(""), cap=1)] == ["passed"]

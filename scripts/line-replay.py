@@ -207,11 +207,6 @@ REPEAT_RULES = {"window10": (10, False), "window5": (5, False), "window3": (3, F
                 "session-once": (None, True)}
 
 
-def compaction(row: dict) -> bool:
-    """The PreCompact hook's snapshot row: it is written before the context is compacted."""
-    return row["cmd"] == "session" and row.get("trigger") == "PreCompact"
-
-
 def when(ts) -> datetime | None:
     try:
         return datetime.fromisoformat(str(ts))
@@ -242,7 +237,7 @@ def with_transcript_compactions(rows: list[dict], marks: dict[str, list[datetime
     marks = {s: list(ts) for s, ts in marks.items()}
     out = []
     for r in rows:
-        if compaction(r):
+        if iirc().compaction(r):
             continue
         s, t = str(r.get("session")), when(r.get("ts"))
         while t is not None and marks.get(s) and marks[s][0] <= t:
@@ -267,7 +262,7 @@ def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
         reads = [(i, base(p)) for i, r in enumerate(srows) if r["cmd"] in ("read", "pull") for p in r.get("pages") or []]
         upkeep = [(i, base(r.get("page"))) for i, r in enumerate(srows) if r["cmd"] in ("write", "verify")]
         recalls = [i for i, r in enumerate(srows) if r["cmd"] == "recall"]
-        compactions = [i for i, r in enumerate(srows) if compaction(r)]
+        compactions = [i for i, r in enumerate(srows) if iirc().compaction(r)]
         named: list[tuple[int, set[str]]] = []   # (row index, pages the rule would let the line name), oldest first
         for i, r in enumerate(srows):
             if r["cmd"] != "recall":
