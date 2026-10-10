@@ -546,10 +546,11 @@ function refreshBrief($: EngineInterface) {
 
 /** Near the auto-compact threshold, ask iirc once for the line that asks the model to write what it learned. */
 async function askCompactNudge($: EngineInterface) {
+  if (await read($, compactAsked)) return
   const { context } = await $.session.usage({ breakdown: 'summary' })
   const b = context.breakdown
   const limit = b?.isAutoCompactEnabled && b.autoCompactThreshold ? b.autoCompactThreshold : context.window
-  if (context.tokens === undefined || context.tokens < COMPACT_NEAR * limit || (await read($, compactAsked))) return
+  if (context.tokens === undefined || context.tokens < COMPACT_NEAR * limit) return
   await update($, compactAsked, () => true)
   const line = await iircLine($, ['nudge', '--compact'])
   if (line) await update($, compactNudge, () => line)
