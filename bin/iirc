@@ -1002,7 +1002,7 @@ def store_pages(store: Store) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in list_pages(store.dir)}
 
 
-def update_vectors(store: Store, limit: int | None = None, full: bool = False):
+def update_vectors(store: Store, limit: int | None = None, full: bool = False, dims: int | None = None):
     """The store's vectors after embedding its new and changed pages (see iirc_embed.refresh).
 
     Under the store's vectors lock, so a recall that loaded the store before an
@@ -1014,11 +1014,11 @@ def update_vectors(store: Store, limit: int | None = None, full: bool = False):
     path, pages = vector_path(store), store_pages(store)
     try:
         with store_lock(f"vectors-{store.field}", wait=0 if limit is not None else LOCK_WAIT):
-            return iirc_embed.refresh(path, pages, embedding_backend(), limit=limit, full=full)
+            return iirc_embed.refresh(path, pages, embedding_backend(), limit=limit, full=full, dims=dims)
     except LockTimeout:
         if limit is None:
             print(f"iirc: another index held the {store.name} vector store for {LOCK_WAIT:.0f} s; changed pages wait for the next search or `iirc index`", file=sys.stderr)
-        return iirc_embed.refresh(path, pages, embedding_backend(), limit=0, write=False)
+        return iirc_embed.refresh(path, pages, embedding_backend(), limit=0, write=False, dims=dims)
 
 
 INDEX_RETRY = 600   # seconds before a search starts another background index for the same store
@@ -1053,7 +1053,8 @@ def semantic_search(query: str) -> list[dict]:
         return []
     rows = []
     for store in live_stores():
-        vectors = update_vectors(store, limit=SEARCH_REEMBED)
+        # the query's width: an OpenAI-compatible host may have changed models, and the store must match
+        vectors = update_vectors(store, limit=SEARCH_REEMBED, dims=len(qvec))
         if len(vectors.names) < len(list_pages(store.dir)):
             index_in_background(store)
         for d, name in iirc_embed.distances(vectors, qvec, active_model().cut):
@@ -3341,15 +3342,15 @@ def suspect_pages(pages: list[Path]) -> list[str]:
         return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
 
 
-def embed_refusal(base: str, model: iirc_embed.Model) -> str | None:
-    """Why a test embed failed, or None when it worked. The probe's GET cannot see a 404 for a model the server does not serve."""
+def embed_refusal(base: str, model: iirc_embed.Model) -> tuple[str | None, int]:
+    """(why a test embed failed, or None when it worked; the width it answered at). The probe's GET cannot see a 404 for a model the server does not serve."""
     try:
-        iirc_embed._post(base + "/v1/embeddings", {"model": model.id, "input": ["iirc doctor"]}, iirc_embed.EMBED_TIMEOUT)
+        got = iirc_embed._post(base + "/v1/embeddings", {"model": model.id, "input": ["iirc doctor"]}, iirc_embed.EMBED_TIMEOUT)
+        return None, len(got["data"][0]["embedding"])
     except urllib.error.HTTPError as e:
-        return f"a test embed got HTTP {e.code}"
-    except (urllib.error.URLError, OSError, ValueError):
-        return "a test embed got no embedding back"
-    return None
+        return f"a test embed got HTTP {e.code}", 0
+    except (urllib.error.URLError, OSError, ValueError, TypeError, KeyError, IndexError):
+        return "a test embed got no embedding back", 0
 
 
 def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
@@ -3515,8 +3516,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     elif model.backend == "openai":
         base, source, up = resolve_host()
         status = host_status(base)
-        why = embed_refusal(base, model) if up else f"it answered HTTP {status}" if status else None
-        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id})", up and why is None,
+        why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
+        # the host's width, not the table's: it may serve another size of the model under this name
+        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
+                    up and why is None,
                     (f"{why}; " if why else "") + "check the endpoint, run `iirc setup` to choose another, or `iirc setup --substring`")
     else:
         up = doctor_ollama(model, args.fix, report)

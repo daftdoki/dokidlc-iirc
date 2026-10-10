@@ -3094,11 +3094,11 @@ def test_flat_recall_moves_on_doctor_fix(tmp_path, monkeypatch, capsys):
 # p5 step 25
 
 @contextlib.contextmanager
-def _fake_openai(monkeypatch, model):
-    """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order. Yields the inputs."""
+def _fake_openai(monkeypatch, model, dims=None):
+    """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order, `dims` wide. Yields the inputs."""
     import http.server
     seen: list[str] = []
-    pad = [0.0] * (iirc.iirc_embed.MODELS[model].dims - len(_WORDS) - 1)
+    pad = [0.0] * ((dims or iirc.iirc_embed.MODELS[model].dims) - len(_WORDS) - 1)
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -3700,3 +3700,33 @@ def test_vector_store_of_the_wrong_width_is_reembedded(tmp_path, monkeypatch):
             assert seen == ["search_query: alpha"]
         with np.load(path) as data:
             assert data["vecs"].shape == (2, 768)
+
+
+# p5 review fixes, R4
+
+
+def test_openai_host_sets_its_own_width(tmp_path, monkeypatch, capsys):
+    """A host may serve Qwen3-Embedding-8B, 4096 wide, under the 0.6B's name: the store takes the host's width, and a store of another width is embedded again."""
+    import numpy as np
+    _vector_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "start_background", lambda argv: None)
+    with _fake_openai(monkeypatch, "qwen3-embedding", dims=4096):
+        path = iirc.vector_path(iirc.STORES[0])
+        iirc.reindex()
+        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
+        assert [r["filename"] for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == ["alpha-notes.md"]
+        iirc.main(["index"])
+        assert "index current" in capsys.readouterr().out
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        assert "4096" in [l for l in capsys.readouterr().out.splitlines() if "embedding endpoint" in l][0]
+        # a store the 0.6B model made, 1024 wide: a search embeds every page again at the host's width
+        v = iirc.iirc_embed.load(path)
+        iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
+        assert [r["filename"] for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == ["alpha-notes.md"]
+        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
+        # and so does an index
+        iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
+        iirc.main(["index"])
+        assert "index current" in capsys.readouterr().out
+        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)

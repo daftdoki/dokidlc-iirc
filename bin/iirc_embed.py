@@ -38,7 +38,7 @@ class Model(NamedTuple):
     backend: str            # "ollama", "openai" (an OpenAI-compatible URL), or "onnx" (bin/iirc-cpu on this CPU)
     query_prefix: str
     doc_prefix: str
-    dims: int
+    dims: int               # ollama and onnx answer at this width; an OpenAI-compatible host at its own (see fixed_width)
     knobs: dict[str, tuple[float, float, float]]   # recall knob: (default, low, high) on this model's distance scale
     cut: float              # a page farther than this never reaches the gate
     near: tuple[float, float]   # page-to-page distance: (near-duplicate, duplicate); doctor names the first, the brief warns on the second
@@ -93,6 +93,11 @@ class Vectors(NamedTuple):
     sha: list[str]
     vecs: object            # numpy float32 array, one row per page, or per window when owner is set
     owner: object = None    # numpy int array: the index in names of each row; None when row i is page i
+
+
+def fixed_width(model: Model) -> bool:
+    """An OpenAI-compatible name may serve any size of the model (Qwen3-Embedding 0.6B is 1024 wide, 8B 4096), so its width is the host's."""
+    return model.backend != "openai"
 
 
 def table_name(model_id: str) -> str:
@@ -157,7 +162,8 @@ def run_cpu(backend: Backend, texts: list[str], kind: str):
 
 
 def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float = EMBED_TIMEOUT):
-    """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else, such as another width."""
+    """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else,
+    such as another width than a fixed-width model's."""
     import numpy as np
     if not texts:
         return []
@@ -179,8 +185,8 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
         vecs = np.asarray(rows, dtype=np.float32)
     except (urllib.error.URLError, OSError, ValueError, TypeError, AttributeError, KeyError):
         return None
-    # another width than the model's is another model served under its name; load() would refuse the store it made
-    if vecs.ndim != 2 or len(vecs) != len(texts) or vecs.shape[1] != backend.model.dims:
+    # another width than a fixed-width model's is another model served under its name; load() would refuse the store it made
+    if vecs.ndim != 2 or len(vecs) != len(texts) or (fixed_width(backend.model) and vecs.shape[1] != backend.model.dims):
         return None
     return [vecs[i:i + 1] for i in range(len(texts))]
 
@@ -192,10 +198,11 @@ def embed_query(backend: Backend, query: str):
 
 
 def load(path: Path) -> Vectors | None:
-    """The store at path, or None when it is missing, not a store this module wrote, or of another width than its model's.
+    """The store at path, or None when it is missing, not a store this module wrote, or of another width than its fixed-width model's.
 
     The file name names the model (store_path). A server that serves another
     model under the same name changes the width, and every page counts as missing.
+    An OpenAI-compatible model's store loads at any width; refresh compares it with the host's.
     """
     import numpy as np
     try:
@@ -206,7 +213,7 @@ def load(path: Path) -> Vectors | None:
         return None
     if vecs.dtype != np.float32 or vecs.ndim != 2 or len(names) != len(shas):
         return None
-    dims = {table_name(m.id): m.dims for m in MODELS.values()}.get(path.stem)
+    dims = {table_name(m.id): m.dims for m in MODELS.values() if fixed_width(m)}.get(path.stem)
     if len(vecs) and dims is not None and vecs.shape[1] != dims:
         return None
     if owner is None and len(vecs) != len(names):
@@ -253,16 +260,19 @@ def build(rows: list[tuple[str, str, object]], dims: int) -> Vectors:
 
 
 def refresh(path: Path, pages: dict[str, bytes], backend: Backend, limit: int | None = None, full: bool = False,
-            write: bool = True) -> Vectors:
+            write: bool = True, dims: int | None = None) -> Vectors:
     """The store for these pages: a page whose sha changed, or that is new, is embedded; a page gone is dropped.
 
     With `limit`, more changed pages than that are embedded not at all and left
     out of the result. With `full`, every page is embedded again, and a page the
     embed failed for keeps its old vector if its file has not changed. A failed
     embed leaves a changed page out. With `write` false, the store on disk is
-    not saved.
+    not saved. A store of another width than `dims` (the query's), or than the
+    pages embedded now, counts as missing: the host changed models.
     """
     old = load(path)
+    if old is not None and dims is not None and len(old.vecs) and old.vecs.shape[1] != dims:
+        old = None
     have = page_blocks(old) if old else {}
     shas = {name: sha(raw) for name, raw in pages.items()}
     stale = sorted(n for n in pages if full or have.get(n, (None,))[0] != shas[n])
@@ -274,6 +284,8 @@ def refresh(path: Path, pages: dict[str, bytes], backend: Backend, limit: int | 
             if got is None:
                 break
             fresh.update(zip(chunk, got))
+    if fresh and old is not None and len(old.vecs) and next(iter(fresh.values())).shape[1] != old.vecs.shape[1]:
+        have = {}
     rows = []
     for name in sorted(pages):
         if name in fresh:
