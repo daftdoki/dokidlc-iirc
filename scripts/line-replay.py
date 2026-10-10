@@ -6,6 +6,7 @@
 """Replay judged prompts through `claude -p` with a given recall line, and count the pages the model reads.
 
   scripts/line-replay.py --replay FILE [--variants today,...] [--sample N] [--seed S] [--passed FILE] [--streams DIR] [--dry-run] [--out FILE]
+  scripts/line-replay.py --repeats [--rule window10|window5|window3|read-only|read-or-window3] [--out FILE]
 
 FILE is a replay JSONL file, one judged pair per line:
 {"repo", "qid", "prompt", "via", "page", "label"}. Only `via: prompt` rows are
@@ -23,6 +24,16 @@ so its own recall hook stays silent; this checkout's bin/ is first on PATH, so
 `iirc read` still runs. The model may run only `iirc read`, `iirc pull`, and
 `iirc search` in Bash, plus Read, Grep, and Glob: the prompts are real tasks and
 the run's cwd is a real checkout.
+
+--repeats runs no model. It reads this machine's iirc logs, read-only, and applies
+the once-per-session rule to each session's recalls in log order: a page is left
+out when the session's last 10 recalls named it, or a read or pull of it is newer
+than the 10th-last recall. --rule picks a variant: window5 and window3 shorten the
+window; read-only leaves a page out only once the session read it; read-or-window3
+adds the last 3 recalls' names to that. It counts the suggestions the rule leaves out, and the
+lost reads among them: a left-out page the session read after that recall and had
+not read before it. A left-out page's slot stays empty here, since the log keeps
+only the pages a line named.
 """
 import argparse
 import importlib.util
@@ -182,6 +193,74 @@ def count_reads(stream: str, labels: dict[str, str]) -> dict:
     return counts
 
 
+# --- the once-per-session rule over the real log ---------------------------------
+
+# rule: (recalls a named page stays out for, whether a read leaves it out for the whole session or only within that window)
+REPEAT_RULES = {"window10": (10, False), "window5": (5, False), "window3": (3, False), "read-only": (0, True), "read-or-window3": (3, True)}
+
+
+def repeat_counts(rows: list[dict], rule: str = "window10") -> dict:
+    """Per session and in total: recalls, pages suggested, pages the rule leaves out, and lost reads, with each lost case.
+
+    A lost pair (session, page) is a plain cost when the session read the page before its next recall and never
+    wrote or verified it afterwards: the left-out suggestion is the likely reason for that read."""
+    base = iirc().base
+    window, session_reads = REPEAT_RULES[rule]
+    by_session: dict[str, list[dict]] = {}
+    for r in rows:
+        by_session.setdefault(str(r.get("session")), []).append(r)
+    sessions, lost, plain = {}, [], set()
+    for s, srows in by_session.items():
+        c = {"recalls": 0, "suggested": 0, "suppressed": 0, "lost_reads": 0}
+        reads = [(i, base(p)) for i, r in enumerate(srows) if r["cmd"] in ("read", "pull") for p in r.get("pages") or []]
+        upkeep = [(i, base(r.get("page"))) for i, r in enumerate(srows) if r["cmd"] in ("write", "verify")]
+        recalls = [i for i, r in enumerate(srows) if r["cmd"] == "recall"]
+        named: list[tuple[int, set[str]]] = []   # (row index, pages the rule would let the line name), oldest first
+        for i, r in enumerate(srows):
+            if r["cmd"] != "recall":
+                continue
+            recent = named[-window:] if window else []
+            since = -1 if session_reads or len(recent) < window else recent[0][0]
+            out = set().union(*(pages for _, pages in recent)) | {p for j, p in reads if since < j < i}
+            pages = [base(p) for p in r.get("pages") or []]
+            kept = {p for p in pages if p not in out}
+            c["recalls"] += 1
+            c["suggested"] += len(pages)
+            for p in pages:
+                if p in kept:
+                    continue
+                c["suppressed"] += 1
+                later = next((j for j, q in reads if j > i and q == p), None)
+                if later is not None and not any(j < i and q == p for j, q in reads):
+                    c["lost_reads"] += 1
+                    lost.append({"session": s, "repo": r.get("repo"), "ts": r.get("ts"), "page": p})
+                    if not any(i < k < later for k in recalls) and not any(k >= later and q == p for k, q in upkeep):
+                        plain.add((s, p))
+            named.append((i, kept))
+        if c["recalls"]:
+            sessions[s] = c
+    totals = {k: sum(c[k] for c in sessions.values()) for k in ("recalls", "suggested", "suppressed", "lost_reads")}
+    totals.update(sessions=len(sessions), lost_pairs=len({(c["session"], c["page"]) for c in lost}), plain_pairs=len(plain))
+    plain_cases = [c for c in lost if (c["session"], c["page"]) in plain]
+    return {"rule": rule, "totals": totals, "sessions": sessions, "lost": lost,
+            "plain": [c for n, c in enumerate(plain_cases) if (c["session"], c["page"]) not in {(d["session"], d["page"]) for d in plain_cases[:n]}]}
+
+
+def main_repeats(out: Path | None, rule: str) -> int:
+    result = repeat_counts(iirc().read_log(), rule)
+    for s, c in result["sessions"].items():
+        if c["suppressed"]:
+            print(f"{s}: recalls {c['recalls']}, suggested {c['suggested']}, left out {c['suppressed']}, lost reads {c['lost_reads']}")
+    for case in result["lost"]:
+        print(f"lost: {case['session']} {case['ts']} {case['page']}")
+    t = result["totals"]
+    print(f"{rule}: {t['sessions']} sessions, {t['recalls']} recalls, {t['suggested']} suggested, left out {t['suppressed']}, "
+          f"lost reads {t['lost_reads']}, lost pairs {t['lost_pairs']}, plain cost {t['plain_pairs']}")
+    if out:
+        out.write_text(json.dumps(result, indent=1) + "\n")
+    return 0
+
+
 # --- running claude -p -----------------------------------------------------------
 
 
@@ -226,7 +305,9 @@ def build_line(variant: str, prompt: dict, rows: list[dict]) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Count the pages a model reads under each recall line variant.")
-    ap.add_argument("--replay", required=True, type=Path)
+    ap.add_argument("--replay", type=Path)
+    ap.add_argument("--repeats", action="store_true", help="count what the once-per-session rule leaves out of the real log, and the reads it loses")
+    ap.add_argument("--rule", choices=list(REPEAT_RULES), default="window10", help="with --repeats: which repeat rule to apply")
     ap.add_argument("--variants", default="today", help=f"comma-separated, from: {', '.join(VARIANTS)}")
     ap.add_argument("--sample", type=int, help="N prompts with a relevant page and N without; default every human prompt")
     ap.add_argument("--seed", type=int, default=1)
@@ -237,6 +318,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="print the planned runs and their count, run nothing")
     ap.add_argument("--out", type=Path, help="JSON results: per variant, relevant reads, noise reads, runs")
     args = ap.parse_args(argv)
+    if args.repeats:
+        return main_repeats(args.out, args.rule)   # before the state override below: it reads this machine's real log
+    if not args.replay:
+        ap.error("--replay is required")
     variants = [v.strip() for v in args.variants.split(",") if v.strip()]
     unknown = [v for v in variants if v not in VARIANTS]
     if unknown:

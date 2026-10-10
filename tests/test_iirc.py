@@ -2774,3 +2774,49 @@ def test_tune_sweep_prints_audit(tmp_path, monkeypatch, capsys):
     iirc.main(["tune", "sweep", "--replay", str(tmp_path / "empty.jsonl")])
     out = capsys.readouterr().out
     assert "\naudit:\n" in out and flagged in out
+
+
+# p5 step 10
+
+def test_line_replay_counts_lost_reads(tmp_path, monkeypatch, capsys):
+    lr = _line_replay()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    log = tmp_path / "st" / "dokidlc-iirc" / "log.jsonl"
+    log.parent.mkdir(parents=True)
+
+    def rec(s, *pages):
+        return {"ts": "2026-10-09T10:00:00Z", "session": s, "cmd": "recall", "pages": [f"{p}.md" for p in pages]}
+
+    def read(s, page, cmd="read"):
+        return {"ts": "2026-10-09T10:00:01Z", "session": s, "cmd": cmd, "pages": [page]}
+    rows = [
+        rec("s1", "a", "b"),
+        read("s1", "proj/d"),         # STORE/PAGE and no .md: the same page as d.md
+        rec("s1", "a", "c", "d"),     # a was named, d was read: both left out
+        read("s1", "a"),              # a read after it was left out, with no read before it: a lost read
+        rec("s1", "b"),               # left out, never read: not lost
+        read("s1", "d.md", "pull"),   # d was read before it was left out: not lost
+        rec("s2", "a"),               # another session starts clean
+        read("s2", "a.md"),
+        read("s3", "k"),              # read long before its last naming: only the session-wide read rules leave k out then
+        rec("s3", "e", "k"),
+        rec("s3", "f"), rec("s3", "g"), rec("s3", "h"),
+        rec("s3", "e", "k"),          # e named 4 recalls back: window 5 and 10 leave it out, window 3 does not
+        read("s3", "e"),
+        {"ts": "2026-10-09T10:00:02Z", "session": "s3", "cmd": "write", "page": "e.md"},   # upkeep: lost, but not a plain cost
+    ]
+    log.write_text("".join(json.dumps(r) + "\n" for r in rows) + "not json\n")
+    out = tmp_path / "repeats.json"
+    assert lr.main(["--repeats", "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    t = result["totals"]
+    assert (t["recalls"], t["suggested"], t["suppressed"], t["lost_reads"], t["lost_pairs"], t["plain_pairs"]) == (9, 14, 6, 2, 2, 1)
+    assert [(c["session"], c["page"]) for c in result["lost"]] == [("s1", "a.md"), ("s3", "e.md")]
+    assert result["sessions"]["s1"]["suppressed"] == 3 and result["sessions"]["s2"]["suppressed"] == 0
+    assert result["rule"] == "window10" and "lost reads 2" in capsys.readouterr().out
+    # each rule: (left out, lost reads)
+    expect = {"window5": (6, 2), "window3": (4, 1), "read-only": (3, 0), "read-or-window3": (5, 1)}
+    for rule, counts in expect.items():
+        assert lr.main(["--repeats", "--rule", rule, "--out", str(out)]) == 0
+        t = json.loads(out.read_text())["totals"]
+        assert (t["suppressed"], t["lost_reads"]) == counts, rule
