@@ -391,9 +391,11 @@ Decisions 1 and 2 are taken: phase 1 was built with the changes in
    model choice and a compatible Go implementation?
 4. For a later port: keep calling the AGPL tool, port it under AGPL,
    build clean-room from the spec, or ask Cal first.
-5. Cleanup: the six pulled ollama models (about 5.2 GB), the two
-   rerankers in `~/.cache/huggingface` (3.3 GB), and the research
-   downloads in the session scratchpad (about 7 GB). Remove them?
+5. Taken, 2026-10-10: the research downloads are removed. These are
+   five of the six pulled ollama models, the two rerankers in
+   `~/.cache/huggingface`, the uv environment of the CPU tier, and the
+   downloads in the session scratchpad. `qwen3-embedding:0.6b` stays,
+   because setup offers it first.
 6. Taken: the research reports are kept in the `evidence/` directory of
    quest 2610100115-p5 in the private agent-builder repository, because
    they quote prompts.
