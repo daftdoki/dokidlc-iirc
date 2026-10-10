@@ -94,7 +94,8 @@ const DEMO_HEALTH: IircHealth = {
 // pages the card names under SUGGESTED, NOT READ, and under TRUST
 const LIST_MAX = 3
 // the commands /iirc runs directly, as the card and the text help list them
-const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
+// WITH CLAUDE: commands that go to the skill, so Claude runs them and asks what it needs
+const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP' | 'WITH CLAUDE'][] = [
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
   ['doctor --fix', 'install or repair what doctor finds', 'MAINTENANCE'],
   ['doubt', 'pages that may be wrong', 'MAINTENANCE'],
@@ -103,12 +104,16 @@ const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
   ['stats', 'how the pages are being used', 'MAINTENANCE'],
   ['index', 'rebuild the search index', 'MAINTENANCE'],
   ['knobs', "the recall gate's distances and ranges", 'MAINTENANCE'],
+  ['cost', 'tokens of index.md and of a search', 'MAINTENANCE'],
   ['search QUERY', 'ranked pages for a query', 'LOOK UP'],
   ['topics', 'every topic with its page count', 'LOOK UP'],
   ['read PAGE', 'one page, with its trust markers', 'LOOK UP'],
   ['open', 'unfold the latest suggested pages', 'LOOK UP'],
   ['reader [PAGE]', "this session's pages, or one page, in a pane", 'LOOK UP'],
   ['show PAGE', 'one page as a card, your read', 'LOOK UP'],
+  ['tune', 'judge what recall suggested, then tune it', 'WITH CLAUDE'],
+  ['audit', 'pages search shows badly, each with its fix', 'WITH CLAUDE'],
+  ['setup', 'the embedding model, or substring search', 'WITH CLAUDE'],
 ]
 // the card's title: the expansion's letters bright, the tagline a gradient from the accent orange to violet
 const TITLE = '#e6edf3'
@@ -118,7 +123,7 @@ const TAGLINE_TO = '#a78bfa'
 // the card's frame is the gradient's violet end; the STATUS chip carries the health color
 const FRAME = '#a78bfa'
 const EXAMPLES = ['what do we know about ollama hangs?', 'remember that the NAS keeps its firmware in /etc', "what's out of date?"]
-const MORE_HINT = 'settings, maintenance, and look-up'
+const MORE_HINT = 'settings, maintenance, look-up, and tuning'
 const STATUS_HINT = 'trust, stores, session counts, and recall noise'
 const REQUEST_HINT = 'ask in words; goes to the skill'
 // section titles: brighter than the tagline's end, so they read before the rows under them
@@ -999,12 +1004,12 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('line under the prompt', isShown ? 'on' : 'off', '/iirc status-line on|off')}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, '/iirc max-suggested N')}
-      {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
+      {(['MAINTENANCE', 'LOOK UP', 'WITH CLAUDE'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>
           {heading(group)}
           {COMMANDS.filter(([, , g]) => g === group).map(([cmd, what]) => command(`/iirc ${cmd}`, what))}
-          {group === 'LOOK UP' && command('/iirc <request>', REQUEST_HINT)}
+          {group === 'WITH CLAUDE' && command('/iirc <request>', REQUEST_HINT)}
         </Box>
       ))}
     </Box>

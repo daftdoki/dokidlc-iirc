@@ -192,7 +192,7 @@ The `command.run` handler in
 |---|---|
 | `/iirc` | The short card: ask in words, pointers to help and status, this session's recall hit rate and average match, and the page count. |
 | `/iirc status` | Every number: the status chip, TRUST (suspect pages), each store's uncommitted and unpushed state, the session counts, the hit rate, and SUGGESTED, NOT READ. It runs `iirc doctor --health` first. |
-| `/iirc help` | The two settings with their current values, and the commands `/iirc` runs directly. |
+| `/iirc help` | The two settings with their current values, the commands `/iirc` runs directly, and under WITH CLAUDE the ones that go to the skill. |
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
 | `/iirc status-line` | Whether the line under the prompt is on or off. |
 | `/iirc status-line on`, `/iirc status-line off` | Shows or hides that line, on this machine. |
@@ -212,6 +212,8 @@ The `command.run` handler in
 | `/iirc open` | Unfolds the latest suggested-pages row, as a click on its `[+]` does. |
 | `/iirc reader`, `/iirc reader PAGE` | The reader, a pane with this session's suggested, written, and suspect pages, or open on one page. A click on a page name, here or anywhere iirc draws one, opens the page in the reader's page tab. See [UI.md](UI.md#the-reader). |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
+| `/iirc audit` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
+| `/iirc setup` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc setup`. |
 | `/iirc tune` | Goes to the skill: the agent judges the recorded sessions and proposes page fixes and knob changes, each for your yes. See [Turn the knobs on evidence](#turn-the-knobs-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,

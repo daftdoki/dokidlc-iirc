@@ -140,7 +140,7 @@ draw the two cards with sample numbers.
 
 `/iirc help` draws the rest:
 
-![The /iirc help card: settings with their values, the maintenance commands, and the look-up commands](images/iirc-card-help.png)
+![The /iirc help card: settings with their values, the maintenance commands, the look-up commands, and the commands that go to Claude](images/iirc-card-help.png)
 
 - SETTINGS: the line under the prompt and the number of suggested pages,
   each with its command and current value
@@ -151,9 +151,10 @@ draw the two cards with sample numbers.
   session's reads, which are the agent's. `/iirc doctor` draws its checks
   as a card too: a result chip, the failures with their fixes first, then
   notes, then the checks that passed.
-- `/iirc <request>`, which goes to the skill, as do the commands that need
-  a question first: `stores add`, `setup`, `init`, `write`, `delete`, and
-  `approve`
+- WITH CLAUDE: `tune`, `audit`, `setup`, and `/iirc <request>`, which go
+  to the skill, so the agent runs them and asks what it needs. So do the
+  other commands that need a question first: `stores add`, `init`,
+  `write`, `delete`, and `approve`
 
 ![The /iirc doctor card: all 13 checks pass, each listed](images/iirc-card-doctor.png)
 
