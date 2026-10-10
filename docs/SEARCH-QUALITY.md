@@ -92,8 +92,11 @@ than nomic through ollama on the soft labels (MRR interval +0.06 to
 +0.21; this may shrink under strict labels, as Qwen3's did). As a fresh
 process, the way the hook runs, it starts in 112 ms on a performance core
 on a quiet machine (139 ms under load) and 370 to 520 ms on an efficiency
-core. On the same efficiency core, today's `iirc search` takes 4.6 to
-6.2 s, past the hook's 5-second limit. It needs 125 MB of wheels for
+core. Under the same efficiency-core proxy (`taskpolicy -b`), the
+recall hook takes 3.0 to 3.1 s today, against 0.51 s on a performance
+core: inside the 5-second limit, with little room for a slower machine
+or a cold ollama load. `iirc search` takes 5.8 to 7.3 s there, but the
+hook does not run it. It needs 125 MB of wheels for
 macOS and Linux, a 23 MB model, and no compiler; all Apache-2.0 or MIT.
 A smaller fallback (potion-base-8M static embeddings with BM25) needs no
 onnxruntime: numpy, tokenizers, safetensors, and PyStemmer.
