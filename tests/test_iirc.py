@@ -2631,3 +2631,41 @@ def test_line_replay_samples_only_prompts_recall_searches(tmp_path):
     replay.write_text("".join(json.dumps(r) + "\n" for r in rows))
     assert [p["qid"] for p in lr.sample(lr.load_replay(replay), None, 1)] == ["human"]
 
+
+
+# p5 step 8
+
+def test_failure_recall_needs_meaning_and_term(tmp_path, monkeypatch):
+    knobs = {"semantic_only": 0.28, "both": 0.34}
+    meaning = (["semantic"], 0.2, [], [])
+    both = (["semantic", "term"], 0.3, ["11434"], [])
+    term = (["term"], None, ["11434"], [])
+    assert [iirc.gate(*c, knobs, "prompt")[0] for c in (meaning, both, term)] == ["meaning", "meaning+term", "term"]
+    assert [iirc.gate(*c, knobs, "failure") for c in (meaning, both, term)] == [(None, "failure_needs_both"), ("meaning+term", None), (None, "failure_needs_both")]
+    # one page on a failure, whatever cap the caller asks for
+    rows = [{"filename": f"{c}.md", "via": ["semantic", "term"], "distance": 0.2, "rare_terms": ["11434"]} for c in "ab"]
+    assert [r["verdict"] for r in iirc.recall_verdicts(rows, knobs, cap=5, source="failure")] == ["passed", "over_max"]
+    assert [r["verdict"] for r in iirc.recall_verdicts(rows, knobs, cap=5, source="prompt")] == ["passed", "passed"]
+    # the eval sweep gates each candidate by its recall's via
+    cand = {"paths": ["semantic"], "distance": 0.2, "rare_terms": [], "head_terms": []}
+    assert iirc.sweep_counts([({**cand, "via": "prompt"}, True), ({**cand, "via": "failure"}, True)], knobs)["relevant_passed"] == 1
+    # the hook's failure recall names one page, and only a meaning+term one
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s8"); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "hybrid_search", lambda q: [{"filename": "near.md", "via": ["semantic"], "distance": 0.1, "summary": "s", "fm": {}}]
+                        + [{**r, "summary": "s", "fm": {}} for r in rows])
+    line = iirc.run_recall("curl 127.0.0.1:11434 hangs", "failure", {}, failed=("curl", "hangs"))
+    assert line.count("`iirc read ") == 1 and "a.md" in line and "near.md" not in line
+
+
+def test_string_only_failure_recall_keeps_the_term_rule(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    knobs = {"semantic_only": 0.28, "both": 0.34}
+    terms = [{"filename": f"{c}.md", "via": ["term"], "rare_terms": ["pysqlite3-binary"]} for c in "ab"]
+    near = [{"filename": "near.md", "via": ["semantic"], "distance": 0.1}]
+    iirc.write_config_file({"semantic": False})
+    # no semantic search can make a meaning hit, so an identifier still passes, one page
+    assert [r["verdict"] for r in iirc.recall_verdicts(terms, knobs, source="failure")] == ["passed", "over_max"]
+    iirc.write_config_file({"semantic": True})
+    assert [r["verdict"] for r in iirc.recall_verdicts(near + terms, knobs, source="failure")] == ["failure_needs_both"] * 3

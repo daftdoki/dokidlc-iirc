@@ -1077,9 +1077,11 @@ def recall_filter(rows: list[dict]) -> list[dict]:
     return [r for r in recall_verdicts(rows) if r["verdict"] == "passed"]
 
 
-def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None) -> list[dict]:
+def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap: int | None = None, source: str = "prompt") -> list[dict]:
     """Every candidate, with its verdict: passed, over_max, or why the gate refused it.
     `knobs` and `cap` default to RECALL and max_suggested(); `tune sweep --replay` passes others.
+    A failure recall passes one page whatever the cap: one error, one page to read.
+    It needs meaning+term only when semantic search is on; string-only search keeps the term rule.
 
     Keep a page only on evidence that survives a busy field.
 
@@ -1091,9 +1093,11 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
     """
     out = []
     kept = 0
-    cap = max_suggested() if cap is None else cap
+    cap = 1 if source == "failure" else max_suggested() if cap is None else cap
+    semantic = semantic_enabled()
     for rank, r in enumerate(rows):
-        rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], knobs or RECALL)
+        rule, reason = gate(r.get("via") or [], r.get("distance"), r.get("rare_terms") or [], r.get("head_terms") or [], knobs or RECALL, source,
+                            semantic)
         if rule is not None:
             reason = "passed" if kept < cap else "over_max"
             kept += reason == "passed"
@@ -1101,9 +1105,12 @@ def recall_verdicts(rows: list[dict], knobs: dict[str, float] | None = None, cap
     return out
 
 
-def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict[str, float]) -> tuple[str | None, str | None]:
+def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict[str, float], source: str = "prompt",
+         semantic: bool = True) -> tuple[str | None, str | None]:
     """(rule, None) when the gate lets a candidate through under these knobs, else (None, why it refused).
-    `iirc tune sweep` calls it with other knobs, so the sweep and the hook share one gate."""
+    `iirc tune sweep` calls it with other knobs, so the sweep and the hook share one gate.
+    `source` is the recall's, "prompt" or "failure"; a failure passes only meaning+term while `semantic` search is on.
+    The evidence for that rule (25 failure pairs, none relevant) came from semantic search; string-only installs keep the term rule."""
     d = distance if isinstance(distance, (int, float)) else None
     sem = "semantic" in via and d is not None   # the tool's own fallback rows carry no distance
     # an identifier, or a rare word of five letters or more that names the page itself
@@ -1111,9 +1118,9 @@ def gate(via: list[str], distance, rare: list[str], head: list[str], knobs: dict
     if sem and strong_term and d <= knobs["both"]:
         return "meaning+term", None
     if sem and d <= knobs["semantic_only"]:
-        return "meaning", None
+        return ("meaning", None) if source != "failure" else (None, "failure_needs_both")
     if not sem and any(IDENTIFIER_RE.search(t) for t in rare):
-        return "term", None
+        return ("term", None) if source != "failure" or not semantic else (None, "failure_needs_both")
     if sem and d <= knobs["both"]:
         return None, "needs_term"     # close enough had a strong term backed it
     if sem:
@@ -1258,7 +1265,7 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
         marker.write_text(now_iso())
     except OSError:
         pass
-    verdicts = recall_verdicts(hybrid_search(query))
+    verdicts = recall_verdicts(hybrid_search(query), source=via)
     passed = [r for r in verdicts if r["verdict"] == "passed"]
     line = recall_line(passed)
     named = line.count("`iirc read ")
@@ -3653,7 +3660,8 @@ def knob_grid() -> list[dict[str, float]]:
 
 def sweep_counts(pairs: list[tuple[dict, bool]], knobs: dict[str, float]) -> dict:
     """What the gate would do under these knobs to the judged pairs: (candidate, relevant)."""
-    return sweep_tally([(gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs)[0] is not None,
+    return sweep_tally([(gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs,
+                              cand.get("via") or "prompt")[0] is not None,
                          relevant) for cand, relevant in pairs])
 
 
@@ -3675,11 +3683,12 @@ def sweep_line(knobs: dict[str, float], c: dict) -> str:
             f"precision {c['precision']:.2f}, recall {c['recall']:.2f}, F1 {c['f1']:.2f}")
 
 
-def replay_counts(prompts: list[tuple[list[dict], list[tuple[str, bool]]]], knobs: dict[str, float]) -> dict:
-    """The gate's counts under these knobs on (search rows, judged pairs) per prompt; every gate pass counts, with no max_suggested cut."""
+def replay_counts(prompts: list[tuple[list[dict], str, list[tuple[str, bool]]]], knobs: dict[str, float]) -> dict:
+    """The gate's counts under these knobs on (search rows, via, judged pairs) per prompt; every gate pass counts, with no
+    max_suggested cut, but a failure keeps its one page, since that cap is the failure gate's and no knob."""
     outcomes = []
-    for rows, pairs in prompts:
-        passed = {r["filename"] for r in recall_verdicts(rows, knobs, cap=len(rows)) if r["verdict"] == "passed"}
+    for rows, via, pairs in prompts:
+        passed = {r["filename"] for r in recall_verdicts(rows, knobs, cap=len(rows), source=via) if r["verdict"] == "passed"}
         outcomes += [(page in passed, relevant) for page, relevant in pairs]
     return sweep_tally(outcomes)
 
@@ -3710,9 +3719,9 @@ def cmd_tune_sweep_replay(files: list[str]) -> None:
             g = groups.setdefault((repo, qid), {"prompt": j.get("prompt") or "", "via": j.get("via"), "pairs": []})
             g["pairs"].append((page, label == "relevant"))
     # the hook searches the person's words of a prompt, and a failure's query as it stands
-    prompts = [(hybrid_search(person_text(g["prompt"]) if g["via"] == "prompt" else g["prompt"]), g["pairs"]) for g in groups.values()]
-    total = sum(len(pairs) for _, pairs in prompts)
-    rel = sum(r for _, pairs in prompts for _, r in pairs)
+    prompts = [(hybrid_search(person_text(g["prompt"]) if g["via"] == "prompt" else g["prompt"]), g["via"], g["pairs"]) for g in groups.values()]
+    total = sum(len(pairs) for _, _, pairs in prompts)
+    rel = sum(r for _, _, pairs in prompts for _, r in pairs)
     print(f"judged pairs: {total} ({rel} relevant, {total - rel} noise) from {len(prompts)} prompts; {excerpt} of them from excerpts")
     print(f"left out: {unsure} unsure; {missing} missing from the store; {other_repo} from other repositories")
     sweep_report(total, lambda k: replay_counts(prompts, k))
