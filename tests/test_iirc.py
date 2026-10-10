@@ -405,7 +405,7 @@ def test_setup_writes_config(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False: False)
     iirc.main(["setup", "--host", "frame:11434"])
-    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}}
+    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
     assert "does not answer yet" in capsys.readouterr().out
     iirc.main(["setup", "--local"])
     assert iirc.read_config()["embedding_host"] == "http://127.0.0.1:11434"
@@ -3035,7 +3035,7 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
     assert "[recall.all-minilm-l6-v2] both must be a number from 0.1 to 0.9" in iirc.CONFIG_ERROR
     toml.write_text("[recall.nomic-embed-text]\nboth = 0.4\n")
     iirc.set_root(tmp_path)
-    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.58}   # minilm's own defaults
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.6, "both": 0.68}   # minilm's own defaults
     grid = iirc.knob_grid()
     assert min(k["semantic_only"] for k in grid) == 0.1 and max(k["both"] for k in grid) == 0.9 and all(k["both"] >= k["semantic_only"] for k in grid)
     iirc.main(["knobs", "set", "semantic_only", "0.55"])   # a new table for the active model, after the others
@@ -3237,7 +3237,7 @@ def test_setup_offers_models(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, any_status=False: False)
     monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
-    answers = iter(["1", "2"])
+    answers = iter(["1", "1"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
     iirc.main(["setup"])
     menu = capsys.readouterr().out
@@ -3308,3 +3308,110 @@ def test_line_replay_followup_query(tmp_path, monkeypatch):
     p = {"repo": "/repo", "qid": "abcd1234/key", "prompt": short}
     assert lr.previous_prompt(p, tmp_path / "projects") == "y" * 300
     assert lr.previous_prompt({**p, "qid": "ffff0000/key"}, tmp_path / "projects") is None
+
+
+# p5 step 26
+def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
+    rf = _replay_files()
+    replay = [{"repo": "/r", "qid": "q1", "prompt": "one", "via": "prompt", "page": "a.md", "label": "relevant"},
+              {"repo": "/r", "qid": "q1", "prompt": "one", "via": "prompt", "page": "project/b.md", "label": "noise"},
+              {"repo": "/r", "qid": "q2", "prompt": "two", "via": "prompt", "page": "c.md", "label": "unsure"}]
+    ranked = {"m1": {"q1": ["a.md", "b.md", "c.md", "d.md"], "q2": ["c.md", "e.md"]},
+              "m2": {"q1": ["d.md", "c.md", "a.md"], "q2": []}}
+    assert rf.pool_rows("ab", replay, ranked) == [
+        {"set": "ab", "qid": "q1", "page": "c.md", "models": ["m1", "m2"]},
+        {"set": "ab", "qid": "q1", "page": "d.md", "models": ["m2"]},     # m1 ranks it fourth, past the pool's depth
+        {"set": "ab", "qid": "q2", "page": "e.md", "models": ["m1"]},     # an unsure label is a label
+    ]
+    # each model searches through a machine config of its own, in temporary directories, after a full index
+    field = _vector_project(tmp_path, monkeypatch)
+    before = {k: os.environ.get(k) for k in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "IIRC_CACHE_DIR")}
+    seen = []
+
+    def embed(backend, texts, kind="doc", timeout=None):
+        import numpy as np
+        assert rf.iirc.read_config()["embedding"]["model"] == backend.model.id
+        seen.append((backend.model.id, str(rf.iirc.config_file()), os.environ["IIRC_CACHE_DIR"]))
+        near = 0 if backend.model.id == "nomic-embed-text" else 1     # "gamma" is near alpha for nomic, near beta for gemma
+        return [np.asarray([[t.count("alpha") + (near == 0) * t.count("gamma"), t.count("beta") + (near == 1) * t.count("gamma"), 0.01]],
+                           dtype=np.float32) for t in texts]
+    monkeypatch.setattr(iirc.iirc_embed, "embed", embed)
+    monkeypatch.setattr(rf.iirc, "start_background", lambda argv: 1 / 0)
+    prompts = {"q1": ("gamma rays", "prompt")}
+    assert rf.ranked_pages("nomic-embed-text", tmp_path, prompts, tmp_path / "pool") == {"q1": ["alpha-notes.md"]}
+    assert rf.ranked_pages("embeddinggemma", tmp_path, prompts, tmp_path / "pool") == {"q1": ["beta-notes.md"]}
+    assert {m for m, _, _ in seen} == {"nomic-embed-text", "embeddinggemma"}
+    assert all(cfg.startswith(str(tmp_path / "pool")) and cache.startswith(str(tmp_path / "pool")) for _, cfg, cache in seen)
+    assert {k: os.environ.get(k) for k in before} == before
+    assert (field / "index.md").read_text() == iirc.INDEX_TEMPLATE                   # no index stamp, no commit in the repository
+
+
+def test_replay_files_merge_pool(tmp_path, capsys):
+    rf = _replay_files()
+    row = {"repo": "/r", "qid": "q1", "prompt": "one", "via": "prompt", "page": "a.md", "label": "relevant"}
+    (tmp_path / "replay-ab.jsonl").write_text(json.dumps(row) + "\n")
+    labels = [{"set": "ab", "qid": "q1", "page": "b.md", "label": "noise", "note": "other mechanism"},
+              {"set": "ab", "qid": "q1", "page": "project/a.md", "label": "noise", "note": "already labelled"},
+              {"set": "ab", "qid": "q9", "page": "c.md", "label": "relevant", "note": "no such prompt"}]
+    (tmp_path / "pool-round-2.jsonl").write_text("".join(json.dumps(x) + "\n" for x in labels))
+    rf.merge(tmp_path)
+    rf.merge(tmp_path)                                                  # a second merge adds nothing
+    rows = [json.loads(x) for x in (tmp_path / "replay-ab.jsonl").read_text().splitlines()]
+    assert rows == [row, {**row, "page": "b.md", "label": "noise"}]
+    assert "1 pool labels added, 2 skipped" in capsys.readouterr().out
+
+
+def test_setup_default_order(tmp_path, monkeypatch, capsys):
+    """qwen3-embedding:0.6b where ollama or the machine's host answers, all-minilm-l6-v2 otherwise, string search last."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
+    answers, asked = [], []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or answers.pop(0))
+    monkeypatch.setattr(iirc, "model_present", lambda host, model, timeout=2.0: True)
+    up = {"http://127.0.0.1:11434"}
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, any_status=False: base in up)
+    answers[:] = ["", ""]                                                   # Enter, Enter: ollama here, its first model
+    iirc.main(["setup"])
+    out = capsys.readouterr().out
+    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
+    assert asked[0].endswith("[1]: ") and out.index("1. qwen3-embedding:0.6b") < out.index("nomic-embed-text")
+    menu = [line for line in out.splitlines() if re.match(r"\s+\d\. ", line)]
+    assert "string search" in menu[len(iirc.SETUP_MENU.splitlines()) - 2]   # the last choice of the menu
+    iirc.main(["setup", "--local"])
+    assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
+    # the machine's own ollama host answers and this one does not: Enter takes that host
+    up.clear(); up.add("http://frame:11434")
+    iirc.write_config_file({"embedding_host": "http://frame:11434"})
+    answers[:] = ["", "", ""]; asked.clear()
+    iirc.main(["setup"])
+    assert asked[0].endswith("[2]: ") and iirc.read_config()["embedding_host"] == "http://frame:11434"
+    assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
+    # nothing answers: Enter takes this CPU
+    up.clear()
+    monkeypatch.setattr(iirc, "fetch_minilm", lambda: None)
+    monkeypatch.setattr(iirc, "cpu_check", lambda: (True, ""))
+    answers[:] = [""]; asked.clear()
+    iirc.main(["setup"])
+    assert asked[0].endswith("[4]: ") and iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"}
+
+
+def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
+    """Page-to-page distances differ by model as prompt-to-page ones do; a pair close for one model is not close for another."""
+    import numpy as np
+    nomic, gemma = iirc.iirc_embed.MODELS["nomic-embed-text"], iirc.iirc_embed.MODELS["embeddinggemma"]
+    assert nomic.near == (0.10, 0.07)
+    for m in iirc.iirc_embed.MODELS.values():
+        assert 0 < m.near[1] < m.near[0] < m.cut
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "cache_dir", lambda: tmp_path / "cache")
+    d = (nomic.near[0] + gemma.near[0]) / 2                     # past nomic's line, inside gemma's
+    vecs = {"a.md": (1.0, 0.0), "b.md": (1 - d, (1 - (1 - d) ** 2) ** 0.5)}
+    rows = np.zeros((2, 768), dtype=np.float32)
+    for i, head in enumerate(vecs.values()):
+        rows[i, :2] = head
+    for model in (nomic.id, gemma.id):
+        path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(tmp_path), model)
+        iirc.iirc_embed.save(path, iirc.iirc_embed.Vectors(list(vecs), ["sha-a", "sha-b"], rows))
+    assert iirc.near_duplicates() == []                          # nomic
+    iirc.write_config_file({"embedding": {"backend": "ollama", "model": gemma.id}})
+    assert iirc.near_duplicates() == [(round(d, 3), "a.md", "b.md")]   # same page shas, other model: not nomic's cached answer

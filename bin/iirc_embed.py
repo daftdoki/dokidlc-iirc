@@ -41,22 +41,29 @@ class Model(NamedTuple):
     dims: int
     knobs: dict[str, tuple[float, float, float]]   # recall knob: (default, low, high) on this model's distance scale
     cut: float              # a page farther than this never reaches the gate
+    near: tuple[float, float]   # page-to-page distance: (near-duplicate, duplicate); doctor names the first, the brief warns on the second
     text: str = "raw"       # "raw": the page file cut at DOC_BYTES; "plain": title, summary, topics, body before Sources
 
 
+def _knobs(semantic_only: float, both: float, high: float = 0.90) -> dict[str, tuple[float, float, float]]:
+    return {"semantic_only": (semantic_only, 0.10, high), "both": (both, 0.10, high)}
+
+
 # The recall knobs differ per model because distances do: relevant pairs sit at a median 0.36 for
-# nomic, 0.53 for qwen3, and 0.64 for embeddinggemma (evidence 6-models.md). MiniLM's defaults keep
-# the share of relevant pairs nomic's keep (evidence 7-cpu-tier.md); the others take nomic's until a sweep.
-# nomic keeps memoryfield-tool's 0.45 cut; the others cut at the top of their knob range.
-_WIDE = {"semantic_only": (0.28, 0.10, 0.90), "both": (0.38, 0.10, 0.90)}
+# nomic, 0.53 for qwen3, and 0.64 for embeddinggemma (evidence 6-models.md). Each default is the pooling
+# round's choice (quest 2610100115-p5, step 26): the best F1 on the agent-builder replay among grid points
+# that refuse no relevant pair the model's earlier defaults passed on the neckbeard replay. nomic's
+# 0.28/0.38 was already that point. The OpenAI-compatible qwen3-embedding was not in the round and takes
+# qwen3-embedding:0.6b's values. nomic keeps memoryfield-tool's 0.45 cut; the others cut at 0.90.
+# near: the page-to-page distances that flag the same share of agent-builder's 4,465 page pairs as nomic's
+# 0.10 and 0.07 (one pair, and none); the duplicate line sits at 0.7 of the near-duplicate one, as nomic's does.
 _QWEN3_QUERY = "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
 MODELS: dict[str, Model] = {m.id: m for m in (
-    Model("nomic-embed-text", "ollama", "search_query: ", "search_document: ", 768,
-          {"semantic_only": (0.28, 0.10, 0.60), "both": (0.38, 0.10, 0.60)}, 0.45),
-    Model("qwen3-embedding:0.6b", "ollama", _QWEN3_QUERY, "", 1024, dict(_WIDE), 0.90),
-    Model("embeddinggemma", "ollama", "task: search result | query: ", "title: none | text: ", 768, dict(_WIDE), 0.90),
-    Model("qwen3-embedding", "openai", _QWEN3_QUERY, "", 1024, dict(_WIDE), 0.90),
-    Model("all-minilm-l6-v2", "onnx", "", "", 384, {"semantic_only": (0.50, 0.10, 0.90), "both": (0.58, 0.10, 0.90)}, 0.90, "plain"),
+    Model("nomic-embed-text", "ollama", "search_query: ", "search_document: ", 768, _knobs(0.28, 0.38, 0.60), 0.45, (0.10, 0.07)),
+    Model("qwen3-embedding:0.6b", "ollama", _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
+    Model("embeddinggemma", "ollama", "task: search result | query: ", "title: none | text: ", 768, _knobs(0.40, 0.68), 0.90, (0.14, 0.10)),
+    Model("qwen3-embedding", "openai", _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
+    Model("all-minilm-l6-v2", "onnx", "", "", 384, _knobs(0.60, 0.68), 0.90, (0.20, 0.14), "plain"),
 )}
 DEFAULT_MODEL = "nomic-embed-text"
 

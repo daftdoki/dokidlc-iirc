@@ -2643,6 +2643,20 @@ SETUP_MENU = f"""How should iirc search pages?
   5. string search: exact text only, the fallback where none of these can run"""
 
 
+# setup's ollama model when --model names none: the pooling round's choice (quest 2610100115-p5, step 26)
+SETUP_MODEL = "qwen3-embedding:0.6b"
+
+
+def setup_default() -> tuple[str, str]:
+    """The menu's default and its host: ollama here, or the machine's ollama host, when one answers; else this CPU."""
+    local = normalize_host(DEFAULT_HOST)
+    env, cfg = os.environ.get("OLLAMA_HOST"), read_config().get("embedding_host")
+    for host in dict.fromkeys(h for h in (normalize_host(env) if env else None, normalize_host(str(cfg)) if cfg else None, local) if h):
+        if host_answers(host):
+            return ("1" if host == local else "2"), host
+    return "4", ""
+
+
 def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
     """(backend or "substring", host or URL, model) from the flags, or from questions on a terminal."""
     chosen = [flag for flag, on in (("--substring", args.substring), ("--local or --host", args.local or args.host or args.semantic),
@@ -2658,19 +2672,24 @@ def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]
     if args.openai:
         return "openai", openai_url(args.openai), args.model or "qwen3-embedding"
     if args.local or args.host:
-        return "ollama", normalize_host(args.host) if args.host else normalize_host(DEFAULT_HOST), args.model or iirc_embed.DEFAULT_MODEL
+        return "ollama", normalize_host(args.host) if args.host else normalize_host(DEFAULT_HOST), args.model or SETUP_MODEL
     if not sys.stdin.isatty():
         die("not a terminal; pass --local, --host URL, --openai URL, --cpu, or --substring" if not args.semantic else "semantic search needs --local or --host URL")
     print(SETUP_MENU)
-    choice = input("1-5: ").strip()
+    default, found = setup_default()
+    choice = input(f"1-5 [{default}]: ").strip() or default
     if choice == "5":
         return "substring", None, None
     if choice == "4":
         return "onnx", None, "all-minilm-l6-v2"
     if choice == "3":
         return "openai", openai_url(input("base URL, like https://llm.example.net: ").strip()), "qwen3-embedding"
-    host = normalize_host(input("host, like http://frame:11434: ").strip()) if choice == "2" else normalize_host(DEFAULT_HOST)
-    models = [m.id for m in iirc_embed.MODELS.values() if m.backend == "ollama"]
+    if choice == "2":
+        typed = input(f"host [{found}]: " if found and default == "2" else "host, like http://frame:11434: ").strip()
+        host = normalize_host(typed or (found if default == "2" else None))
+    else:
+        host = normalize_host(DEFAULT_HOST)
+    models = sorted((m.id for m in iirc_embed.MODELS.values() if m.backend == "ollama"), key=lambda m: m != SETUP_MODEL)
     print("Which ollama model?\n" + "\n".join(f"  {i}. {m}" for i, m in enumerate(models, 1)))
     pick = input(f"1-{len(models)} [1]: ").strip()
     return "ollama", host, models[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(models) else models[0]
@@ -3133,9 +3152,8 @@ def uncommitted(store: Store) -> int:
 # --- near-duplicate pages -----------------------------------------------------
 
 PAIR_BUDGET = 2.0        # seconds the session-start line may spend comparing pages; `iirc doctor` has no limit
-NEAR_DUPLICATE = 0.10    # cosine distance between two pages; the recall gate is prompt-to-page and far looser
-DUPLICATE = 0.07         # a pair this close turns the brief yellow; a reworded copy of one finding measured 0.047,
-                         # two findings on one topic 0.088 (2026-10-08); pairs between are doctor notes only
+# The active model's near-duplicate and duplicate distances (Model.near): a pair at the first is a doctor note,
+# a pair at the second turns the brief yellow. Page-to-page, so far tighter than the recall gate's prompt-to-page knobs.
 
 
 def index_rows() -> list[tuple[str, str, object]]:
@@ -3163,7 +3181,7 @@ def page_vectors() -> dict[str, list[float]]:
 
 
 def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]:
-    """Pairs of pages at or under NEAR_DUPLICATE, closest first.
+    """Pairs of pages at or under the active model's near-duplicate distance, closest first.
 
     All pairs cost about 17 microseconds each in Python, so the result is kept
     per repository root beside a digest of the index's own hashes and computed
@@ -3174,7 +3192,9 @@ def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]
     hashes = sorted((label, h) for label, h, _ in index_rows())
     if not hashes:
         return []
-    digest = hashlib.sha256(json.dumps([NEAR_DUPLICATE, hashes]).encode()).hexdigest()
+    model = active_model()
+    # page shas are the same under every model, so the model and its line are part of what the cached pairs answer
+    digest = hashlib.sha256(json.dumps([model.id, model.near[0], hashes]).encode()).hexdigest()
     state = read_state_json("pairs.json")
     entry = state.get(str(ROOT))
     kept = entry.get("pairs") if isinstance(entry, dict) and entry.get("digest") == digest else None
@@ -3189,7 +3209,7 @@ def near_duplicates(budget: float | None = None) -> list[tuple[float, str, str]]
         va = vectors[a]
         for b in names[i + 1:]:
             d = 1.0 - sum(x * y for x, y in zip(va, vectors[b]))
-            if d <= NEAR_DUPLICATE:
+            if d <= model.near[0]:
                 pairs.append((round(d, 3), a, b))
     pairs.sort()
     if set(vectors) == {label for label, _ in hashes}:    # a short read, from a lock or an odd blob, is not kept
@@ -3361,7 +3381,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
         try:
             # string mode never refreshes the index, so its pairs would be stale
-            close = sum(1 for d, _, _ in flagged_pairs(PAIR_BUDGET) if d <= DUPLICATE) if semantic_enabled() else 0
+            close = sum(1 for d, _, _ in flagged_pairs(PAIR_BUDGET) if d <= active_model().near[1]) if semantic_enabled() else 0
         except Exception:   # a hook must never fail the session start
             close = 0
         timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
@@ -3445,7 +3465,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
     if semantic_enabled():
         for d, first, second in flagged_pairs():
-            what = "near-duplicate pages" if d <= DUPLICATE else "similar pages, below the warning"
+            what = "near-duplicate pages" if d <= active_model().near[1] else "similar pages, below the warning"
             print(f"note {what} (distance {d:.3f}): {first} | {second}")
         if live_stores() and not index_rows():
             print("note no index to compare pages with (iirc index builds it)")
