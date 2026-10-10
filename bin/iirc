@@ -1614,10 +1614,31 @@ def validate_page(name: str, fm: dict, body: str) -> list[str]:
     if "## sources" not in body.lower():
         problems.append("the body has no '## Sources' section. Put it in the same write: "
                         "printf 'What is true.\\n\\n## Sources\\n\\n- what you ran or read, and when\\n' | iirc write ...")
-    size = len(render_page(fm, body).encode())
+    page = render_page(fm, body)
+    for n, line in enumerate(page.splitlines(), 1):
+        for pname, pattern in SECRET_PATTERNS.items():
+            if pattern.search(line):
+                # never the match: this text reaches the transcript and the log
+                problems.append(f"line {n} of the page matches the secret pattern {pname!r}; remove the secret and write again")
+    size = len(page.encode())
     if size > PAGE_LIMIT:
         problems.append(f"warning: page is {size} bytes, over the {PAGE_LIMIT} byte soft limit; split it")
     return problems
+
+
+def shape_warnings(fm: dict) -> list[str]:
+    """Title and summary shapes that search and recall show badly. A write that has them still succeeds."""
+    title, summary = str(fm.get("title") or ""), str(fm.get("summary") or "")
+    out = []
+    if re.match(r"\d{4}-\d\d", summary) or summary.startswith("Creator decision"):
+        out.append("the summary starts with a date or 'Creator decision'; start it with the fact")
+    if len(title) > 70:
+        out.append(f"the title is {len(title)} characters, over 70; shorten it")
+    def words(s: str) -> set[str]:
+        return set(re.findall(r"[a-z]{4,}", s.lower()))
+    if not words(summary[:90]) & words(title):
+        out.append("the summary's first 90 characters share no word of four letters or more with the title; use the title's words")
+    return out
 
 
 def list_pages(field: Path | None = None) -> list[Path]:
@@ -2038,6 +2059,8 @@ def cmd_write(args: argparse.Namespace) -> None:
     if proc.returncode:
         die(proc.stderr.strip() or "write failed")
     print(proc.stdout.strip())
+    for w in shape_warnings(fm):
+        print(f"iirc: warning: {w}", file=sys.stderr)
     log_event("write", page=page_label(store.name, args.page), kind=args.kind)
     stamp_index(store.dir)
     reindex()

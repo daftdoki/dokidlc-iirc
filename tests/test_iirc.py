@@ -2416,3 +2416,37 @@ def test_replay_files_join_labels_to_prompts():
     assert rf.recall_prompt({"via": "prompt", "prompt": {"text": None}}, None, None) is None
     rows, _ = rf.join([{"qid": "q", "page": "p.md", "label": "unsure"}], {"q": {"prompt": "lost", "via": "prompt", "excerpt": True}}, "/r")
     assert rows[0]["excerpt"] is True
+
+
+# p5 step 15
+
+def _write_page(monkeypatch, tmp_path, name, title, summary, body):
+    import io
+    project, _ = _two_stores(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "tool", _fake_tool(project.dir))
+    monkeypatch.setattr(iirc, "reindex", lambda: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO(body))
+    iirc.main(["write", name, "--title", title, "--summary", summary, "--topics", "t", "--kind", "finding"])
+    return project.dir / name
+
+
+def test_write_refuses_secrets(tmp_path, monkeypatch, capsys):
+    token = "ghp_" + "Zx9Yw8" * 6   # built in two parts so no scanner takes the file for a leak
+    with pytest.raises(SystemExit):
+        _write_page(monkeypatch, tmp_path, "leak.md", "Leak", "a leak", f"one\ntwo {token}\n\n## Sources\n\n- y\n")
+    err = capsys.readouterr().err
+    assert not (tmp_path / ".iirc" / "leak.md").exists()
+    assert "github token" in err and "line 9" in err and token not in err and "ghp_" not in err
+
+
+def test_write_warns_and_succeeds(tmp_path, monkeypatch, capsys):
+    page = _write_page(monkeypatch, tmp_path, "shape.md", "Ollama unloads the embedding model after five minutes of idle time here",
+                       "2026-10-09 we saw the hook stall", "x\n\n## Sources\n\n- y\n")
+    assert page.is_file()
+    warnings = [line for line in capsys.readouterr().err.splitlines() if line.startswith("iirc: warning:")]
+    assert len(warnings) == 3, warnings
+    assert "date" in warnings[0] and "70" in warnings[1] and "title" in warnings[2]
+    _write_page(monkeypatch, tmp_path, "fine.md", "Ollama unloads the model", "Ollama unloads the embed model after idle time", "x\n\n## Sources\n\n- y\n")
+    assert "warning" not in capsys.readouterr().err
+    _write_page(monkeypatch, tmp_path, "decided.md", "Search uses rare terms", "Creator decision: search uses rare terms", "x\n\n## Sources\n\n- y\n")
+    assert "Creator decision" in capsys.readouterr().err
