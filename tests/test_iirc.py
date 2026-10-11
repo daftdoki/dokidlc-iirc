@@ -4290,7 +4290,6 @@ def test_network_check_re_matches_commands_not_names():
         assert not iirc.network_check(good), good
 
 
-
 def _stub_checks(monkeypatch, fails=False):
     """Records each check run_check would run, and runs none. No test contacts the network."""
     ran = []
@@ -4346,9 +4345,9 @@ def test_an_unapproved_network_check_is_named_as_unapproved(tmp_path, monkeypatc
     ran = _stub_checks(monkeypatch)
     rows, _, _ = iirc.suspect_rows()
     assert [s for s, _ in rows[0][2]] == ["unapproved"] and ran == []
-    assert iirc.network_checks() == []                     # --network runs only approved checks, so it names only those
+    assert iirc.network_listing() == []                    # --network runs only approved checks, so it names only those
     iirc.approve_check(cmd, "net.md")
-    assert iirc.network_checks() == [("net.md", cmd)]
+    assert iirc.network_listing() == [("net.md", "check", cmd)]
 
 
 def test_find_suspect_pages_leaves_a_network_check_for_network(tmp_path, monkeypatch, capsys):
@@ -4377,9 +4376,12 @@ def test_find_suspect_pages_network_needs_consent_for_a_network_check(tmp_path, 
 def test_run_maintenance_never_runs_a_network_check(tmp_path, monkeypatch, capsys):
     field, cmd = _network_page(tmp_path, monkeypatch)
     ran = _stub_checks(monkeypatch)
-    rows, _, _ = iirc.suspect_rows()
+    rows, deferred, _ = iirc.suspect_rows()
     assert ran == [] and [s for s, _ in rows[0][2]] == ["network"]
     assert iirc.maintenance_suspects(rows) == []          # a glance note, offered with the URL refs, not a suspect
+    assert deferred == [("net.md", "check", cmd)]
+    offer = [u for u in iirc.upkeep_items({"network": deferred}) if u.kind == "network"]
+    assert offer and offer[0].detail.startswith("1 network check, not checked")
 
 
 def test_verify_runs_a_network_check_only_with_network(tmp_path, monkeypatch, capsys):
