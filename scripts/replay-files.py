@@ -148,8 +148,12 @@ def pool_rows(set_name: str, replay: list[dict], ranked: dict[str, dict[str, lis
 def model_machine(model_id: str, tmp: Path):
     """A machine whose config names this model, with its config, state, and cache under tmp; the environment comes back after."""
     model = iirc.iirc_embed.MODELS[model_id]
-    if model.backend == "openai":
-        sys.exit(f"{model_id} needs a URL; --pool takes the ollama and onnx models")
+    if "ollama" in model.names:
+        entry = {"model": model_id, "host": iirc.LOCAL_OLLAMA, "protocol": "ollama", "name": model.names["ollama"][0]}
+    elif "onnx" in model.names:
+        entry = {"model": model_id, "host": iirc.CPU, "protocol": "onnx", "name": model.names["onnx"][0]}
+    else:
+        sys.exit(f"{model_id} needs a URL; --pool takes the models this machine's ollama or CPU runs")
     old = {k: os.environ.get(k) for k in POOL_ENV}
     base = tmp / iirc.iirc_embed.table_name(model_id)
     for k in POOL_ENV:
@@ -158,8 +162,7 @@ def model_machine(model_id: str, tmp: Path):
     # a search that finds pages missing starts `iirc rebuild-search-index`, which stamps and commits the repository's index
     iirc.index_in_background = lambda store: None
     try:
-        iirc.write_config_file({"semantic": True, "embedding": {"backend": model.backend, "model": model_id}})
-        iirc._RESOLVED = None
+        iirc.write_config_file({"search_mode": "semantic", "embedding_models": [entry]})
         yield
     finally:
         iirc.index_in_background = real_background
@@ -168,7 +171,7 @@ def model_machine(model_id: str, tmp: Path):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-        iirc._CONFIG = iirc._RESOLVED = None
+        iirc._CONFIG = None
 
 
 def ranked_pages(model_id: str, repo: Path, prompts: dict[str, tuple[str, str]], tmp: Path) -> dict[str, list[str]]:

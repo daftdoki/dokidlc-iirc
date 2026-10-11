@@ -92,11 +92,17 @@ test('parses the recovery nudge and the brief', () => {
     status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: '/iirc run-maintenance' },
     warnings: ['Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.'],
   })
-  const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc set-search-backend` with their answer.')!.status
+  const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc add-embedding-model MODEL HOST` with their answer.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc set-search-backend')
-  const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc set-search-backend` to fix). Topics: x 5.')!
-  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc set-search-backend' })
+  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc add-embedding-model MODEL HOST')
+  const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!
+  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc doctor' })
+  // a model id may hold a dot; inside the parentheses it does not end the mode
+  const unserved = parseBrief('iirc: 5 pages, string only (this machine cannot serve qwen3-embedding-0.6b; `iirc doctor` names the ways out). Topics: x 5.')!
+  expect(unserved.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc doctor' })
+  expect(unserved.warnings).toEqual([])
+  const cpu = parseBrief('iirc: 5 pages, string only (all-minilm-l6-v2 model files missing; `iirc add-embedding-model all-minilm-l6-v2 cpu` to fix).')!
+  expect(cpu.status.fix).toBe('iirc add-embedding-model all-minilm-l6-v2 cpu')
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status.fix).toBe('/iirc run-maintenance')
@@ -287,13 +293,13 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).toContain('summary line on · max-suggested-pages 4')
   expect(helpText).toContain('/iirc max-suggested-pages N')
   expect(helpText).toContain('/iirc summary-line-visibility ')
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-embedding-model', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
   expect(helpText).toContain('summary line on · max-suggested-pages 4 · search semantic+keyword')
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate thresholds/)
   expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
-  expect((helpText ?? '').indexOf('/iirc set-search-backend')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
+  expect((helpText ?? '').indexOf('/iirc set-embedding-model')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
   // the first maintenance row, before doctor: the one command a person needs
   expect(helpText).toMatch(/\/iirc run-maintenance +the only thing you need to run, weekly/)
   expect((helpText ?? '').indexOf('/iirc run-maintenance')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))
@@ -382,7 +388,7 @@ test('/iirc doctor draws a card, and /iirc help draws the help card', async ($: 
   expect(await help.find({ text: '/iirc max-suggested-pages N' })).toBeDefined()
   // tune and audit are maintenance; setup is a setting, shown with the search mode in force
   expect(await help.find({ text: 'WITH CLAUDE' })).toBeUndefined()
-  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-search-backend', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
+  for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-embedding-model', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage', '<request>']) expect(await help.find({ text: `/iirc ${cmd}` })).toBeDefined()
   expect(await help.find({ text: 'search' })).toBeDefined()
 })
 

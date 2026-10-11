@@ -1,12 +1,12 @@
 """Embedding and the vector store behind iirc's semantic search. bin/iirc imports it.
 
-MODELS is the table of embedding models iirc knows: each one's backend, its
-query and document prefixes, its dimensions, its recall knobs, and the page
+MODELS is the table of embedding models iirc knows: each one's names under each
+protocol that serves it, its query and document prefixes, its dimensions, its recall knobs, and the page
 text it embeds. For nomic the text is what memoryfield-tool embeds, so
 distances match the tool's: `search_document: ` plus the raw page file cut at
 8,192 bytes, and `search_query: ` plus the query.
 
-Backends: ollama's /api/embed with truncate on and keep_alive set; an OpenAI-compatible
+Protocols: ollama's /api/embed with truncate on and keep_alive set; an OpenAI-compatible
 /v1/embeddings; and onnx, which runs bin/iirc-cpu (its own uv script, with
 onnxruntime and tokenizers) and returns one row per window of a page.
 
@@ -34,11 +34,12 @@ from typing import NamedTuple
 
 
 class Model(NamedTuple):
-    id: str                 # the name the backend knows it by
-    backend: str            # "ollama", "openai" (an OpenAI-compatible URL), or "onnx" (bin/iirc-cpu on this CPU)
+    id: str                 # one name whatever serves it; also its [suggestions.ID] table and its vector store's file name
+    names: dict[str, list[str]]   # protocol -> the names that protocol knows it by, preferred first: "ollama", "openai"
+                                  # (an OpenAI-compatible URL), or "onnx" (bin/iirc-cpu on this CPU)
     query_prefix: str
     doc_prefix: str
-    dims: int               # ollama and onnx answer at this width; an OpenAI-compatible host at its own (see fixed_width)
+    dims: int               # every host answers at this width; another width is another model served under its name
     knobs: dict[str, tuple[float, float, float]]   # recall knob: (default, low, high) on this model's distance scale
     cut: float              # a page farther than this never reaches the gate
     near: tuple[float, float]   # page-to-page distance: (near-duplicate, duplicate); doctor names the first, the brief warns on the second
@@ -53,21 +54,24 @@ def _knobs(semantic_only: float, both: float, high: float = 0.90) -> dict[str, t
 # nomic, 0.53 for qwen3, and 0.64 for embeddinggemma (evidence 6-models.md). Each default is the pooling
 # round's choice (quest 2610100115-p5, step 26): the best F1 on the agent-builder replay among grid points
 # that refuse no relevant pair the model's earlier defaults passed on the neckbeard replay. nomic's
-# 0.28/0.38 was already that point. The OpenAI-compatible qwen3-embedding was not in the round and takes
-# qwen3-embedding:0.6b's values. nomic keeps memoryfield-tool's 0.45 cut; the others cut at 0.90.
+# 0.28/0.38 was already that point. qwen3's values came from its ollama build and hold for every build of it.
+# nomic keeps memoryfield-tool's 0.45 cut; the others cut at 0.90.
 # near: the page-to-page distances that flag the same share of agent-builder's 4,465 page pairs as nomic's
 # 0.10 and 0.07 (one pair, and none); the duplicate line sits at 0.7 of the near-duplicate one, as nomic's does.
 _QWEN3_QUERY = "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
 MODELS: dict[str, Model] = {m.id: m for m in (
-    Model("nomic-embed-text", "ollama", "search_query: ", "search_document: ", 768, _knobs(0.28, 0.38, 0.60), 0.45, (0.10, 0.07)),
-    Model("qwen3-embedding:0.6b", "ollama", _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
-    Model("embeddinggemma", "ollama", "task: search result | query: ", "title: none | text: ", 768, _knobs(0.40, 0.68), 0.90, (0.14, 0.10)),
-    Model("qwen3-embedding", "openai", _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
-    Model("all-minilm-l6-v2", "onnx", "", "", 384, _knobs(0.60, 0.68), 0.90, (0.20, 0.14), "plain"),
+    Model("nomic-embed-text", {"ollama": ["nomic-embed-text"]}, "search_query: ", "search_document: ", 768, _knobs(0.28, 0.38, 0.60),
+          0.45, (0.10, 0.07)),
+    # F16 first, to match the bf16 build an OpenAI-compatible server runs; ollama's default tag is Q8_0
+    Model("qwen3-embedding-0.6b", {"ollama": ["qwen3-embedding:0.6b-fp16", "qwen3-embedding:0.6b"], "openai": ["qwen3-embedding"]},
+          _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
+    Model("embeddinggemma", {"ollama": ["embeddinggemma"]}, "task: search result | query: ", "title: none | text: ", 768,
+          _knobs(0.40, 0.68), 0.90, (0.14, 0.10)),
+    Model("all-minilm-l6-v2", {"onnx": ["all-minilm-l6-v2"]}, "", "", 384, _knobs(0.60, 0.68), 0.90, (0.20, 0.14), "plain"),
 )}
 DEFAULT_MODEL = "nomic-embed-text"
 
-# all-minilm-l6-v2's files, fetched by `iirc set-search-backend --cpu` at a pinned commit and checked against these sha256 values.
+# all-minilm-l6-v2's files, fetched by `iirc add-embedding-model all-minilm-l6-v2 cpu` at a pinned commit and checked against these sha256 values.
 # The fp32 model, not the 23 MB int8 one: one file, so every machine computes the same vectors.
 MINILM_REPO = "sentence-transformers/all-MiniLM-L6-v2"
 MINILM_COMMIT = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
@@ -86,6 +90,8 @@ BATCH = 16                  # pages per request when indexing
 
 class Backend(NamedTuple):
     model: Model
+    protocol: str                    # "ollama", "openai", or "onnx"
+    name: str                        # the protocol's name for the build the host serves
     url: str = ""                    # the ollama host, or the OpenAI-compatible base URL
     cpu: tuple[str, str] = ("", "")  # onnx: bin/iirc-cpu and the directory holding the model files
 
@@ -97,9 +103,9 @@ class Vectors(NamedTuple):
     owner: object = None    # numpy int array: the index in names of each row; None when row i is page i
 
 
-def fixed_width(model: Model) -> bool:
-    """An OpenAI-compatible name may serve any size of the model (Qwen3-Embedding 0.6B is 1024 wide, 8B 4096), so its width is the host's."""
-    return model.backend != "openai"
+def model_named(name: str) -> Model | None:
+    """The model a name means: its id, or any protocol's name for it."""
+    return MODELS.get(name) or next((m for m in MODELS.values() if any(name in names for names in m.names.values())), None)
 
 
 def table_name(model_id: str) -> str:
@@ -165,12 +171,12 @@ def run_cpu(backend: Backend, texts: list[str], kind: str):
 
 def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float = EMBED_TIMEOUT):
     """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else,
-    such as another width than a fixed-width model's."""
+    such as another width than the model's."""
     import numpy as np
     if not texts:
         return []
     try:
-        if backend.model.backend == "onnx":
+        if backend.protocol == "onnx":
             got = run_cpu(backend, texts, kind)
             if got is None:
                 return None
@@ -179,17 +185,17 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
                 return None
             parts = [vecs[owner == i] for i in range(len(texts))]
             return parts if all(len(p) for p in parts) else None
-        if backend.model.backend == "openai":
-            data = _post(backend.url + "/v1/embeddings", {"model": backend.model.id, "input": texts}, timeout)["data"]
+        if backend.protocol == "openai":
+            data = _post(backend.url + "/v1/embeddings", {"model": backend.name, "input": texts}, timeout)["data"]
             rows = [d["embedding"] for d in sorted(data, key=lambda d: d["index"])]
         else:
-            rows = _post(backend.url + "/api/embed", {"model": backend.model.id, "input": texts, "truncate": True,
+            rows = _post(backend.url + "/api/embed", {"model": backend.name, "input": texts, "truncate": True,
                                                        "keep_alive": KEEP_ALIVE}, timeout).get("embeddings")
         vecs = np.asarray(rows, dtype=np.float32)
     except (urllib.error.URLError, OSError, ValueError, TypeError, AttributeError, KeyError):
         return None
-    # another width than a fixed-width model's is another model served under its name; load() would refuse the store it made
-    if vecs.ndim != 2 or len(vecs) != len(texts) or (fixed_width(backend.model) and vecs.shape[1] != backend.model.dims):
+    # another width is another model served under its name, such as Qwen3-Embedding 8B (4096); load() would refuse the store it made
+    if vecs.ndim != 2 or len(vecs) != len(texts) or vecs.shape[1] != backend.model.dims:
         return None
     return [vecs[i:i + 1] for i in range(len(texts))]
 
@@ -201,11 +207,10 @@ def embed_query(backend: Backend, query: str):
 
 
 def load(path: Path) -> Vectors | None:
-    """The store at path, or None when it is missing, not a store this module wrote, or of another width than its fixed-width model's.
+    """The store at path, or None when it is missing, not a store this module wrote, or of another width than its model's.
 
     The file name names the model (store_path). A server that serves another
     model under the same name changes the width, and every page counts as missing.
-    An OpenAI-compatible model's store loads at any width; refresh compares it with the host's.
     """
     import numpy as np
     try:
@@ -216,7 +221,7 @@ def load(path: Path) -> Vectors | None:
         return None
     if vecs.dtype != np.float32 or vecs.ndim != 2 or len(names) != len(shas):
         return None
-    dims = {table_name(m.id): m.dims for m in MODELS.values() if fixed_width(m)}.get(path.stem)
+    dims = {table_name(m.id): m.dims for m in MODELS.values()}.get(path.stem)
     if len(vecs) and dims is not None and vecs.shape[1] != dims:
         return None
     if owner is None and len(vecs) != len(names):

@@ -71,13 +71,13 @@ const WARNING_FIX: [RegExp, string][] = [
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages (read also matches read-matching-pages)
-const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-search-backend|init|doctor|run-maintenance)\b/
+const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-embedding-model|add-embedding-model|remove-embedding-model|prefer-embedding-host|search-mode|init|doctor|run-maintenance)\b/
 const COUNTS_RE = /\biirc\s+(read|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const SUMMARY_LINE_ARGS_RE = /^\s*summary-line-visibility(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
-const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|show-page-stores|sync|summarize-page-usage(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|show-suggestion-thresholds|search\s+\S.*|read(?:\s+\S+)+)$/s
+const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|show-page-stores|sync|summarize-page-usage(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|show-suggestion-thresholds|show-embedding-models|search-mode|search\s+\S.*|read(?:\s+\S+)+)$/s
 const MAX_SUGGESTED_ARGS_RE = /^\s*max-suggested-pages(?:\s+(\S+))?\s*$/
 // columns left of a page's text: the fold's indent (3), the list's (2), and the branch (3), plus one spare
 const PAGE_INDENT = 9
@@ -156,7 +156,7 @@ const HEADING = '#c4b5fd'
 // the settings' commands, as the card and the text help list them
 const SET_LINE = '/iirc summary-line-visibility'
 const SET_MAX = '/iirc max-suggested-pages N'
-const SET_SEARCH = '/iirc set-search-backend'
+const SET_SEARCH = '/iirc set-embedding-model'
 const REQUEST_CMD = '/iirc <request>'
 // the help card's command column: the longest command, plus a gap. A row is 2 + CMD_COL + its text, so a
 // text of up to 40 characters keeps every row inside an 80-column terminal's 76 inner columns
@@ -234,14 +234,14 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     const warnings = MIGRATE_RE.test(line) ? [] : [line.split('. ')[0].replace(/^iirc: /, '')]
     return { status: { level: 'error', pages: null, mode: null, note, ...(fix ? { fix } : {}) }, warnings }
   }
-  // semantic search also matches terms; without an embedding host it matches terms alone
+  // semantic search also matches terms; without an embedding host it matches terms alone, and the parentheses name the command that helps
   const isHostDown = m[2].startsWith('string only')
   const mode = m[2].startsWith('semantic') ? 'semantic+keyword' : 'keyword'
   const warnings = m[3]
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  const fix = isHostDown ? 'iirc set-search-backend' : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
+  const fix = isHostDown ? (/`(iirc [^`]+)`/.exec(m[2])?.[1] ?? 'iirc doctor') : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
   const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
   return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}) }, warnings }
 }
@@ -330,7 +330,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     `summary line ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
     row(SET_LINE, 'on|off: show or hide the summary line'),
     row(SET_MAX, 'pages per suggestion line (1-10)'),
-    row(SET_SEARCH, 'the embedding model, or substring search'),
+    row(SET_SEARCH, 'the embedding model and where it runs'),
     ...COMMANDS.map(([cmd, what]) => row(`/iirc ${cmd}`, what)),
     row(REQUEST_CMD, REQUEST_HINT),
   ].join('\n')

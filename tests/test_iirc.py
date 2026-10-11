@@ -43,11 +43,15 @@ def _machine_dirs(tmp_path_factory, monkeypatch):
         monkeypatch.setenv(var, str(base / var.lower()))
     # set_root resolves the model once; a test that never calls it must not get the last test's
     monkeypatch.setattr(iirc, "MODEL", iirc.iirc_embed.MODELS[iirc.iirc_embed.DEFAULT_MODEL])
+    monkeypatch.setattr(iirc, "HOST_ENTRY", None)
 
+
+
+QWEN = "qwen3-embedding-0.6b"
 
 
 def _machine_config(values: dict) -> None:
-    """Write the machine setup file and resolve the model again, as set-search-backend does after it writes."""
+    """Write the machine setup file and resolve the model and its host again, as the commands that write it do."""
     iirc.write_config_file(values)
     iirc.set_root(iirc.ROOT)
 
@@ -326,7 +330,7 @@ def test_doctor_brief_guides_setup(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     iirc.main(["doctor", "--brief"])
     assert "not set up on this machine" in capsys.readouterr().out
-    iirc.main(["set-search-backend", "--substring"]); capsys.readouterr()
+    iirc.main(["search-mode", "string"]); capsys.readouterr()
     iirc.main(["doctor", "--brief"])
     assert "no .iirc/" in capsys.readouterr().out
     monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
@@ -346,7 +350,7 @@ def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, cap
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
-    iirc.main(["set-search-backend", "--substring"]); iirc.main(["init"]); capsys.readouterr()
+    iirc.main(["search-mode", "string"]); iirc.main(["init"]); capsys.readouterr()
     monkeypatch.setattr(iirc, "suspicion", lambda fm, *a, **k: [("ref", "x")])
     (tmp_path / ".iirc" / "old.md").write_text("---\ntitle: t\n---\nbody\n")
     iirc.main(["doctor", "--health"])
@@ -374,69 +378,28 @@ def test_git_checks_and_init_staging(tmp_path, monkeypatch):
     assert all(ok for ok, _, _ in iirc.git_checks())
 
 
-def test_host_candidates_order(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    assert iirc.host_candidates() == [("http://127.0.0.1:11434", "default")]
-    iirc.write_config_file({"embedding_host": "http://frame:11434"})
-    assert iirc.host_candidates() == [("http://frame:11434", "iirc set-search-backend"), ("http://127.0.0.1:11434", "default")]
-    monkeypatch.setenv("OLLAMA_HOST", "other:1")
-    assert [c[1] for c in iirc.host_candidates()] == ["OLLAMA_HOST", "iirc set-search-backend", "default"]
 
 
-def test_resolve_host_skips_a_dead_env_host(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.setenv("OLLAMA_HOST", "http://dead:11434")
-    iirc.write_config_file({"embedding_host": "http://frame:11434"})
-    monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: url == "http://frame:11434")
-    iirc._RESOLVED = None
-    assert iirc.resolve_host() == ("http://frame:11434", "iirc set-search-backend", True)
-    iirc._RESOLVED = None
-    monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: False)
-    assert iirc.resolve_host() == ("http://dead:11434", "OLLAMA_HOST", False)
-    iirc._RESOLVED = None
 
 
 def test_semantic_search_never_embeds_on_a_dead_host(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda url, timeout=2.0: False)
-    iirc._RESOLVED = None
     called = []
     monkeypatch.setattr(iirc, "tool", lambda *a, **k: called.append(a))
     monkeypatch.setattr(iirc.iirc_embed, "embed", lambda *a, **k: called.append(a))
     assert iirc.semantic_search("anything") == []
     assert called == []
-    iirc._RESOLVED = None
 
 
-def test_setup_writes_config(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
-    monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False: False)
-    iirc.main(["set-search-backend", "--host", "frame:11434"])
-    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
-    assert "does not answer yet" in capsys.readouterr().out
-    iirc.main(["set-search-backend", "--local"])
-    assert iirc.read_config()["embedding_host"] == "http://127.0.0.1:11434"
-    iirc.main(["set-search-backend", "--substring"])
-    assert iirc.read_config()["semantic"] is False and iirc.semantic_enabled() is False
-    assert iirc.tool_env()["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST
-    monkeypatch.setenv("OLLAMA_HOST", "x:1")
-    assert iirc.semantic_enabled() is False                             # the setup file's choice wins
-    monkeypatch.delenv("OLLAMA_HOST")
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--local", "--host", "x"])
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--semantic", "--substring"])
 
 
 def test_semantic_is_on_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     assert iirc.semantic_enabled() is True
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     assert iirc.semantic_enabled() is False
 
 
@@ -647,7 +610,7 @@ def test_recall_skips_machine_prompts_and_searches_the_person_s_words(tmp_path, 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     field = tmp_path / ".iirc"; field.mkdir()
     (field / "pysqlite3-install-override.md").write_text("---\ntitle: pysqlite3-binary blocks install\nsummary: the uv override\ntopics: [install]\nkind: environment\n---\nx\n")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": handback})))
     iirc.main(["suggest-pages"])
@@ -786,14 +749,14 @@ def test_recall_line_shows_the_match_and_its_rule():
 
 def test_max_suggested_sets_how_many_pages_recall_suggests(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
-    iirc.set_root(tmp_path); iirc.write_config_file({"semantic": True, "embedding_host": "http://h:1"})
+    iirc.set_root(tmp_path); iirc.write_config_file({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", "http://h:1")]})
     assert iirc.max_suggested() == 3
     rows = [{"filename": f"p{i}.md", "summary": "s", "distance": 0.1, "via": ["semantic"]} for i in range(6)]
     assert len(iirc.recall_filter(rows)) == 3
     iirc.main(["max-suggested-pages", "5"])
     assert "a suggestion line names up to 5 pages" in capsys.readouterr().out
     assert iirc.max_suggested() == 5 and len(iirc.recall_filter(rows)) == 5
-    assert iirc.read_config()["embedding_host"] == "http://h:1"   # the other settings stay
+    assert iirc.read_config()["embedding_models"][0]["host"] == "http://h:1"   # the other settings stay
     iirc.main(["max-suggested-pages"])
     assert "a suggestion line names up to 5 pages" in capsys.readouterr().out
     with pytest.raises(SystemExit):
@@ -816,7 +779,7 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     field = tmp_path / ".iirc"; field.mkdir()
     (field / "pysqlite3-install-override.md").write_text("---\ntitle: pysqlite3-binary blocks install\nsummary: the uv override\ntopics: [install]\nkind: environment\n---\nx\n")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"})))
     iirc.main(["suggest-pages"])
@@ -862,7 +825,7 @@ def test_show_hooks_shows_each_hook_line_to_the_user(tmp_path, monkeypatch, caps
     field = tmp_path / ".iirc"; field.mkdir()
     (field / "pysqlite3-install-override.md").write_text("---\ntitle: pysqlite3-binary blocks install\nsummary: the uv override\ntopics: [install]\nkind: environment\n---\nx\n")
     (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "iirc.toml").write_text("show_hooks = true\n")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     def run(argv, payload):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload))); iirc.main(argv); return capsys.readouterr().out
     out = json.loads(run(["suggest-pages"], {"prompt": "why does uv tool install memoryfield-tool fail with pysqlite3-binary"}))
@@ -982,12 +945,13 @@ def test_commands_carry_their_plain_names():
     out = subprocess.run([str(ROOT / "bin" / "iirc"), "--help"], capture_output=True, text=True).stdout
     names = set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
     new = {"read-matching-pages", "approve-page-check", "rebuild-search-index", "find-suspect-pages", "audit-page-findability",
-           "estimate-context-tokens", "tune-suggestions", "set-search-backend", "show-page-topics", "max-suggested-pages",
+           "estimate-context-tokens", "tune-suggestions", "show-page-topics", "max-suggested-pages",
+           "set-embedding-model", "show-embedding-models", "add-embedding-model", "remove-embedding-model", "prefer-embedding-host", "search-mode",
            "suggest-pages", "record-command-success", "remind-to-write", "show-compaction-instructions", "summarize-page-usage",
            "record-session-summary", "summarize-session-usage", "show-suggestion-thresholds", "set-suggestion-threshold",
            "show-page-stores", "add-remote-store"}
     old = {"doubt", "cost", "knobs", "pull", "approve", "index", "suspect-pages", "audit", "token-cost", "tune", "setup", "topics", "max-suggested",
-           "recall", "nudge", "stats", "thresholds", "stores"}
+           "recall", "nudge", "stats", "thresholds", "stores", "set-search-backend"}
     assert new - names == set() and old & names == set()
     out = subprocess.run([str(ROOT / "bin" / "iirc"), "tune-suggestions", "--help"], capture_output=True, text=True).stdout
     assert {"gather-suggestion-data", "record-relevance-judgments", "evaluate-suggestion-thresholds", "mark-session-tuned"} <= set(re.search(r"\{([^}]*)\}", out).group(1).split(","))
@@ -999,7 +963,7 @@ def test_brief_channels(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s3")
     monkeypatch.setattr(iirc.shutil, "which", lambda name: None)
-    iirc.write_config_file({"semantic": False}); iirc.set_root(tmp_path)
+    iirc.write_config_file({"search_mode": "string"}); iirc.set_root(tmp_path)
     monkeypatch.setattr("sys.stdin", io.StringIO("{}")); iirc.main(["init"]); capsys.readouterr()
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SubagentStart", "session_id": "s3"})))
     iirc.main(["doctor", "--brief", "--hook"])
@@ -1015,8 +979,8 @@ def test_brief_channels(tmp_path, monkeypatch, capsys):
     assert [r["source"] for r in starts] == ["compact", "startup"]   # SubagentStart logs no start
     assert starts[0]["knobs"] == {"semantic_only": 0.28, "both": 0.38} and starts[0]["max_suggested"] == 3 and starts[0]["page_count"] == 0
     # semantic mode probes the host, and the host's source must not replace the hook's
-    iirc.write_config_file({"semantic": True})
-    monkeypatch.setattr(iirc, "resolve_host", lambda: ("http://127.0.0.1:11434", "config", True))
+    _machine_model("nomic-embed-text")
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: True)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "SessionStart", "source": "compact", "session_id": "s3"})))
     iirc.main(["doctor", "--brief", "--hook"])
     assert "just compacted" in capsys.readouterr().out
@@ -1272,7 +1236,7 @@ def test_read_and_pull_pass_the_field(tmp_path, monkeypatch, capsys):
 def test_search_prefixes_store_with_two_stores(tmp_path, monkeypatch, capsys):
     project, agent = _two_stores(tmp_path, monkeypatch)
     _page(project.dir, "ollama-p.md", "ollama in project"); _page(agent.dir, "ollama-a.md", "ollama in agent")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     iirc.main(["search", "ollama"])
     lines = capsys.readouterr().out.splitlines()
     assert sorted(line.split(":")[0] for line in lines) == ["agent/ollama-a.md", "project/ollama-p.md"]
@@ -1393,7 +1357,7 @@ def test_store_lock_serializes_two_writers(tmp_path, monkeypatch, capsys):
 
 def test_doctor_brief_counts_uncommitted(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     iirc.main(["doctor", "--brief"])
     assert "not committed" not in capsys.readouterr().out
     _page(field, "loose.md")
@@ -1403,7 +1367,7 @@ def test_doctor_brief_counts_uncommitted(tmp_path, monkeypatch, capsys):
 
 def test_brief_does_not_warn_on_page_count(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     for i in range(51):
         _page(field, f"page-{i}.md")
     iirc.main(["doctor", "--brief"])
@@ -1476,7 +1440,7 @@ def test_near_duplicates_reuses_the_cached_result(tmp_path, monkeypatch):
 
 def test_near_duplicates_survives_a_bad_cache_and_a_short_read(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     _index(tmp_path, monkeypatch, _CLOSE)
     first = iirc.near_duplicates()
     state = iirc.read_state_json("pairs.json")
@@ -1501,7 +1465,7 @@ def test_near_duplicates_survives_a_bad_cache_and_a_short_read(tmp_path, monkeyp
 
 def test_doctor_names_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     _index(tmp_path, monkeypatch, _CLOSE)
     with pytest.raises(SystemExit):
         iirc.main(["doctor"])
@@ -1510,20 +1474,20 @@ def test_doctor_names_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
 
 def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     iirc.main(["doctor", "--brief"])
     assert "near-duplicate" not in capsys.readouterr().out
     _index(tmp_path, monkeypatch, _CLOSE)
     iirc.main(["doctor", "--brief"])
     assert "Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance." in capsys.readouterr().out
-    iirc.write_config_file({"semantic": False})               # string mode: nothing refreshes the index
+    iirc.write_config_file({"search_mode": "string"})               # string mode: nothing refreshes the index
     iirc.main(["doctor", "--brief"])
     assert "near-duplicate" not in capsys.readouterr().out
 
 
 def test_brief_reports_a_slow_scan(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(field, "one.md")
     iirc.main(["doctor", "--brief"])
     assert "start scan" not in capsys.readouterr().out
@@ -1625,7 +1589,7 @@ def test_project_store_never_pushes(tmp_path, monkeypatch):
 def test_brief_pulls_only_at_session_start(tmp_path, monkeypatch, capsys):
     import io
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     started = []
     monkeypatch.setattr(iirc, "start_background", lambda argv: started.append(argv))
     _push_page(_other_clone(tmp_path, bare), "theirs.md")
@@ -1641,7 +1605,7 @@ def test_brief_pulls_only_at_session_start(tmp_path, monkeypatch, capsys):
 
 def test_doctor_brief_counts_unpushed(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     iirc.main(["doctor", "--brief"])
     assert "not pushed" not in capsys.readouterr().out
     _page(agent.dir, "local-only.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "local")
@@ -1694,7 +1658,7 @@ def test_verify_keeps_other_project_refs(tmp_path, monkeypatch):
 
 def test_search_ranks_current_project_first(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     pid = iirc.project_id()
     _page(agent.dir, "aaa-elsewhere.md", "zeppelin notes", extra="project: github.com/x/other\n")
     _page(agent.dir, "zzz-here.md", "zeppelin notes", extra=f"project: {pid}\n")
@@ -1734,7 +1698,7 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
     """The hook returns within its budget, and the reindex runs detached in its own session."""
     import io, os, time
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     procs = []
     real = iirc.start_background
     asked = []
@@ -1755,7 +1719,7 @@ def test_brief_starts_a_background_index_after_a_pull(tmp_path, monkeypatch, cap
 def test_brief_names_doctor_fix_when_only_a_remote_store_is_missing(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     (tmp_path / ".claude").mkdir(); (tmp_path / ".claude" / "iirc.toml").write_text('[stores.agent]\nkind = "remote"\nurl = "u"\n')
     iirc.main(["doctor", "--brief"])
     assert "iirc doctor --fix" in capsys.readouterr().out
@@ -2354,7 +2318,7 @@ def test_tune_sweep_replay_counts_passes(tmp_path, monkeypatch, capsys):
     for name, title in (("pysqlite3-install-override.md", "pysqlite3-binary blocks install"), ("uv-install-notes.md", "uv install notes"),
                         ("ollama-host-hang.md", "ollama on 11434 hangs"), ("quiet.md", "quiet page")):
         (field / name).write_text(f"---\ntitle: {title}\nsummary: s\ntopics: [t]\nkind: finding\n---\nx\n")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     r = str(tmp_path.resolve())
     q1 = {"repo": r, "qid": "q1", "prompt": "why does uv tool install fail with pysqlite3-binary", "via": "prompt"}
     q2 = {"repo": r, "qid": "q2", "prompt": "curl 127.0.0.1:11434 hangs", "via": "failure", "excerpt": True}
@@ -2542,7 +2506,7 @@ def test_write_warns_and_succeeds(tmp_path, monkeypatch, capsys):
 
 def test_doctor_brief_calls_git_once_per_sha(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.main(["set-search-backend", "--substring"]); capsys.readouterr()
+    iirc.main(["search-mode", "string"]); capsys.readouterr()
     docs = tmp_path / "docs"
     for name in ("b.md", "c.md"):
         (docs / name).write_text(f"{name}\n\n## Alpha\n\nalpha\n")
@@ -2761,10 +2725,10 @@ def test_string_only_failure_recall_keeps_the_term_rule(tmp_path, monkeypatch):
     knobs = {"semantic_only": 0.28, "both": 0.34}
     terms = [{"filename": f"{c}.md", "via": ["term"], "rare_terms": ["pysqlite3-binary"]} for c in "ab"]
     near = [{"filename": "near.md", "via": ["semantic"], "distance": 0.1}]
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     # no semantic search can make a meaning hit, so an identifier still passes, one page
     assert [r["verdict"] for r in iirc.recall_verdicts(terms, knobs, source="failure")] == ["passed", "over_max"]
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     assert [r["verdict"] for r in iirc.recall_verdicts(near + terms, knobs, source="failure")] == ["failure_needs_both"] * 3
 
 
@@ -2791,7 +2755,7 @@ def _audit_fixture(tmp_path, monkeypatch):
     page("brief-old.md", "Lemur perch height", body="Superseded by [[lemur-perches]].\n\nThe perch stood at two metres.\n")
     page("prose.md", "Gecko lamp wiring", body="The old switch was replaced by a dimmer.\n\nThe lamp sits left.\n\nThe cord runs under it.\n")   # prose, no link
     page("marked.md", "Tapir pen gates", extra="superseded: tapir-pens.md\n", body="The gates opened inward.\n\nThe pens held two tapirs.\n")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     r = str(tmp_path.resolve())
     _jsonl(tmp_path / "st" / "dokidlc-iirc" / "tune" / "judgments.jsonl",
            [{"repo": r, "session": "s", "recall": f"r{i}", "page": "hub.md", "label": "noise" if i < 6 else "relevant"} for i in range(8)]
@@ -3030,35 +2994,60 @@ _REAL_REINDEX = iirc.reindex
 _WORDS = ("alpha", "beta", "gamma")
 
 
-@contextlib.contextmanager
-def _fake_ollama(monkeypatch, model="nomic-embed-text"):
-    """An ollama that answers / and /api/embed: each text's vector counts the _WORDS in it, padded with zeros to the model's width. Yields the inputs it embedded."""
+class _Seen(list):
+    """The inputs a fake host embedded, and the fake's URL."""
+    url = ""
+
+
+def _vector_rows(texts, width):
+    """_fake_ollama's vectors: each text's count of each of _WORDS, then 0.01, padded with zeros to `width`."""
+    return [[t.count(w) + 0.0 for w in _WORDS] + [0.01] + [0.0] * (width - len(_WORDS) - 1) for t in texts]
+
+
+def _serve(handler) -> "http.server.HTTPServer":
     import http.server
-    seen: list[str] = []
-    pad = [0.0] * (iirc.iirc_embed.MODELS[model].dims - len(_WORDS) - 1)
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def _listed(model, url, protocol, name):
+    """The machine's list names this host as the model's one host; the repository names no model, so the list's first is used."""
+    _machine_config({"search_mode": "semantic", "embedding_models": [{"model": model, "host": url, "protocol": protocol, "name": name}]})
+
+
+@contextlib.contextmanager
+def _fake_ollama(monkeypatch, model="nomic-embed-text", name=None, tags=None, listed=True):
+    """An ollama that answers /, /api/version, /api/tags, and /api/embed: each text's vector counts the _WORDS in it, padded with zeros to
+    the model's width. `name` is the build it serves, by default the model's first ollama name, and `tags` what /api/tags lists, by default
+    that build. With `listed`, the machine's list names it. Yields the inputs it embedded, with the host's URL as .url."""
+    import http.server
+    seen = _Seen()
+    name = name or iirc.iirc_embed.MODELS[model].names["ollama"][0]
+    tags = [name] if tags is None else tags
+    width = iirc.iirc_embed.MODELS[model].dims
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            self.send_response(200); self.end_headers(); self.wfile.write(b"Ollama is running")
+            body = {"/api/version": b'{"version": "0.12.0"}', "/api/tags": json.dumps({"models": [{"name": t} for t in tags]}).encode()}
+            self.send_response(200); self.end_headers(); self.wfile.write(body.get(self.path, b"Ollama is running"))
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            assert self.path == "/api/embed" and body["model"] == model and body["truncate"] is True
+            assert self.path == "/api/embed" and body["model"] == name and body["truncate"] is True
             seen.extend(body["input"])
-            vecs = [[t.count(w) + 0.0 for w in _WORDS] + [0.01] + pad for t in body["input"]]
-            out = json.dumps({"embeddings": vecs}).encode()
+            out = json.dumps({"embeddings": _vector_rows(body["input"], width)}).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
 
         def log_message(self, *a): pass
-    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    monkeypatch.setenv("OLLAMA_HOST", f"127.0.0.1:{srv.server_port}")
-    iirc._RESOLVED = None
+    srv = _serve(H)
+    seen.url = f"http://127.0.0.1:{srv.server_port}"
+    if listed:
+        _listed(model, seen.url, "ollama", name)
     try:
         yield seen
     finally:
         srv.shutdown()
-        iirc._RESOLVED = None
 
 
 def _vector_project(tmp_path, monkeypatch):
@@ -3161,11 +3150,10 @@ def test_hybrid_search_in_process(tmp_path, monkeypatch):
 
 # p5 step 24
 
-def _machine_model(model):
-    """The setup file names this embedding model, as `iirc set-search-backend` writes it."""
-    path = iirc.config_file(); path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'embedding = {{backend = "{iirc.iirc_embed.MODELS[model].backend}", model = "{model}"}}\n')
-    iirc._CONFIG = None
+def _machine_model(model, host="http://127.0.0.1:11434"):
+    """The machine's list names this one model, through ollama at HOST or, for the CPU model, on this CPU; a repository that names none uses it."""
+    protocol = next(iter(iirc.iirc_embed.MODELS[model].names))
+    _machine_config({"search_mode": "semantic", "embedding_models": [_entry(model, iirc.CPU if protocol == "onnx" else host, protocol)]})
 
 
 def test_knobs_per_model(tmp_path, monkeypatch, capsys):
@@ -3176,7 +3164,7 @@ def test_knobs_per_model(tmp_path, monkeypatch, capsys):
                     '[suggestions.all-minilm-l6-v2]\nboth = 0.95\n')
     iirc.set_root(tmp_path)   # no embedding in the setup file: nomic-embed-text
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.3, "both": 0.38}   # minilm's 0.95 is not checked
-    _machine_model("qwen3-embedding:0.6b")
+    _machine_model(QWEN)
     iirc.set_root(tmp_path)
     assert iirc.CONFIG_ERROR is None and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}    # past nomic's 0.60, inside qwen3's range
     iirc.main(["show-suggestion-thresholds"])
@@ -3279,11 +3267,13 @@ def test_empty_old_flat_table_names_itself(tmp_path, monkeypatch):
 # p5 step 25
 
 @contextlib.contextmanager
-def _fake_openai(monkeypatch, model, dims=None):
-    """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order, `dims` wide. Yields the inputs."""
+def _fake_openai(monkeypatch, model, dims=None, listed=True):
+    """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order, `dims` wide, for the
+    model's openai name; 404 for any other name. With `listed`, the machine's list names it. Yields the inputs, with the host's URL as .url."""
     import http.server
-    seen: list[str] = []
-    pad = [0.0] * ((dims or iirc.iirc_embed.MODELS[model].dims) - len(_WORDS) - 1)
+    seen = _Seen()
+    name = iirc.iirc_embed.MODELS[model].names["openai"][0]
+    width = dims or iirc.iirc_embed.MODELS[model].dims
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -3291,34 +3281,31 @@ def _fake_openai(monkeypatch, model, dims=None):
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            assert self.path == "/v1/embeddings" and set(body) == {"model", "input"} and body["model"] == model
+            assert self.path == "/v1/embeddings" and set(body) == {"model", "input"}
+            if body["model"] != name:
+                self.send_response(404); self.end_headers(); return
             seen.extend(body["input"])
-            data = [{"index": i, "embedding": [t.count(w) + 0.0 for w in _WORDS] + [0.01] + pad} for i, t in enumerate(body["input"])]
-            out = json.dumps({"data": data[::-1], "model": model}).encode()
+            data = [{"index": i, "embedding": v} for i, v in enumerate(_vector_rows(body["input"], width))]
+            out = json.dumps({"data": data[::-1], "model": name}).encode()
             self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
 
         def log_message(self, *a): pass
-    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
-    iirc._RESOLVED = None
+    srv = _serve(H)
+    seen.url = f"http://127.0.0.1:{srv.server_port}"
+    if listed:
+        _listed(model, seen.url, "openai", name)
     try:
         yield seen
     finally:
         srv.shutdown()
-        iirc._RESOLVED = None
 
 
-@pytest.mark.parametrize("model", ["nomic-embed-text", "qwen3-embedding:0.6b", "embeddinggemma", "qwen3-embedding"])
-def test_backend_prefixes(tmp_path, monkeypatch, capsys, model):
-    """Each model gets its own query and document prefixes over the raw page file, through its own backend, into its own store."""
+@pytest.mark.parametrize("model, protocol", [("nomic-embed-text", "ollama"), (QWEN, "ollama"), ("embeddinggemma", "ollama"), (QWEN, "openai")])
+def test_backend_prefixes(tmp_path, monkeypatch, capsys, model, protocol):
+    """Each model gets its own query and document prefixes over the raw page file, through each protocol it has, into its own store."""
     field = _vector_project(tmp_path, monkeypatch)
     m = iirc.iirc_embed.MODELS[model]
-    if m.backend == "ollama":
-        _machine_config({"semantic": True, "embedding": {"backend": "ollama", "model": model}})
-        server = _fake_ollama(monkeypatch, model)
-    else:
-        server = _fake_openai(monkeypatch, model)
+    server = _fake_ollama(monkeypatch, model) if protocol == "ollama" else _fake_openai(monkeypatch, model)
     with server as seen:
         assert iirc.active_model() == m
         iirc.reindex()
@@ -3329,17 +3316,15 @@ def test_backend_prefixes(tmp_path, monkeypatch, capsys, model):
         rows = iirc.hybrid_search("alpha")
         assert seen == [m.query_prefix + "alpha"]
         assert [r["filename"] for r in rows if "semantic" in r["via"]] == ["alpha-notes.md"]
-    if m.backend == "openai":
+    if protocol == "openai":
         # a hosted endpoint that does not answer is a dead host: string search, and the brief says so
         s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-        _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{port}"}})
-        iirc._RESOLVED = None
+        _listed(model, f"http://127.0.0.1:{port}", "openai", m.names["openai"][0])
         assert iirc.semantic_search("alpha") == []
         capsys.readouterr()
         iirc.main(["doctor", "--brief"])
         assert f"string only (127.0.0.1:{port} does not answer" in capsys.readouterr().out
-        iirc._RESOLVED = None
-    assert iirc.iirc_embed.MODELS["qwen3-embedding:0.6b"].query_prefix == \
+    assert iirc.iirc_embed.MODELS[QWEN].query_prefix == \
         "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
     assert (iirc.iirc_embed.MODELS["embeddinggemma"].query_prefix, iirc.iirc_embed.MODELS["embeddinggemma"].doc_prefix) == \
         ("task: search result | query: ", "title: none | text: ")
@@ -3405,7 +3390,7 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
     # bin/iirc: the onnx backend sends the plain page text and keeps each page's best window
     field = _vector_project(tmp_path, monkeypatch)
     (field / "long-notes.md").write_text(f"---\ntitle: Long notes\nsummary: mostly alpha\ntopics:\n- greek\nkind: finding\n---\n{text}\n\n## Sources\n- gamma gamma\n")
-    _machine_config({"semantic": True, "embedding": {"backend": "onnx", "model": "all-minilm-l6-v2"}})
+    _machine_model("all-minilm-l6-v2")
     sent = []
 
     def run_cpu(backend, texts, kind):
@@ -3414,7 +3399,6 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
         return np.pad(vecs, ((0, 0), (0, backend.model.dims - vecs.shape[1]))), owner   # the model's width, or the store is refused
     monkeypatch.setattr(iirc.iirc_embed, "run_cpu", run_cpu)
     monkeypatch.setattr(iirc, "cpu_ready", lambda: True)
-    iirc._RESOLVED = None
     iirc.reindex()
     docs = dict(zip(sorted(p.name for p in iirc.list_pages(field)), sent[0][1]))
     assert docs["long-notes.md"] == f"Long notes\nmostly alpha\nTopics: greek\n\n{text}\n"   # no YAML, no Sources
@@ -3427,49 +3411,8 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
     assert abs(rows["long-notes.md"] - best) < 1e-6 and best < 0.01 < mean   # its last window is nearly all gamma
     assert sent[-1] == ("query", ["gamma"])
     assert "long-notes.md" in [label for label, _, _ in iirc.index_rows()]  # one vector per page for near-duplicates
-    iirc._RESOLVED = None
 
 
-def test_setup_offers_models(tmp_path, monkeypatch, capsys):
-    import hashlib
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
-    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
-    answers = iter(["1", "1"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
-    iirc.main(["set-search-backend"])
-    menu = capsys.readouterr().out
-    for offer in ("ollama on this machine", "a remote ollama host", "OpenAI-compatible", "this CPU", "all-minilm-l6-v2", "string search",
-                  "nomic-embed-text", "qwen3-embedding:0.6b", "embeddinggemma"):
-        assert offer in menu
-    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://127.0.0.1:11434",
-                                  "embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}}
-    iirc.main(["set-search-backend", "--openai", "https://llm.example.net/v1/"])
-    assert iirc.read_config()["embedding"] == {"backend": "openai", "model": "qwen3-embedding", "url": "https://llm.example.net"}
-    iirc.main(["set-search-backend", "--host", "frame:11434", "--model", "embeddinggemma"])
-    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "embeddinggemma"} and iirc.active_model().id == "embeddinggemma"
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--local", "--model", "all-minilm-l6-v2"])   # not an ollama model
-    # the CPU tier fetches its files at the pinned commit, checks each sha256, and runs bin/iirc-cpu once
-    fetched, checked = [], []
-    blobs = {"onnx/model.onnx": b"model bytes", "tokenizer.json": b"{}"}
-    monkeypatch.setattr(iirc.iirc_embed, "MINILM_FILES", {name: (src, hashlib.sha256(blobs[src]).hexdigest())
-                                                          for name, (src, _) in iirc.iirc_embed.MINILM_FILES.items()})
-    monkeypatch.setattr(iirc, "fetch_url", lambda url, dest: fetched.append(url) or dest.write_bytes(blobs[url.split(f"/{iirc.iirc_embed.MINILM_COMMIT}/")[1]]))
-    monkeypatch.setattr(iirc, "cpu_check", lambda: checked.append(1) or (True, ""))
-    iirc.main(["set-search-backend", "--cpu"])
-    assert iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"} and checked == [1]
-    assert all(u.startswith(f"https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/{iirc.iirc_embed.MINILM_COMMIT}/") for u in fetched)
-    assert len(fetched) == 2 and iirc.cpu_ready()
-    iirc.main(["set-search-backend", "--cpu"])
-    assert len(fetched) == 2                                               # files whose sha matches are not fetched again
-    (iirc.minilm_dir() / "tokenizer.json").write_bytes(b"tampered")
-    blobs["tokenizer.json"] = b"tampered too"
-    iirc.write_config_file({"semantic": False})
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--cpu"])                                      # a file that fails its sha256 is refused
-    assert "sha256" in capsys.readouterr().err and iirc.read_config() == {"semantic": False}
-    assert iirc.iirc_embed.MINILM_COMMIT == "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
 
 # p5 step 13
@@ -3528,7 +3471,7 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
 
     def embed(backend, texts, kind="doc", timeout=None):
         import numpy as np
-        assert rf.iirc.read_config()["embedding"]["model"] == backend.model.id
+        assert rf.iirc.read_config()["embedding_models"][0]["model"] == backend.model.id
         seen.append((backend.model.id, str(rf.iirc.config_file()), os.environ["IIRC_CACHE_DIR"]))
         near = 0 if backend.model.id == "nomic-embed-text" else 1     # "gamma" is near alpha for nomic, near beta for gemma
         pad = [0.0] * (backend.model.dims - 3)                       # the model's width, or the store is refused
@@ -3536,7 +3479,7 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
                            dtype=np.float32) for t in texts]
     monkeypatch.setattr(iirc.iirc_embed, "embed", embed)
     monkeypatch.setattr(rf.iirc, "start_background", lambda argv: 1 / 0)
-    monkeypatch.setattr(rf.iirc, "resolve_host", lambda: ("http://127.0.0.1:9", "default", True))    # the stub is the backend; CI has no ollama
+    monkeypatch.setattr(rf.iirc, "host_answers", lambda *a, **k: True)    # the stub is the backend; CI has no ollama
     prompts = {"q1": ("gamma rays", "prompt")}
     assert rf.ranked_pages("nomic-embed-text", tmp_path, prompts, tmp_path / "pool") == {"q1": ["alpha-notes.md"]}
     assert rf.ranked_pages("embeddinggemma", tmp_path, prompts, tmp_path / "pool") == {"q1": ["beta-notes.md"]}
@@ -3561,38 +3504,6 @@ def test_replay_files_merge_pool(tmp_path, capsys):
     assert "1 pool labels added, 2 skipped" in capsys.readouterr().out
 
 
-def test_setup_default_order(tmp_path, monkeypatch, capsys):
-    """qwen3-embedding:0.6b where ollama or the machine's host answers, all-minilm-l6-v2 otherwise, string search last."""
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
-    answers, asked = [], []
-    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or answers.pop(0))
-    monkeypatch.setattr(iirc, "model_present", lambda host, model, timeout=2.0: True)
-    up = {"http://127.0.0.1:11434"}
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: base in up)
-    answers[:] = ["", ""]                                                   # Enter, Enter: ollama here, its first model
-    iirc.main(["set-search-backend"])
-    out = capsys.readouterr().out
-    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
-    assert asked[0].endswith("[1]: ") and out.index("1. qwen3-embedding:0.6b") < out.index("nomic-embed-text")
-    menu = [line for line in out.splitlines() if re.match(r"\s+\d\. ", line)]
-    assert "string search" in menu[len(iirc.SETUP_MENU.splitlines()) - 2]   # the last choice of the menu
-    iirc.main(["set-search-backend", "--local"])
-    assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
-    # the machine's own ollama host answers and this one does not: Enter takes that host
-    up.clear(); up.add("http://frame:11434")
-    iirc.write_config_file({"embedding_host": "http://frame:11434"})
-    answers[:] = ["", "", ""]; asked.clear()
-    iirc.main(["set-search-backend"])
-    assert asked[0].endswith("[2]: ") and iirc.read_config()["embedding_host"] == "http://frame:11434"
-    assert iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
-    # nothing answers: Enter takes this CPU
-    up.clear()
-    monkeypatch.setattr(iirc, "fetch_minilm", lambda: None)
-    monkeypatch.setattr(iirc, "cpu_check", lambda: (True, ""))
-    answers[:] = [""]; asked.clear()
-    iirc.main(["set-search-backend"])
-    assert asked[0].endswith("[4]: ") and iirc.read_config()["embedding"] == {"backend": "onnx", "model": "all-minilm-l6-v2"}
 
 
 def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
@@ -3613,7 +3524,7 @@ def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
         path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(tmp_path), model)
         iirc.iirc_embed.save(path, iirc.iirc_embed.Vectors(list(vecs), ["sha-a", "sha-b"], rows))
     assert iirc.near_duplicates() == []                          # nomic
-    _machine_config({"embedding": {"backend": "ollama", "model": gemma.id}})
+    _machine_model(gemma.id)
     assert iirc.near_duplicates() == [(round(d, 3), "a.md", "b.md")]   # same page shas, other model: not nomic's cached answer
 
 
@@ -3636,9 +3547,9 @@ def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
     vectors = _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
     _audit_host_answers(monkeypatch)
-    _machine_config({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
+    _machine_model(QWEN)
     iirc.main(["audit-page-findability", "old.md"])
-    assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"
+    assert capsys.readouterr().out.splitlines()[-1] == f"1 finding in 1 page; vectors checked with {QWEN}"
 
 
 # p5 review fixes, R3
@@ -3791,9 +3702,8 @@ def test_audit_skips_own_title_when_no_host_answers(tmp_path, monkeypatch, capsy
     """Vectors on disk are not enough: with no host, a title search is string matches, which tie on filenames."""
     vectors = _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
-    iirc.write_config_file({"semantic": True})
+    _machine_model("nomic-embed-text"); _repo_model(tmp_path, "nomic-embed-text")
     monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
-    monkeypatch.setattr(iirc, "_RESOLVED", None)
     iirc.main(["audit-page-findability"])
     out, err = capsys.readouterr()
     assert ": own-title: " not in out and "hub.md: hub: " in out
@@ -3817,13 +3727,11 @@ def _refusing_openai(monkeypatch, get_status, post_status=None):
         def log_message(self, *a): pass
     srv = http.server.HTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": "qwen3-embedding", "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
-    iirc._RESOLVED = None
+    _listed(QWEN, f"http://127.0.0.1:{srv.server_port}", "openai", "qwen3-embedding")
     try:
         yield f"127.0.0.1:{srv.server_port}"
     finally:
         srv.shutdown()
-        iirc._RESOLVED = None
 
 
 @pytest.mark.parametrize("status", [401, 403, 500])
@@ -3831,14 +3739,14 @@ def test_openai_host_that_refuses_is_down(tmp_path, monkeypatch, capsys, status)
     """A refusal or a server fault is not an answer: search and index say so, and doctor names the status."""
     _vector_project(tmp_path, monkeypatch)
     with _refusing_openai(monkeypatch, status) as where:
-        assert iirc.resolve_host()[2] is False
-        assert iirc.search_mode() == f"string only ({where} does not answer; `iirc set-search-backend` to fix)"
+        assert iirc.host_up() is False
+        assert iirc.search_status() == f"string only ({where} does not answer; `iirc doctor` to check)"
         capsys.readouterr()
         assert iirc.semantic_search("alpha") == []
-        assert "no embedding host answers" in capsys.readouterr().err
+        assert f"http://{where}, which serves {QWEN} on this machine, does not answer" in capsys.readouterr().err
         iirc.main(["rebuild-search-index"])
         out, err = capsys.readouterr()
-        assert "no embedding host answers" in err
+        assert "does not answer" in err
         assert "index current" not in out and "have no vectors" in out   # nothing was embedded
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
@@ -3850,12 +3758,12 @@ def test_openai_host_without_the_model_fails_doctor(tmp_path, monkeypatch, capsy
     """A server with no route at / is alive, but doctor's test embed names the 404 it gives for a model it does not serve."""
     _vector_project(tmp_path, monkeypatch)
     with _refusing_openai(monkeypatch, 404) as where:
-        assert iirc.resolve_host()[2] is True
+        assert iirc.host_up() is True
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
         out = capsys.readouterr().out
         assert f"FAIL embedding endpoint http://{where}" in out and "HTTP 404" in out
-    with _fake_openai(monkeypatch, "qwen3-embedding"):
+    with _fake_openai(monkeypatch, QWEN):
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
         assert "ok  embedding endpoint http://127.0.0.1:" in capsys.readouterr().out
@@ -3891,31 +3799,21 @@ def test_vector_store_of_the_wrong_width_is_reembedded(tmp_path, monkeypatch):
 # p5 review fixes, R4
 
 
-def test_openai_host_sets_its_own_width(tmp_path, monkeypatch, capsys):
-    """A host may serve Qwen3-Embedding-8B, 4096 wide, under the 0.6B's name: the store takes the host's width, and a store of another width is embedded again."""
-    import numpy as np
+def test_openai_host_of_another_width_is_another_model(tmp_path, monkeypatch, capsys):
+    """A host may serve Qwen3-Embedding-8B, 4096 wide, under the 0.6B's name: no page is embedded, search matches strings, and doctor fails it."""
     _vector_project(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "start_background", lambda argv: None)
-    with _fake_openai(monkeypatch, "qwen3-embedding", dims=4096):
+    with _fake_openai(monkeypatch, QWEN, dims=4096):
         path = iirc.vector_path(iirc.STORES[0])
         iirc.reindex()
-        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
-        assert [r["filename"] for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == ["alpha-notes.md"]
+        assert iirc.iirc_embed.load(path) is None
+        assert [r for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == []
         iirc.main(["rebuild-search-index"])
-        assert "index current" in capsys.readouterr().out
+        assert "have no vectors" in capsys.readouterr().out
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
-        assert "4096" in [l for l in capsys.readouterr().out.splitlines() if "embedding endpoint" in l][0]
-        # a store the 0.6B model made, 1024 wide: a search embeds every page again at the host's width
-        v = iirc.iirc_embed.load(path)
-        iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
-        assert [r["filename"] for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == ["alpha-notes.md"]
-        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
-        # and so does an index
-        iirc.iirc_embed.save(path, v._replace(vecs=np.ones((2, 1024), dtype=np.float32)))
-        iirc.main(["rebuild-search-index"])
-        assert "index current" in capsys.readouterr().out
-        assert iirc.iirc_embed.load(path).vecs.shape == (2, 4096)
+        line = [l for l in capsys.readouterr().out.splitlines() if "embedding endpoint" in l][0]
+        assert line.startswith("FAIL") and "4096 wide" in line and f"{QWEN} is 1024" in line
 
 
 def test_saved_prompts_are_redacted(tmp_path, monkeypatch):
@@ -4005,12 +3903,11 @@ def test_maintenance_due_sooner_for_each_reason(tmp_path, monkeypatch):
 
 def _no_host(monkeypatch):
     monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
-    monkeypatch.setattr(iirc, "_RESOLVED", None)
 
 
 def test_run_maintenance_changes_no_page_logs_its_row_and_is_not_due_after(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     (field / "widgets.md").write_text("---\ntitle: Widgets need a restart after setup\nsummary: Widgets need a restart after setup, or they keep the old config.\n"
                                       "topics: [widgets]\nkind: finding\n---\nRestart them.\n\n## Sources\n\n- x\n")
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
@@ -4030,7 +3927,7 @@ def test_run_maintenance_changes_no_page_logs_its_row_and_is_not_due_after(tmp_p
 
 def test_run_maintenance_syncs_remote_stores_before_the_page_checks(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(agent.dir, "loose.md")
     _push_page(_other_clone(tmp_path, bare), "theirs.md", text="from the other instance\n\n## Sources\n\n- x\n")
     iirc.main(["run-maintenance"])
@@ -4043,7 +3940,7 @@ def test_run_maintenance_syncs_remote_stores_before_the_page_checks(tmp_path, mo
 
 def test_run_maintenance_lists_what_is_left(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     _no_host(monkeypatch)
     _index(tmp_path, monkeypatch, _CLOSE)
     sha = _git(tmp_path, "log", "-1", "--format=%h").strip()
@@ -4075,7 +3972,7 @@ def test_run_maintenance_lists_what_is_left(tmp_path, monkeypatch, capsys):
 
 def test_run_maintenance_starts_from_a_clean_commit_and_prints_its_undo(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     field = proj / ".iirc"
     _page(field, "mine.md", summary="before"); _page(agent.dir, "shared.md", summary="before")
     _git(proj, "add", ".iirc"); _git(proj, "commit", "-qm", "pages")
@@ -4109,7 +4006,7 @@ def test_run_maintenance_starts_from_a_clean_commit_and_prints_its_undo(tmp_path
 
 def test_brief_says_maintenance_is_due_in_one_sentence(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     iirc.main(["doctor", "--brief"])
     assert "Maintenance" not in capsys.readouterr().out
     _log([("start", f"s{i}", 1) for i in range(5)] + [("timeout", "s1", 1)])
@@ -4126,7 +4023,7 @@ def test_brief_says_maintenance_is_due_in_one_sentence(tmp_path, monkeypatch, ca
 
 def test_doctor_ends_with_run_maintenance_when_due(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": True})
+    iirc.write_config_file({"search_mode": "semantic"})
     _no_host(monkeypatch)
     with pytest.raises(SystemExit):
         iirc.main(["doctor"])
@@ -4146,7 +4043,7 @@ def test_doctor_ends_with_run_maintenance_when_due(tmp_path, monkeypatch, capsys
 
 def test_run_maintenance_leaves_a_store_it_could_not_commit_first(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     _page(field, "loose.md")
     monkeypatch.setattr(iirc, "commit_store", lambda store, message: "a merge or rebase is in progress")
@@ -4191,7 +4088,7 @@ def test_untuned_sessions_stops_at_its_limit(tmp_path, monkeypatch):
 
 def test_doctor_names_an_unpushed_store_and_timeouts_once(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(agent.dir, "local-only.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "local")
     _log([("timeout", "s1", 1)])
     with pytest.raises(SystemExit):
@@ -4208,7 +4105,7 @@ def _undo_lines(out):
 
 def test_undo_leaves_another_machines_iirc_commit_pulled_later(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(agent.dir, "shared.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "pages"); _git(agent.repo, "push", "-q", "origin", "main")
     iirc.main(["run-maintenance"])
     undo = _undo_lines(capsys.readouterr().out)
@@ -4223,7 +4120,7 @@ def test_undo_leaves_another_machines_iirc_commit_pulled_later(tmp_path, monkeyp
 
 def test_undo_leaves_a_persons_commit_with_an_iirc_line(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     iirc.main(["run-maintenance"])
     undo = _undo_lines(capsys.readouterr().out)
@@ -4234,7 +4131,7 @@ def test_undo_leaves_a_persons_commit_with_an_iirc_line(tmp_path, monkeypatch, c
 
 def test_undo_with_no_run_commits_says_so(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     iirc.main(["run-maintenance"])
     undo = _undo_lines(capsys.readouterr().out)
@@ -4253,7 +4150,7 @@ def test_iirc_commits_carry_this_machines_trailer(tmp_path, monkeypatch):
 
 def test_sync_refuses_a_detached_head(tmp_path, monkeypatch, capsys):
     proj, agent, bare = _remote(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(agent.dir, "shared.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "pages"); _git(agent.repo, "push", "-q", "origin", "main")
     _git(agent.repo, "checkout", "-q", "--detach")
     _page(agent.dir, "loose.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "detached")
@@ -4266,7 +4163,7 @@ def test_sync_refuses_a_detached_head(tmp_path, monkeypatch, capsys):
 
 def test_starting_commits_name_a_repository_with_no_commit(tmp_path, monkeypatch, capsys):
     _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     subprocess.run(["rm", "-rf", str(tmp_path / ".git")], check=True)
     _git(tmp_path, "init", "-q", "-b", "main")
@@ -4284,14 +4181,18 @@ def test_ollama_embed_asks_to_keep_the_model_loaded(monkeypatch):
     def post(url, body, timeout):
         sent.append((url, body))
         if url.endswith("/v1/embeddings"):
-            return {"data": [{"index": 0, "embedding": [0.0] * 4}]}
+            return {"data": [{"index": 0, "embedding": [0.0] * width}]}
         return {"embeddings": [[0.0] * emb.MODELS["nomic-embed-text"].dims]}
     monkeypatch.setattr(emb, "_post", post)
-    assert emb.embed(emb.Backend(emb.MODELS["nomic-embed-text"], "http://h:11434"), ["a"]) is not None
+    assert emb.embed(emb.Backend(emb.MODELS["nomic-embed-text"], "ollama", "nomic-embed-text", "http://h:11434"), ["a"]) is not None
     url, body = sent[-1]
     assert url == "http://h:11434/api/embed" and body["keep_alive"] == emb.KEEP_ALIVE and body["truncate"] is True
-    assert emb.embed(emb.Backend(emb.MODELS["qwen3-embedding"], "http://h:8000"), ["a"]) is not None
-    assert "keep_alive" not in sent[-1][1]   # an OpenAI-compatible host gets the body it knows
+    qwen = emb.Backend(emb.MODELS[QWEN], "openai", "qwen3-embedding", "http://h:8000")
+    width = 1024
+    assert emb.embed(qwen, ["a"]) is not None
+    assert sent[-1][1] == {"model": "qwen3-embedding", "input": ["a"]}   # an OpenAI-compatible host gets the body it knows, and the build's name
+    width = 4096
+    assert emb.embed(qwen, ["a"]) is None                                # another width is another model under the name
     assert f"loaded for {emb.KEEP_ALIVE}," in iirc.TIMEOUT_FIX
 
 
@@ -4513,14 +4414,14 @@ def test_migrate_fixes_a_flat_recall_table_so_hooks_stay_on(tmp_path, monkeypatc
     assert iirc.CONFIG_ERROR is None and iirc.RECALL["semantic_only"] == 0.30
     assert "`iirc find-suspect-pages`" in (repo / ".iirc" / "page.md").read_text()
     assert ".claude/iirc.toml" in _git(repo, "diff", "--cached", "--name-only")
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     assert "hooks off" not in _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
 
 
 def test_run_maintenance_clears_the_timeouts_it_reported(tmp_path, monkeypatch, capsys):
     """Timeouts count since the last run, so a run settles them; untuned sessions are a note for run-maintenance, never due."""
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(field, "a.md"); _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "page")
     monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     _waiting(10)
@@ -4549,7 +4450,7 @@ def test_only_the_main_session_is_told_to_run_maintenance(tmp_path, monkeypatch,
     """A subagent cannot run a slash command, so its start line leaves out the maintenance sentence."""
     import io
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(field, "a.md")
     _log([("start", f"s{i}", 1) for i in range(5)])
     said = {}
@@ -4569,7 +4470,7 @@ def test_only_the_main_session_is_told_to_run_maintenance(tmp_path, monkeypatch,
 
 
 def test_doctor_fix_before_setup_installs_and_pulls_nothing(tmp_path, monkeypatch, capsys):
-    """With no machine config, doctor names set-search-backend and leaves ollama alone, even with --fix."""
+    """With no machine config, doctor names add-embedding-model and leaves ollama alone, even with --fix."""
     _project(tmp_path, monkeypatch)
     shims = tmp_path / "shims"; shims.mkdir()
     calls = tmp_path / "calls.log"
@@ -4587,7 +4488,7 @@ def test_doctor_fix_before_setup_installs_and_pulls_nothing(tmp_path, monkeypatc
     with pytest.raises(SystemExit):
         iirc.main(["doctor", "--fix"])
     out = capsys.readouterr().out
-    assert "not set up; run iirc set-search-backend" in out
+    assert "not set up; run iirc add-embedding-model MODEL HOST" in out
     assert not calls.exists(), calls.read_text()
 
 
@@ -4614,8 +4515,7 @@ def test_substring_setup_wins_over_an_exported_ollama_host(tmp_path, monkeypatch
     """semantic = false from --substring holds even with OLLAMA_HOST exported, so the brief reports string search, not a broken host."""
     _project(tmp_path, monkeypatch)
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
-    monkeypatch.setattr(iirc, "_RESOLVED", None)
-    iirc.main(["set-search-backend", "--substring"]); capsys.readouterr()
+    iirc.main(["search-mode", "string"]); capsys.readouterr()
     assert iirc.semantic_enabled() is False
     out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
     assert "string search" in out and "to fix" not in out and "does not answer" not in out
@@ -4671,7 +4571,7 @@ def test_migrate_stops_on_a_config_the_knob_fix_cannot_repair(tmp_path, monkeypa
 def test_doctor_fix_names_maintenance_due_after_it_fixes_the_knobs(tmp_path, monkeypatch, capsys):
     """doctor --fix repairs a flat [recall], reloads the stores, and counts their pages for the due line in the same run."""
     field = _project(tmp_path, monkeypatch)
-    iirc.write_config_file({"semantic": False})
+    iirc.write_config_file({"search_mode": "string"})
     _page(field, "a.md")
     (tmp_path / ".claude").mkdir(exist_ok=True)
     (tmp_path / ".claude" / "iirc.toml").write_text("[recall]\nsemantic_only = 0.30\n")
@@ -4701,17 +4601,17 @@ def test_init_leaves_a_settings_file_it_did_not_write_unstaged(tmp_path, monkeyp
 
 # chore 2610111741-jy
 
-def test_repository_model_wins_over_the_machine_default(tmp_path):
-    """Two repositories on one machine: the one that names a model searches with it, the other with the machine's default."""
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+def test_repository_model_wins_over_the_machine_lists_first(tmp_path):
+    """Two repositories on one machine: the one that names a model searches with it, the other with the first on the machine's list."""
+    iirc.write_config_file({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", "http://127.0.0.1:11434")]})
     named, plain = tmp_path / "named", tmp_path / "plain"
     (named / ".claude").mkdir(parents=True); plain.mkdir()
-    (named / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding:0.6b"\n')
+    (named / ".claude" / "iirc.toml").write_text(f'embedding_model = "{QWEN}"\n')
     iirc.set_root(named)
-    assert iirc.CONFIG_ERROR is None and iirc.active_model().id == "qwen3-embedding:0.6b"
-    assert iirc.RECALL == {k: v[0] for k, v in iirc.iirc_embed.MODELS["qwen3-embedding:0.6b"].knobs.items()}
+    assert iirc.CONFIG_ERROR is None and iirc.active_model().id == QWEN and iirc.HOST_ENTRY is None
+    assert iirc.RECALL == {k: v[0] for k, v in iirc.iirc_embed.MODELS[QWEN].knobs.items()}
     iirc.set_root(plain)
-    assert iirc.active_model().id == "nomic-embed-text"
+    assert iirc.active_model().id == "nomic-embed-text" and iirc.MODEL_SOURCE == iirc.FIRST_LISTED
 
 
 def test_unknown_repository_model_is_a_config_error(tmp_path):
@@ -4724,118 +4624,29 @@ def test_unknown_repository_model_is_a_config_error(tmp_path):
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
 
 
-@pytest.fixture
-def backend_repo(tmp_path, monkeypatch):
-    """backend_repo(settings, name): a repository whose .claude/NAME holds these settings (None: no settings file), on a machine
-    whose default is nomic; it returns the path of .claude/iirc.toml. Afterwards the repository's model is gone and the root
-    reloaded, so no later test inherits it."""
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
-    toml = tmp_path / ".claude" / "iirc.toml"
-
-    def make(settings: dict | None, name: str = "settings.json"):
-        (tmp_path / ".claude").mkdir(exist_ok=True)
-        if settings is not None:
-            (tmp_path / ".claude" / name).write_text(json.dumps(settings))
-        iirc.write_config_file({"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
-        return toml
-    yield make
-    toml.unlink(missing_ok=True)
-    iirc.set_root(tmp_path)
-
-
-def test_set_search_backend_sets_the_repository_model(tmp_path, backend_repo, capsys):
-    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
-    toml.write_text('# stores\nshow_hooks = true\n\n[stores.project]\nkind = "project"\n')
-    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
-    assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "qwen3-embedding:0.6b"\n\n[stores.project]\nkind = "project"\n'
-    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://127.0.0.1:11434",
-                                  "embedding": {"backend": "ollama", "model": "nomic-embed-text"}}   # where it runs; the default stays
-    out = capsys.readouterr().out
-    assert f"embedding_model in {toml}" in out and iirc.active_model().id == "qwen3-embedding:0.6b"
-    iirc.main(["set-search-backend", "--openai", "https://llm.example.net/v1"])
-    assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "qwen3-embedding"\n\n[stores.project]\nkind = "project"\n'
-    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "nomic-embed-text", "url": "https://llm.example.net"}
-    toml.write_text('[stores.project]  # the pages\nkind = "project"\n')   # no top-level key yet: one goes above the first table
-    iirc.main(["set-search-backend", "--host", "frame:11434", "--model", "embeddinggemma"])
-    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n\n[stores.project]  # the pages\nkind = "project"\n'
-    assert iirc.read_config()["embedding_host"] == "http://frame:11434"
-
-
-def test_set_search_backend_sets_the_machine_default(tmp_path, backend_repo, capsys):
-    for settings in (None, {"enabledPlugins": {"iirc@dokidlc": False, "other@dokidlc": True}}):
-        toml = backend_repo(settings)
-        iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
-        assert not toml.exists() and iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
-        assert f"the machine default in {iirc.config_file()}" in capsys.readouterr().out
-
-
-def test_set_search_backend_target_flags(tmp_path, backend_repo, capsys):
-    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}}, name="settings.local.json")
-    iirc.main(["set-search-backend", "--local", "--model", "embeddinggemma", "--machine"])
-    assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
-    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])   # settings.local.json installs it too
-    assert toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n' and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
-    toml.unlink(); (tmp_path / ".claude" / "settings.local.json").unlink()
-    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b", "--repository"])
-    assert toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n' and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
-    capsys.readouterr()
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--local", "--repository", "--machine"])
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--substring", "--repository"])
-    assert "string search" in capsys.readouterr().err and iirc.read_config()["semantic"] is True
-    iirc.main(["set-search-backend", "--substring"])
-    assert iirc.read_config()["semantic"] is False and toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n'
-
-
-
-def test_repository_target_leaves_the_machines_string_search(tmp_path, backend_repo, capsys):
-    """String search is the machine's choice: a repository's model leaves it, and the output names the command that changes it."""
-    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
-    iirc.write_config_file({**iirc.read_config(), "semantic": False})
-    for flags in (["--local", "--model", "qwen3-embedding:0.6b"], ["--openai", "https://llm.example.net/v1"]):
-        iirc.main(["set-search-backend", *flags])
-        assert iirc.read_config()["semantic"] is False and "embedding_model" in toml.read_text()
-        out = capsys.readouterr().out
-        assert "This machine uses string search" in out and "`iirc set-search-backend --machine`" in out, out
-
-
-def test_openai_model_with_no_url_on_this_machine(tmp_path, monkeypatch, capsys):
-    """A repository names the OpenAI-compatible model and this machine has no URL for it: every message says so,
-    and names the command that writes the URL without changing the repository's model."""
+def test_set_embedding_model_edits_lines(tmp_path, monkeypatch, capsys):
+    """set-embedding-model sets one top-level line and keeps every other line and comment; with no top-level key, the line goes above the first table."""
     _project(tmp_path, monkeypatch)
-    real_which = iirc.shutil.which
-    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
-    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
-    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
-    (tmp_path / ".claude").mkdir(exist_ok=True)
-    (tmp_path / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding"\n')
-    iirc.set_root(tmp_path); iirc._RESOLVED = None
-    says = "this machine has no URL for qwen3-embedding; `iirc set-search-backend --openai URL`"
-    assert says in iirc.search_mode()
-    assert not iirc.require_host() and says in capsys.readouterr().err
-    with pytest.raises(SystemExit):
-        iirc.main(["doctor"])
-    assert says in capsys.readouterr().out
-    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text('# stores\nshow_hooks = true\n\n[stores.project]\nkind = "project"\n')
+    iirc.main(["set-embedding-model", QWEN])
+    assert toml.read_text() == f'# stores\nshow_hooks = true\nembedding_model = "{QWEN}"\n\n[stores.project]\nkind = "project"\n'
+    assert f"embedding_model = \"{QWEN}\" in {toml}" in capsys.readouterr().out and iirc.active_model().id == QWEN
+    iirc.main(["set-embedding-model", "nomic-embed-text"])
+    assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "nomic-embed-text"\n\n[stores.project]\nkind = "project"\n'
+    toml.write_text('[stores.project]  # the pages\nkind = "project"\n')
+    iirc.main(["set-embedding-model", "embeddinggemma"])
+    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n\n[stores.project]  # the pages\nkind = "project"\n'
 
 
-def test_settings_local_overrides_settings_and_a_bad_file_stops(tmp_path, backend_repo, capsys):
-    """As in Claude Code, settings.local.json's value for a key wins over settings.json's; a settings file that does not parse
-    stops set-search-backend with the file named, and nothing written."""
-    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
-    (tmp_path / ".claude" / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"iirc@dokidlc": False}}))
-    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
-    assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
-    (tmp_path / ".claude" / "settings.local.json").write_text("{not json")
-    before = iirc.config_file().read_text()
-    capsys.readouterr()
-    with pytest.raises(SystemExit):
-        iirc.main(["set-search-backend", "--local", "--model", "embeddinggemma"])
-    assert ".claude/settings.local.json" in capsys.readouterr().err
-    assert iirc.config_file().read_text() == before and not toml.exists()
+def test_set_embedding_model_leaves_the_machines_string_search(tmp_path, monkeypatch, capsys):
+    """String search is the machine's choice: a repository's model leaves it, and the output names the command that changes it."""
+    _project(tmp_path, monkeypatch)
+    _machine_config({"search_mode": "string", "embedding_models": [_entry(QWEN, "http://127.0.0.1:11434")]})
+    iirc.main(["set-embedding-model", QWEN])
+    out = capsys.readouterr().out
+    assert iirc.read_config()["search_mode"] == "string" and "This machine uses string search" in out and "`iirc search-mode semantic`" in out, out
+
 
 def test_sweep_uses_only_the_active_models_rows(tmp_path, monkeypatch, capsys):
     """A row from another model, or from before rows named their model, is on another distance scale: the sweep leaves it out."""
@@ -4870,16 +4681,15 @@ def test_doctor_names_the_model_and_its_source(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
     monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
-    for toml, says in (("", f"embedding model nomic-embed-text, set in the machine default in {iirc.config_file()}"),
-                       ('embedding_model = "qwen3-embedding:0.6b"\n', "embedding model qwen3-embedding:0.6b, set in this repository's .claude/iirc.toml")):
+    iirc.write_config_file({"search_mode": "semantic"})
+    for toml, says in (("", "embedding model nomic-embed-text, set in the built-in default"),
+                       (f'embedding_model = "{QWEN}"\n', f"embedding model {QWEN}, set in this repository's .claude/iirc.toml")):
         (tmp_path / ".claude").mkdir(exist_ok=True)
         (tmp_path / ".claude" / "iirc.toml").write_text(toml)
-        iirc._RESOLVED = None
         with pytest.raises(SystemExit):
             iirc.main(["doctor"])
         assert f"ok  {says}" in capsys.readouterr().out
-    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
+    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
 
 
 def test_doctor_names_the_model_with_no_setup_file(tmp_path, monkeypatch, capsys):
@@ -4889,10 +4699,241 @@ def test_doctor_names_the_model_with_no_setup_file(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
     monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
     (tmp_path / ".claude").mkdir(exist_ok=True)
-    (tmp_path / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding:0.6b"\n')
+    (tmp_path / ".claude" / "iirc.toml").write_text(f'embedding_model = "{QWEN}"\n')
     assert not iirc.config_file().exists()
     with pytest.raises(SystemExit):
         iirc.main(["doctor"])
     out = capsys.readouterr().out
-    assert "ok  embedding model qwen3-embedding:0.6b, set in this repository's .claude/iirc.toml" in out and "FAIL search backend chosen" in out
+    assert f"ok  embedding model {QWEN}, set in this repository's .claude/iirc.toml" in out and "FAIL search set up on this machine" in out
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
+
+
+# quest 2610112037-68: the machine's embedding models and the repository's choice
+
+
+def _entry(model, host, protocol="ollama", name=None):
+    return {"model": model, "host": host, "protocol": protocol, "name": name or iirc.iirc_embed.MODELS[model].names[protocol][0]}
+
+
+def _repo_model(root, model):
+    (root / ".claude").mkdir(exist_ok=True)
+    (root / ".claude" / "iirc.toml").write_text(f'embedding_model = "{model}"\n')
+    iirc.set_root(root)
+
+
+def test_model_names_are_one_per_model():
+    """One id per model, each protocol's names under it; the ids are the ollama tables' names, so no table or vector store is renamed."""
+    emb = iirc.iirc_embed
+    assert set(emb.MODELS) == {"nomic-embed-text", QWEN, "embeddinggemma", "all-minilm-l6-v2"}
+    qwen = emb.MODELS[QWEN]
+    assert qwen.names == {"ollama": ["qwen3-embedding:0.6b-fp16", "qwen3-embedding:0.6b"], "openai": ["qwen3-embedding"]}
+    assert emb.model_named("qwen3-embedding:0.6b") is qwen and emb.model_named("qwen3-embedding") is qwen and emb.model_named(QWEN) is qwen
+    assert emb.model_named("nope") is None
+    assert all(emb.table_name(m) == m for m in emb.MODELS) and emb.table_name("qwen3-embedding:0.6b") == QWEN
+    assert emb.MODELS["all-minilm-l6-v2"].names == {"onnx": ["all-minilm-l6-v2"]} and not hasattr(qwen, "backend")
+
+
+def test_one_repository_model_on_two_protocols(tmp_path, monkeypatch):
+    """One repository's qwen through ollama on one machine and an OpenAI-compatible server on another: one table, two requests."""
+    _project(tmp_path, monkeypatch)
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text(f'embedding_model = "{QWEN}"\n\n[suggestions."{QWEN}"]\nsemantic_only = 0.5\nboth = 0.7\n')
+    for machine, entry in (("mac", _entry(QWEN, "http://127.0.0.1:11434")), ("neckbeard", _entry(QWEN, "https://llm.example.net", "openai"))):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / machine))
+        _machine_config({"search_mode": "semantic", "embedding_models": [entry]})
+        assert iirc.recall_table() == QWEN and iirc.RECALL == {"semantic_only": 0.5, "both": 0.7}
+        b = iirc.embedding_backend()
+        assert (b.model.id, b.protocol, b.name, b.url) == (QWEN, entry["protocol"], entry["name"], entry["host"])
+    assert iirc.embedding_backend().name == "qwen3-embedding" and iirc.iirc_embed.store_path(tmp_path, "f", QWEN).name == f"{QWEN}.npz"
+
+
+def test_add_embedding_model_finds_the_protocol(tmp_path, monkeypatch, capsys):
+    """add-embedding-model finds ollama or OpenAI-compatible by asking the host, takes the first build of the model the host has,
+    reads `local` as this machine's ollama and `cpu` as the in-process model, and writes nothing to the repository."""
+    _project(tmp_path, monkeypatch)
+    with _fake_ollama(monkeypatch, QWEN, name="qwen3-embedding:0.6b", listed=False) as host:
+        iirc.main(["add-embedding-model", QWEN, host.url + "/"])
+        assert "ollama" in capsys.readouterr().out
+        assert iirc.read_config()["embedding_models"] == [_entry(QWEN, host.url, "ollama", "qwen3-embedding:0.6b")]
+        monkeypatch.setattr(iirc, "LOCAL_OLLAMA", host.url)
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", "nomic-embed-text", "local"])   # `local` is this machine's ollama, which has no nomic
+        assert f"{host.url} is an ollama host without nomic-embed-text" in capsys.readouterr().err
+    with _fake_openai(monkeypatch, QWEN, listed=False) as host:
+        iirc.main(["add-embedding-model", QWEN, host.url + "/v1"])
+        assert "OpenAI-compatible" in capsys.readouterr().out
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", "nomic-embed-text", host.url])   # nomic has no OpenAI-compatible name
+        assert "nomic-embed-text" in capsys.readouterr().err
+    monkeypatch.setattr(iirc, "fetch_minilm", lambda: None)
+    monkeypatch.setattr(iirc, "cpu_check", lambda: (True, "ok"))
+    iirc.main(["add-embedding-model", "all-minilm-l6-v2", "cpu"])
+    entries = iirc.read_config()["embedding_models"]
+    assert entries[1:] == [_entry(QWEN, host.url, "openai"), _entry("all-minilm-l6-v2", "cpu", "onnx")]
+    assert [(e.model, e.protocol) for e in iirc.machine_models()] == [(QWEN, "ollama"), (QWEN, "openai"), ("all-minilm-l6-v2", "onnx")]
+    assert not (tmp_path / ".claude" / "iirc.toml").exists()
+
+
+def test_add_embedding_model_refuses_a_host_without_the_model(tmp_path, monkeypatch, capsys):
+    """An ollama host without the model is refused with the pull command, OLLAMA_HOST named for another host; nothing is pulled or written."""
+    _project(tmp_path, monkeypatch)
+    shims = tmp_path / "shims"; shims.mkdir(); calls = tmp_path / "calls.log"
+    (shims / "ollama").write_text(f'#!/bin/sh\necho "ollama $*" >> "{calls}"\n'); (shims / "ollama").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shims}:{os.environ['PATH']}")
+    with _fake_ollama(monkeypatch, "nomic-embed-text", tags=["nomic-embed-text:latest"], listed=False) as host:
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", QWEN, host.url])
+        assert f"OLLAMA_HOST={host.url} ollama pull qwen3-embedding:0.6b-fp16" in capsys.readouterr().err
+        monkeypatch.setattr(iirc, "LOCAL_OLLAMA", host.url)
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", QWEN, "local"])
+        err = capsys.readouterr().err
+        assert "ollama pull qwen3-embedding:0.6b-fp16" in err and "OLLAMA_HOST" not in err
+    with pytest.raises(SystemExit):
+        iirc.main(["add-embedding-model", "nomic-embed-text", "cpu"])          # the CPU runs MiniLM only
+    with pytest.raises(SystemExit):
+        iirc.main(["add-embedding-model", "nope", "local"])
+    capsys.readouterr()
+    assert not calls.exists() and not iirc.config_file().exists()
+
+
+def test_remove_embedding_model(tmp_path, monkeypatch, capsys):
+    """remove-embedding-model drops one host's entry, or every entry of the model, and a preference for a host it removed."""
+    _project(tmp_path, monkeypatch)
+    a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
+    nomic = _entry("nomic-embed-text", "http://127.0.0.1:11434")
+    _machine_config({"search_mode": "string", "embedding_models": [a, b, nomic], "embedding_preferred": {QWEN: b["host"]}, "max_suggested": 3})
+    iirc.main(["remove-embedding-model", QWEN, "https://llm.example.net/"])
+    assert "removed" in capsys.readouterr().out
+    cfg = iirc.read_config()
+    assert cfg["embedding_models"] == [a, nomic] and cfg["embedding_preferred"] == {} and cfg["max_suggested"] == 3 and cfg["search_mode"] == "string"
+    iirc.main(["remove-embedding-model", "nomic-embed-text"])
+    assert iirc.read_config()["embedding_models"] == [a]
+    with pytest.raises(SystemExit):
+        iirc.main(["remove-embedding-model", "embeddinggemma"])
+    assert "embeddinggemma" in capsys.readouterr().err and iirc.read_config()["embedding_models"] == [a]
+
+
+def test_prefer_embedding_host(tmp_path, monkeypatch, capsys):
+    """prefer-embedding-host picks which listed host serves a model here; a host not listed for the model is refused."""
+    _project(tmp_path, monkeypatch)
+    a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
+    _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
+    _repo_model(tmp_path, QWEN)
+    assert iirc.serving_entry(QWEN).host == a["host"]
+    iirc.main(["prefer-embedding-host", QWEN, "https://llm.example.net"])
+    assert iirc.read_config()["embedding_preferred"] == {QWEN: b["host"]}
+    assert iirc.serving_entry(QWEN).host == b["host"] and iirc.HOST_ENTRY.host == b["host"]
+    iirc.main(["prefer-embedding-host", QWEN, "local"])
+    assert iirc.read_config()["embedding_preferred"] == {QWEN: a["host"]}
+    with pytest.raises(SystemExit):
+        iirc.main(["prefer-embedding-host", QWEN, "http://elsewhere:11434"])
+    assert "not listed" in capsys.readouterr().err and iirc.read_config()["embedding_preferred"] == {QWEN: a["host"]}
+
+
+def test_two_hosts_ask_once_on_a_terminal(tmp_path, monkeypatch, capsys):
+    """Two listed hosts serve the repository's model and none is preferred: a command on a terminal asks once and records the answer."""
+    _project(tmp_path, monkeypatch)
+    a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
+    _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
+    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "2")
+    iirc.main(["set-embedding-model", QWEN])
+    assert len(asked) == 1 and iirc.read_config()["embedding_preferred"] == {QWEN: b["host"]}
+    assert iirc.HOST_ENTRY.host == b["host"]
+    iirc.main(["set-embedding-model", QWEN])
+    assert len(asked) == 1
+
+
+def test_two_hosts_without_a_preference_use_the_first_and_say_so(tmp_path, monkeypatch, capsys):
+    """A hook cannot ask: it uses the first listed host, and the session-start line says two hosts serve the model."""
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: True)
+    a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
+    _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
+    _repo_model(tmp_path, QWEN)
+    assert iirc.HOST_ENTRY.host == a["host"]
+    out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
+    assert "semantic via 127.0.0.1:11434" in out
+    assert f"Two hosts serve {QWEN} on this machine" in out and f"`iirc prefer-embedding-host {QWEN} HOST`" in out
+    assert "embedding_preferred" not in iirc.read_config()
+
+
+def test_search_mode_setting(tmp_path, monkeypatch, capsys):
+    """search-mode prints the machine's mode bare, and sets it with an argument; other settings stay."""
+    _project(tmp_path, monkeypatch)
+    _machine_config({"embedding_models": [_entry("nomic-embed-text", "http://127.0.0.1:11434")], "max_suggested": 3})
+    iirc.main(["search-mode"])
+    assert capsys.readouterr().out.strip() == "semantic" and iirc.semantic_enabled()
+    iirc.main(["search-mode", "string"])
+    capsys.readouterr()
+    assert iirc.read_config()["search_mode"] == "string" and not iirc.semantic_enabled() and iirc.read_config()["max_suggested"] == 3
+    iirc.main(["search-mode"])
+    assert capsys.readouterr().out.strip() == "string"
+    assert iirc.search_status() == "string search"
+    iirc.main(["search-mode", "semantic"])
+    assert iirc.semantic_enabled() and len(iirc.machine_models()) == 1
+    with pytest.raises(SystemExit):
+        iirc.main(["search-mode", "fast"])
+
+
+def test_set_embedding_model_writes_only_the_repository(tmp_path, monkeypatch, capsys):
+    """set-embedding-model writes embedding_model to .claude/iirc.toml and nothing about hosts; the machine file stays as it was."""
+    _project(tmp_path, monkeypatch)
+    rebuilt = []
+    monkeypatch.setattr(iirc, "reindex", lambda full=False: rebuilt.append(full))
+    _machine_config({"search_mode": "semantic", "embedding_models": [_entry(QWEN, "http://127.0.0.1:11434")]})
+    machine = iirc.config_file().read_text()
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text('# stores\nshow_hooks = true\nembedding_model = "nomic-embed-text"\n\n[stores.project]\nkind = "project"\n')
+    iirc.set_root(tmp_path)
+    iirc.main(["set-embedding-model", QWEN])
+    out = capsys.readouterr().out
+    assert toml.read_text() == f'# stores\nshow_hooks = true\nembedding_model = "{QWEN}"\n\n[stores.project]\nkind = "project"\n'
+    assert "http" not in toml.read_text() and iirc.config_file().read_text() == machine
+    assert "embedded again" in out and "defaults" in out and "tuning judgments" in out and "commit" in out
+    assert rebuilt == [False] and iirc.active_model().id == QWEN
+    iirc.main(["set-embedding-model", "embeddinggemma"])                  # a model this machine cannot serve: written, nothing rebuilt
+    out = capsys.readouterr().out
+    assert "this machine cannot serve embeddinggemma" in out and rebuilt == [False] and 'embedding_model = "embeddinggemma"' in toml.read_text()
+    with pytest.raises(SystemExit):
+        iirc.main(["set-embedding-model", "qwen3-embedding:0.6b"])         # a protocol's name is not the model's
+    assert QWEN in capsys.readouterr().err and iirc.config_file().read_text() == machine
+
+
+def test_repository_without_a_model_gets_the_first_served_one(tmp_path, monkeypatch, capsys):
+    """A repository that names no model uses the machine list's first; a hook only names it, and the first command writes it."""
+    _project(tmp_path, monkeypatch)
+    _no_host(monkeypatch)
+    _machine_config({"search_mode": "semantic", "embedding_models": [_entry("embeddinggemma", "http://127.0.0.1:11434"), _entry(QWEN, "http://127.0.0.1:11434")]})
+    toml = tmp_path / ".claude" / "iirc.toml"
+    assert iirc.active_model().id == "embeddinggemma" and not toml.exists()
+    out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
+    assert "names no embedding model" in out and "`iirc set-embedding-model embeddinggemma`" in out and not toml.exists()
+    iirc.main(["rebuild-search-index", "--vectors-only"])            # what a search starts in the background, from a hook too
+    assert not toml.exists()
+    iirc.main(["search", "alpha"])
+    err = capsys.readouterr().err
+    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n' and 'embedding_model = "embeddinggemma"' in err
+
+
+def test_machine_that_cannot_serve_the_model_falls_back_and_says_so(tmp_path, monkeypatch, capsys):
+    """No listed host serves the repository's model: search matches strings, and the brief and doctor say why and name the ways out."""
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: pytest.fail("no host serves the model, so none is asked"))
+    _machine_config({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", "http://127.0.0.1:11434")]})
+    _repo_model(tmp_path, QWEN)
+    assert iirc.HOST_ENTRY is None and iirc.semantic_search("alpha") == []
+    assert iirc.search_status().startswith(f"string only (this machine cannot serve {QWEN};")
+    out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
+    assert f"string only (this machine cannot serve {QWEN};" in out
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    out = capsys.readouterr().out
+    assert f"FAIL this machine cannot serve {QWEN}" in out
+    for way in (f"iirc add-embedding-model {QWEN} URL", "ollama pull", "iirc set-embedding-model", "all-minilm-l6-v2"):
+        assert way in out, way

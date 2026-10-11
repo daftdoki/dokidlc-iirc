@@ -31,7 +31,12 @@ Usage:
   iirc set-suggestion-threshold NAME VALUE  write one into .claude/iirc.toml
   iirc tune-suggestions STEP                gather-suggestion-data, record-relevance-judgments,
                                             evaluate-suggestion-thresholds, or mark-session-tuned
-  iirc set-search-backend                   the embedding model, for this repository or the machine, and where it runs; or string search
+  iirc set-embedding-model MODEL            this repository's embedding model, for every machine
+  iirc show-embedding-models                this machine's embedding models and where each runs
+  iirc add-embedding-model MODEL HOST       add one to this machine's list: a URL, `local`, or `cpu`
+  iirc remove-embedding-model MODEL [HOST]  remove one from this machine's list
+  iirc prefer-embedding-host MODEL HOST     which listed host serves a model here, when two do
+  iirc search-mode [semantic|string]        this machine's search mode
   iirc init                                 create .iirc/ and the CLAUDE.md paragraph
   iirc migrate                              move a repository and this machine from the memory plugin's layout
   iirc sync                                 commit, pull, and push every remote store
@@ -99,7 +104,7 @@ def project_root() -> Path:
 
 def set_root(root: Path) -> None:
     """Set the project root and load its stores. A bad store config is kept as CONFIG_ERROR; commands die on it, hooks stay quiet."""
-    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL, MODEL, MODEL_SOURCE
+    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL, MODEL, MODEL_SOURCE, HOST_ENTRY
     ROOT = Path(root).resolve()
     try:
         STORES, WRITE_DEFAULT = load_stores(ROOT)
@@ -112,6 +117,7 @@ def set_root(root: Path) -> None:
         STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
         MODEL, MODEL_SOURCE = model_and_source({})
         RECALL = {k: v[0] for k, v in knob_spec().items()}
+    HOST_ENTRY = serving_entry(MODEL.id)
 
 
 def plugin_commit() -> str:
@@ -129,7 +135,7 @@ DEFAULT_HOST = "127.0.0.1:11434"
 
 
 def config_file() -> Path:
-    """Per-machine settings, because the embedding host is a fact about the machine."""
+    """Per-machine settings: the search mode, and the list of embedding models this machine can run and where each runs."""
     base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return base / "dokidlc-iirc" / "config.toml"
 
@@ -151,9 +157,12 @@ def read_config() -> dict:
 
 
 def toml_value(v) -> str:
-    """A string, bool, int, or a table of them as an inline table; JSON's string escapes are TOML's."""
+    """A string, bool, int, a list, or a table of them as an inline table; JSON's string escapes are TOML's."""
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
     if isinstance(v, dict):
-        return "{" + ", ".join(f"{k} = {toml_value(x)}" for k, x in v.items()) + "}"
+        # a key with a dot, such as qwen3-embedding-0.6b, is quoted, or TOML reads the dot as nesting
+        return "{" + ", ".join(f"{k if TABLE_KEY_RE.fullmatch(k) else json.dumps(k)} = {toml_value(x)}" for k, x in v.items()) + "}"
     if isinstance(v, str):
         return json.dumps(v)
     return str(v).lower()
@@ -169,87 +178,80 @@ def write_config_file(values: dict) -> Path:
     return path
 
 
-def embedding_config() -> dict:
-    """The setup file's embedding table: backend, model, and url. Empty when it has none."""
-    emb = read_config().get("embedding")
-    return emb if isinstance(emb, dict) else {}
+class Entry(NamedTuple):
+    """One pair on this machine's list of embedding models: a model and where it runs."""
+    model: str       # an iirc_embed.MODELS id
+    host: str        # a base URL, or CPU for the in-process model
+    protocol: str    # "ollama", "openai", or "onnx"
+    name: str        # the protocol's name for the build the host serves
+
+
+CPU = "cpu"                                   # an entry's host for the model that runs on this CPU
+LOCAL_OLLAMA = "http://127.0.0.1:11434"       # `local` in add-embedding-model
+
+
+def machine_models() -> list[Entry]:
+    """The setup file's embedding_models: each a known model on a protocol it has a name for. An entry that is not is left out."""
+    out = []
+    for e in read_config().get("embedding_models") or []:
+        model = iirc_embed.MODELS.get(str(e.get("model"))) if isinstance(e, dict) else None
+        if model is None or e.get("protocol") not in model.names or e.get("name") not in model.names[e["protocol"]] \
+                or not isinstance(e.get("host"), str) or not e["host"]:
+            continue
+        out.append(Entry(model.id, e["host"], e["protocol"], e["name"]))
+    return out
+
+
+def preferred_hosts() -> dict[str, str]:
+    """The setup file's embedding_preferred: model -> the host this machine uses for it when two serve it."""
+    prefs = read_config().get("embedding_preferred")
+    return {str(k): str(v) for k, v in prefs.items()} if isinstance(prefs, dict) else {}
+
+
+def model_entries(model: str) -> list[Entry]:
+    return [e for e in machine_models() if e.model == model]
+
+
+def serving_entry(model: str) -> Entry | None:
+    """The entry that serves MODEL on this machine: the preferred one when it is listed, else the only one, else the first. None when no
+    listed host serves it."""
+    entries = model_entries(model)
+    want = preferred_hosts().get(model)
+    return next((e for e in entries if e.host == want), entries[0] if entries else None)
+
+
+def unpreferred(model: str) -> bool:
+    """True when two or more listed hosts serve MODEL and none is preferred, so a hook uses the first and says so."""
+    entries = model_entries(model)
+    return len(entries) > 1 and preferred_hosts().get(model) not in {e.host for e in entries}
 
 
 def semantic_enabled() -> bool:
-    """Semantic search is the default. String search is a fallback chosen with `iirc set-search-backend --substring`,
-    and that choice wins over an exported OLLAMA_HOST, which only names the first host to try."""
-    return bool(read_config().get("semantic", True))
+    """Semantic search is the default. String search is the fallback chosen with `iirc search-mode string`."""
+    return read_config().get("search_mode", "semantic") != "string"
+
+
+def set_machine(**values) -> Path:
+    """Write these keys to the setup file, keep the others, and resolve the model and its host again."""
+    path = write_config_file({**read_config(), **values})
+    set_root(ROOT)
+    return path
 
 
 # A closed port: the tool's client fails at once and falls back to string search.
 NO_EMBEDDING_HOST = "http://127.0.0.1:9"
 
 
-def host_candidates() -> list[tuple[str, str]]:
-    """(base url, source) in order of preference: OLLAMA_HOST, then iirc set-search-backend, then the local default.
-    An OpenAI-compatible backend has one candidate, the URL setup wrote."""
-    if active_model().backend == "openai":
-        return [(openai_url(str(embedding_config().get("url") or "")), "iirc set-search-backend")]
-    out: list[tuple[str, str]] = []
-    env = os.environ.get("OLLAMA_HOST")
-    if env:
-        out.append((normalize_host(env), "OLLAMA_HOST"))
-    cfg = read_config().get("embedding_host")
-    if cfg:
-        out.append((normalize_host(str(cfg)), "iirc set-search-backend"))
-    out.append((normalize_host(None), "default"))
-    seen: set[str] = set()
-    return [c for c in out if not (c[0] in seen or seen.add(c[0]))]
+def host_url(raw: str) -> str:
+    """A host as an entry keeps it: `local` is this machine's ollama, and a base URL loses any trailing / or /v1, which the protocol adds."""
+    if raw == "local":
+        return LOCAL_OLLAMA
+    return CPU if raw == CPU else re.sub(r"/v1$", "", normalize_host(raw))
 
 
-def no_url() -> str | None:
-    """What to say when the model is OpenAI-compatible and the setup file has no URL for it; None otherwise.
-    The command it names writes the URL to the machine and, as --openai's default is the one OpenAI-compatible model,
-    leaves a repository's model as it is."""
-    model = active_model()
-    if model.backend != "openai" or embedding_config().get("url"):
-        return None
-    return f"this machine has no URL for {model.id}; `iirc set-search-backend --openai URL` sets one"
-
-
-_RESOLVED: tuple[str, str, bool] | None = None
-
-
-def resolve_host() -> tuple[str, str, bool]:
-    """The first candidate that answers, probed once per process: (url, source, answers).
-
-    A stale OLLAMA_HOST in a long-lived shell must not beat a setup file that
-    names a host that works. If nothing answers, the first candidate is
-    returned with answers=False so messages can name it.
-    """
-    global _RESOLVED
-    if _RESOLVED is None:
-        backend = active_model().backend
-        if backend == "onnx":
-            # no host: the model files on this machine are the backend
-            _RESOLVED = (CPU_HOST, "iirc set-search-backend", cpu_ready())
-            return _RESOLVED
-        cands = host_candidates()
-        _RESOLVED = (cands[0][0], cands[0][1], False)
-        for url, source in cands:
-            if url and (host_answers(url, no_route=True) if backend == "openai" else host_answers(url)):
-                _RESOLVED = (url, source, True)
-                break
-    return _RESOLVED
-
-
-def embedding_host() -> tuple[str, str]:
-    """(base url, where it came from). The first configured host that answers."""
-    url, source, _ = resolve_host()
-    return url, source
-
-
-CPU_HOST = "this CPU"   # resolve_host's url for the onnx backend, which has no host
-
-
-def openai_url(url: str) -> str:
-    """An OpenAI-compatible base URL without a trailing /v1, which the backend adds."""
-    return re.sub(r"/v1/?$", "", normalize_host(url) if url else "")
+def where(entry: Entry) -> str:
+    """The entry's host as the brief names it: no scheme, and no dot after it, because hooks/register.tsx reads the mode up to the first dot."""
+    return "this CPU" if entry.host == CPU else re.sub(r"^https?://", "", entry.host)
 
 
 def minilm_dir() -> Path:
@@ -257,32 +259,41 @@ def minilm_dir() -> Path:
 
 
 def cpu_ready() -> bool:
-    """True when the MiniLM files are on this machine. Their sha256 is checked by setup and doctor, not on every search."""
+    """True when the MiniLM files are on this machine. Their sha256 is checked by add-embedding-model and doctor, not on every search."""
     return all((minilm_dir() / name).is_file() for name in iirc_embed.MINILM_FILES)
 
 
+def host_up() -> bool:
+    """True when the serving entry can embed now: the model files are here, or its host answers a GET (cached, see host_answers)."""
+    e = HOST_ENTRY
+    if e is None:
+        return False
+    if e.protocol == "onnx":
+        return cpu_ready()
+    return host_answers(e.host, no_route=e.protocol == "openai")
+
+
 def embedding_backend() -> iirc_embed.Backend:
-    model = active_model()
-    if model.backend == "onnx":
-        return iirc_embed.Backend(model, cpu=(str(PLUGIN_ROOT / "bin" / "iirc-cpu"), str(minilm_dir())))
-    return iirc_embed.Backend(model, embedding_host()[0])
+    """The serving entry as a Backend. Callers check HOST_ENTRY first, through require_host."""
+    e, model = HOST_ENTRY, active_model()
+    if e.protocol == "onnx":
+        return iirc_embed.Backend(model, e.protocol, e.name, cpu=(str(PLUGIN_ROOT / "bin" / "iirc-cpu"), str(minilm_dir())))
+    return iirc_embed.Backend(model, e.protocol, e.name, e.host)
 
 
-def search_mode() -> str:
-    """How search runs here, for the brief: semantic and where, or string only and why."""
+def search_status() -> str:
+    """How search runs here, for the brief: semantic and where, or string only and why, with the command that helps in backticks."""
     if not semantic_enabled():
         return "string search"
-    model = active_model()
-    url, _, answers = resolve_host()
-    where = re.sub(r"^https?://", "", url)
-    # no model name: hooks/register.tsx reads the mode up to the first dot, and qwen3-embedding:0.6b has one
-    if answers:
-        return f"semantic via {where}"
-    if model.backend == "onnx":
-        return f"string only ({model.id} model files missing; `iirc set-search-backend --cpu` to fix)"
-    if no_url():
-        return f"string only ({no_url()})"
-    return f"string only ({where} does not answer; `iirc set-search-backend` to fix)"
+    model, e = active_model(), HOST_ENTRY
+    # a model id may hold a dot, so it goes inside the parentheses, which hooks/register.tsx reads whole
+    if e is None:
+        return f"string only (this machine cannot serve {model.id}; `iirc doctor` names the ways out)"
+    if host_up():
+        return f"semantic via {where(e)}"
+    if e.protocol == "onnx":
+        return f"string only ({model.id} model files missing; `iirc add-embedding-model {model.id} cpu` to fix)"
+    return f"string only ({where(e)} does not answer; `iirc doctor` to check)"
 HOST_TIMEOUT = 2.0
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -358,20 +369,25 @@ def read_store_config(root: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# MODEL_SOURCE when the repository names no model and the machine's list does: the first command that needs a model writes it
+FIRST_LISTED = f"the first model on this machine's list, not yet written to {STORE_CONFIG}"
+
+
 def model_and_source(cfg: dict) -> tuple[iirc_embed.Model, str]:
     """The embedding model a repository uses, and where it is set: `embedding_model` in its .claude/iirc.toml (cfg, which
-    load_stores has checked), else `embedding.model` in the machine setup file, else nomic-embed-text. Where it runs is per machine."""
+    load_stores has checked), else the first model on this machine's list, else nomic-embed-text. Where it runs is per machine."""
     if "embedding_model" in cfg:
         return iirc_embed.MODELS[cfg["embedding_model"]], f"this repository's {STORE_CONFIG}"
-    name = embedding_config().get("model")
-    if isinstance(name, str) and name in iirc_embed.MODELS:
-        return iirc_embed.MODELS[name], f"the machine default in {config_file()}"
+    listed = machine_models()
+    if listed:
+        return iirc_embed.MODELS[listed[0].model], FIRST_LISTED
     return iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL], "the built-in default"
 
 
-# set_root resolves the model once per root; set-search-backend resolves it again after it writes
+# set_root resolves the model and the entry that serves it once per root; a command that writes either resolves them again
 MODEL: iirc_embed.Model = iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL]
 MODEL_SOURCE = "the built-in default"
+HOST_ENTRY: Entry | None = None
 
 
 def active_model() -> iirc_embed.Model:
@@ -1046,17 +1062,17 @@ def require_host() -> bool:
     """True when embeddings will work. Prints one line and returns False otherwise."""
     if not semantic_enabled():
         return False
-    base, source, answers = resolve_host()
-    if answers:
+    model, e = active_model(), HOST_ENTRY
+    if e is None:
+        print(f"iirc: this machine cannot serve {model.id}; results are string matches only. `iirc doctor` names the ways out.", file=sys.stderr)
+        return False
+    if host_up():
         return True
-    if active_model().backend == "onnx":
-        print(f"iirc: the {active_model().id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc set-search-backend --cpu` to fetch them.", file=sys.stderr)
+    if e.protocol == "onnx":
+        print(f"iirc: the {model.id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc add-embedding-model {model.id} cpu` to fetch them.", file=sys.stderr)
         return False
-    if no_url():
-        print(f"iirc: {no_url()}; results are string matches only.", file=sys.stderr)
-        return False
-    tried = ", ".join(f"{u} ({src})" for u, src in host_candidates())
-    print(f"iirc: no embedding host answers (tried {tried}); results are string matches only. Run `iirc set-search-backend` to choose a host, or `iirc set-search-backend --substring` if ollama cannot run here.", file=sys.stderr)
+    print(f"iirc: {e.host}, which serves {model.id} on this machine, does not answer; results are string matches only. "
+          "`iirc show-embedding-models` lists this machine's hosts, and `iirc doctor` checks them.", file=sys.stderr)
     return False
 
 
@@ -1716,7 +1732,7 @@ def cmd_search(args: argparse.Namespace) -> None:
         print(json.dumps(results, indent=2))
         return
     if not results:
-        print("no matching pages" + ("" if semantic_enabled() else " (string search only; try the terms a page would contain, or `iirc set-search-backend --local` or `--host URL` for semantic search)"))
+        print("no matching pages" + ("" if semantic_enabled() else " (string search only; try the terms a page would contain, or `iirc search-mode semantic` for semantic search)"))
         return
     for r in results:
         print(result_line(r))
@@ -2968,73 +2984,6 @@ def cpu_check() -> tuple[bool, str]:
     return proc.returncode == 0, strip_ansi(proc.stdout + proc.stderr).strip()
 
 
-SETUP_MENU = f"""How should iirc search pages?
-  1. ollama on this machine ({normalize_host(DEFAULT_HOST)})
-  2. a remote ollama host
-  3. an OpenAI-compatible host, such as vLLM serving qwen3-embedding
-  4. this CPU: all-minilm-l6-v2 through onnxruntime; fetches about 90 MB of model files, no ollama needed
-  5. string search: exact text only, the fallback where none of these can run"""
-
-
-# setup's ollama model when --model names none: the pooling round's choice (quest 2610100115-p5, step 26)
-SETUP_MODEL = "qwen3-embedding:0.6b"
-
-
-def setup_default() -> tuple[str, str]:
-    """The menu's default and its host: ollama here, or the machine's ollama host, when one answers; else this CPU."""
-    local = normalize_host(DEFAULT_HOST)
-    env, cfg = os.environ.get("OLLAMA_HOST"), read_config().get("embedding_host")
-    for host in dict.fromkeys(h for h in (normalize_host(env) if env else None, normalize_host(str(cfg)) if cfg else None, local) if h):
-        if host_answers(host):
-            return ("1" if host == local else "2"), host
-    return "4", ""
-
-
-def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]:
-    """(backend or "substring", host or URL, model) from the flags, or from questions on a terminal."""
-    chosen = [flag for flag, on in (("--substring", args.substring), ("--local or --host", args.local or args.host or args.semantic),
-                                    ("--openai", args.openai), ("--cpu", args.cpu)) if on]
-    if len(chosen) > 1:
-        die(f"choose one of {', '.join(chosen)}")
-    if args.local and args.host:
-        die("choose --local or --host URL, not both")
-    if args.substring:
-        return "substring", None, None
-    if args.cpu:
-        return "onnx", None, "all-minilm-l6-v2"
-    if args.openai:
-        return "openai", openai_url(args.openai), args.model or "qwen3-embedding"
-    if args.local or args.host:
-        return "ollama", normalize_host(args.host) if args.host else normalize_host(DEFAULT_HOST), args.model or SETUP_MODEL
-    if not sys.stdin.isatty():
-        die("not a terminal; pass --local, --host URL, --openai URL, --cpu, or --substring" if not args.semantic else "semantic search needs --local or --host URL")
-    print(SETUP_MENU)
-    default, found = setup_default()
-    choice = input(f"1-5 [{default}]: ").strip() or default
-    if choice == "5":
-        return "substring", None, None
-    if choice == "4":
-        return "onnx", None, "all-minilm-l6-v2"
-    if choice == "3":
-        return "openai", openai_url(input("base URL, like https://llm.example.net: ").strip()), "qwen3-embedding"
-    if choice == "2":
-        typed = input(f"host [{found}]: " if found and default == "2" else "host, like http://frame:11434: ").strip()
-        host = normalize_host(typed or (found if default == "2" else None))
-    else:
-        host = normalize_host(DEFAULT_HOST)
-    models = sorted((m.id for m in iirc_embed.MODELS.values() if m.backend == "ollama"), key=lambda m: m != SETUP_MODEL)
-    print("Which ollama model?\n" + "\n".join(f"  {i}. {m}" for i, m in enumerate(models, 1)))
-    pick = input(f"1-{len(models)} [1]: ").strip()
-    return "ollama", host, models[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(models) else models[0]
-
-
-def iirc_installed() -> bool:
-    """True when this repository's settings enable an iirc@ plugin. As in Claude Code, a key in .claude/settings.local.json
-    wins over the same key in .claude/settings.json. A settings file that does not parse is a ConfigError."""
-    plugins = {**enabled_plugins(SETTINGS_FILE), **enabled_plugins(LOCAL_SETTINGS_FILE)}
-    return any(k.startswith("iirc@") and v is True for k, v in plugins.items())
-
-
 def set_top_level_text(text: str, key: str, value: str) -> str:
     """The config text with one top-level key set above the first [table] header. Edits lines, so every other line and comment stays."""
     entry = f"{key} = {toml_value(value)}"
@@ -3051,75 +3000,188 @@ def set_top_level_text(text: str, key: str, value: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def cmd_set_search_backend(args: argparse.Namespace) -> None:
-    """Choose how search runs: the embedding model, for this repository where it installs iirc and else as the machine default,
-    and where the model runs on this machine (an ollama host, an OpenAI-compatible host, or this CPU); or substring, on this machine."""
-    backend, host, model = setup_choice(args)
-    if backend == "substring" and args.repository:
-        die("string search is the fallback for a machine that cannot run embeddings, and it names no model, so it is set on the machine; drop --repository")
-    if model and iirc_embed.MODELS.get(model, iirc_embed.MODELS["all-minilm-l6-v2"]).backend != backend:
-        die(f"{model} is not a model for this backend; the {backend} models are "
-            + ", ".join(m.id for m in iirc_embed.MODELS.values() if m.backend == backend))
-    try:
-        repository = backend != "substring" and (args.repository or (not args.machine and iirc_installed()))
-    except ConfigError as e:
-        die(f"set-search-backend: {e}; fix it, or choose with --repository or --machine. Nothing was written.")
-    values = dict(read_config())   # keep keys setup does not ask about
-    if not repository:
-        values["semantic"] = backend != "substring"   # string search is the machine's choice, never a repository's
-    if backend == "substring":
-        path = write_config_file(values)
-        print(f"string search (fallback); written to {path}. `iirc set-search-backend` switches to semantic search.")
+PROTOCOL_TEXT = {"ollama": "ollama", "openai": "an OpenAI-compatible server", "onnx": "onnxruntime on this CPU"}
+# what a switch of the repository's model costs; set-embedding-model and doctor's ways out say it before the creator decides
+SWITCH_COSTS = ("every page is embedded again, the suggestion thresholds start at {new}'s defaults unless [suggestions.{new}] "
+                "sets them, and tuning judgments made under {old} stop counting")
+
+
+def known_model(name: str) -> iirc_embed.Model:
+    """The model NAME is the id of, or die naming the ids; a protocol's name for a model is not its id."""
+    model = iirc_embed.MODELS.get(name)
+    if model is None:
+        other = iirc_embed.model_named(name)
+        die(f"{name} names no embedding model" + (f"; it is a protocol's name for {other.id}, which is the name to use" if other else "")
+            + f"; the models are {', '.join(iirc_embed.MODELS)}")
+    return model
+
+
+def ways_out(model: iirc_embed.Model) -> str:
+    """Decision 10's four ways out for a machine that cannot serve MODEL, each a command, and the cost of a switch."""
+    ways = [f"add a host that serves it: iirc add-embedding-model {model.id} URL"]
+    if "ollama" in model.names:
+        ways.append(f"load it on an ollama host: ollama pull {model.names['ollama'][0]} there (OLLAMA_HOST=URL for another machine, "
+                    f"with the creator's approval), or install ollama here; then iirc add-embedding-model {model.id} URL or local")
+    ways.append("switch this repository to a model a listed host serves: iirc set-embedding-model MODEL (iirc show-embedding-models lists them)")
+    ways.append("switch it to the CPU model: iirc add-embedding-model all-minilm-l6-v2 cpu, then iirc set-embedding-model all-minilm-l6-v2")
+    return "; ".join(ways) + ". A switch costs this: " + SWITCH_COSTS.format(new="the new model", old=model.id)
+
+
+def ask_host(model: str) -> None:
+    """Two listed hosts serve MODEL and none is preferred: on a terminal, ask once which this machine uses, and record it."""
+    if not unpreferred(model) or not sys.stdin.isatty():
         return
-    if backend == "onnx":
+    entries = model_entries(model)
+    print(f"{len(entries)} hosts on this machine's list serve {model}. Which should this machine use?")
+    for i, e in enumerate(entries, 1):
+        print(f"  {i}. {e.host} ({PROTOCOL_TEXT[e.protocol]}, as {e.name})")
+    pick = input(f"1-{len(entries)} [1]: ").strip()
+    chosen = entries[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(entries) else entries[0]
+    set_machine(embedding_preferred={**preferred_hosts(), model: chosen.host})
+    print(f"{model} runs through {chosen.host} on this machine; `iirc prefer-embedding-host` changes it")
+
+
+def write_model(model: str, command: str) -> Path:
+    """Write embedding_model = MODEL to .claude/iirc.toml above its first table, checked, and resolve the model again."""
+    toml = ROOT / STORE_CONFIG
+    path = write_checked_config(set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model),
+                                lambda cfg: cfg.get("embedding_model") == model, "embedding_model did not land above the first table", command)
+    set_root(ROOT)
+    return path
+
+
+def adopt_model() -> None:
+    """A repository that names no model gets the first on this machine's list, written once by the first command that needs a model."""
+    if MODEL_SOURCE != FIRST_LISTED or CONFIG_ERROR or not live_stores():
+        return
+    path = write_model(MODEL.id, "iirc")
+    print(f"iirc: this repository named no embedding model; embedding_model = \"{MODEL.id}\", the first on this machine's list, "
+          f"is now in {path} (commit it; `iirc set-embedding-model` changes it)", file=sys.stderr)
+
+
+def cmd_set_embedding_model(args: argparse.Namespace) -> None:
+    """The repository's embedding model, in .claude/iirc.toml for every machine. Nothing about hosts, and nothing on this machine."""
+    model = known_model(args.model)
+    old = MODEL.id
+    path = write_model(model.id, "set-embedding-model")
+    print(f"embedding_model = \"{model.id}\" in {path}, for this repository on every machine (commit it)")
+    if old != model.id:
+        print(f"From {old} to {model.id}: " + SWITCH_COSTS.format(new=model.id, old=old) + ".")
+    ask_host(model.id)
+    e = HOST_ENTRY
+    if e is None:
+        print(f"this machine cannot serve {model.id}: no host on its list serves it. `iirc add-embedding-model {model.id} HOST` adds one.")
+        return
+    print(f"this machine serves it through {where(e)} ({PROTOCOL_TEXT[e.protocol]})")
+    if not semantic_enabled():
+        print("This machine uses string search, so no model is used here until `iirc search-mode semantic` turns semantic search on.")
+        return
+    reindex()
+
+
+def cmd_show_embedding_models(args: argparse.Namespace) -> None:
+    """This machine's list: one row per entry, the entry that serves this repository's model marked, and the preferred hosts."""
+    entries, prefs = machine_models(), preferred_hosts()
+    print(f"search mode: {'semantic' if semantic_enabled() else 'string'}; this repository's model: {MODEL.id} (set in {MODEL_SOURCE})")
+    if not entries:
+        print(f"no embedding models on this machine's list in {config_file()}; `iirc add-embedding-model MODEL HOST` adds one")
+        return
+    for e in entries:
+        marks = (["serves this repository"] if e == HOST_ENTRY else []) + (["preferred"] if prefs.get(e.model) == e.host else [])
+        print(f"{e.model}  {e.host}  {e.protocol}  {e.name}" + (f"  ({', '.join(marks)})" if marks else ""))
+    if HOST_ENTRY is None:
+        print(f"this machine cannot serve {MODEL.id}; `iirc doctor` names the ways out")
+
+
+def ollama_answers(url: str) -> bool:
+    """True when GET URL/api/version answers as ollama does."""
+    try:
+        with urllib.request.urlopen(url + "/api/version", timeout=HOST_TIMEOUT) as resp:
+            body = json.load(resp)
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+    return isinstance(body, dict) and "version" in body
+
+
+def pull_command(url: str, name: str) -> str:
+    return f"ollama pull {name}" if url == LOCAL_OLLAMA else f"OLLAMA_HOST={url} ollama pull {name}"
+
+
+def found_entry(model: iirc_embed.Model, host: str) -> Entry:
+    """The entry for MODEL on HOST, its protocol and its build found by asking the host; die, naming why, when the host cannot serve it.
+    Never pulls a model."""
+    if host == CPU:
+        if "onnx" not in model.names:
+            die(f"this CPU runs all-minilm-l6-v2 only; {model.id} needs an ollama or OpenAI-compatible host. Nothing was added.")
         fetch_minilm()
         ok, out = cpu_check()
         if not ok:
-            die(f"bin/iirc-cpu could not run the model, so nothing was written to the setup file: {out[-500:]}\n"
-                "onnxruntime may have no wheel for this machine; `iirc set-search-backend --substring` is the fallback.")
-    if repository:
-        # the model goes to the repository; where it runs stays the machine's, and so does the machine's default model
-        toml = ROOT / STORE_CONFIG
-        write_checked_config(set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model),
-                             lambda cfg: cfg.get("embedding_model") == model, "embedding_model did not land above the first table", "set-search-backend")
-        if backend == "openai":
-            values["embedding"] = {**embedding_config(), "url": host}
-        written = f"the model is embedding_model in {toml}, for this repository (commit it), and where it runs is in {config_file()}, for this machine"
-        whose = "This repository's pages are"
-    else:
-        values["embedding"] = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
-        written = f"written as the machine default in {config_file()}"
-        whose = f"The pages of each repository that names no embedding_model in its {STORE_CONFIG} are"
-    if backend == "ollama":
-        values["embedding_host"] = host
-    write_config_file(values)
-    set_root(ROOT)   # the model may have changed, and with it the thresholds
-    global _RESOLVED
-    _RESOLVED = None
-    where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
-    print(f"semantic search with {model} through {where}; {written}")
-    if not semantic_enabled():
-        # only a repository target leaves the machine on string search
-        print("This machine uses string search, so no repository's model is used here until "
-              "`iirc set-search-backend --machine` with --local, --host URL, --openai URL, or --cpu turns semantic search on.")
-    else:
-        print(f"{whose} embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
-    if backend == "onnx":
+            die(f"bin/iirc-cpu could not run the model, so nothing was added: {out[-500:]}\n"
+                "onnxruntime may have no wheel for this machine; `iirc search-mode string` is the fallback.")
+        return Entry(model.id, CPU, "onnx", model.names["onnx"][0])
+    if ollama_answers(host):
+        if "ollama" not in model.names:
+            die(f"{host} is an ollama host, and {model.id} does not run on ollama. Nothing was added.")
+        name = next((n for n in model.names["ollama"] if model_present(host, n)), None)
+        if name is None:
+            die(f"{host} is an ollama host without {model.id}, so nothing was added. Pull it there, then run this again: "
+                f"{pull_command(host, model.names['ollama'][0])}")
+        return Entry(model.id, host, "ollama", name)
+    if "openai" not in model.names:
+        die(f"{host} does not answer as ollama, and {model.id} has no OpenAI-compatible name. Nothing was added.")
+    name = model.names["openai"][0]
+    why, _ = embed_refusal(host, name)
+    if why:
+        die(f"{host} answers neither as ollama nor as an OpenAI-compatible server for {name} ({why}). Nothing was added.")
+    return Entry(model.id, host, "openai", name)
+
+
+def cmd_add_embedding_model(args: argparse.Namespace) -> None:
+    """Add MODEL on HOST to this machine's list after asking the host which protocol it speaks and which build it has."""
+    model = known_model(args.model)
+    entry = found_entry(model, host_url(args.host))
+    raw = [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
+    at = next((i for i, e in enumerate(raw) if (e.get("model"), e.get("host")) == (entry.model, entry.host)), len(raw))
+    raw[at:at + 1] = [entry._asdict()]
+    path = set_machine(embedding_models=raw)
+    print(f"added {model.id} on {entry.host} to {path}: {PROTOCOL_TEXT[entry.protocol]}, as {entry.name}")
+    ask_host(model.id)
+
+
+def cmd_remove_embedding_model(args: argparse.Namespace) -> None:
+    """Remove MODEL's entry on HOST from this machine's list, or every entry of MODEL, and a preference for a host removed."""
+    model = known_model(args.model)
+    host = host_url(args.host) if args.host else None
+    raw = [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
+    gone = [e for e in raw if e.get("model") == model.id and (host is None or e.get("host") == host)]
+    if not gone:
+        die(f"this machine's list has no {model.id}" + (f" on {host}" if host else "") + "; `iirc show-embedding-models` lists it")
+    left = [e for e in raw if e not in gone]
+    prefs = preferred_hosts()
+    if prefs.get(model.id) in {e.get("host") for e in gone}:
+        del prefs[model.id]
+    path = set_machine(embedding_models=left, embedding_preferred=prefs)
+    for e in gone:
+        print(f"removed {model.id} on {e.get('host')} from {path}")
+
+
+def cmd_prefer_embedding_host(args: argparse.Namespace) -> None:
+    """Record which listed host serves MODEL on this machine when two do."""
+    model = known_model(args.model)
+    host = host_url(args.host)
+    if host not in {e.host for e in model_entries(model.id)}:
+        die(f"{host} is not listed for {model.id} on this machine; `iirc add-embedding-model {model.id} {args.host}` adds it")
+    path = set_machine(embedding_preferred={**preferred_hosts(), model.id: host})
+    print(f"{model.id} runs through {host} on this machine; written to {path}")
+
+
+def cmd_search_mode(args: argparse.Namespace) -> None:
+    """Print this machine's search mode, or set it: semantic, or string, the fallback where no embedding model can run."""
+    if args.mode is None:
+        print("semantic" if semantic_enabled() else "string")
         return
-    if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
-        print("note: OLLAMA_HOST is exported in this shell and wins over the setup file")
-    if not (host_answers(host, fresh=True, no_route=True) if backend == "openai" else host_answers(host, fresh=True)):
-        if backend == "openai":
-            print(f"{host} does not answer yet. Start the server there, then run `iirc doctor`.")
-        else:
-            print(f"{host} does not answer yet. " + ("Run `iirc doctor --fix` to install ollama here." if host == normalize_host(DEFAULT_HOST) else "Start ollama there, then run `iirc doctor`."))
-        return
-    if backend == "openai":
-        print("Run `iirc doctor` to confirm everything.")
-    elif model_present(host, model):
-        print(f"{model} is present. Run `iirc doctor` to confirm everything.")
-    else:
-        print(f"{model} is not on {host}. Pull it there: OLLAMA_HOST={host} ollama pull {model}")
+    path = set_machine(search_mode=args.mode)
+    print(f"search_mode = \"{args.mode}\" in {path}")
 
 
 # --- git ---------------------------------------------------------------------
@@ -3674,10 +3736,10 @@ def suspect_pages(pages: list[Path]) -> list[str]:
         return [page.name for page in pages if any(sig == "ref" for sig, _ in suspicion(parse_page(page.read_text())[0]))]
 
 
-def embed_refusal(base: str, model: iirc_embed.Model) -> tuple[str | None, int]:
-    """(why a test embed failed, or None when it worked; the width it answered at). The probe's GET cannot see a 404 for a model the server does not serve."""
+def embed_refusal(base: str, name: str) -> tuple[str | None, int]:
+    """(why a test embed of NAME failed, or None when it worked; the width it answered at). The probe's GET cannot see a 404 for a model the server does not serve."""
     try:
-        got = iirc_embed._post(base + "/v1/embeddings", {"model": model.id, "input": ["iirc doctor"]}, iirc_embed.EMBED_TIMEOUT)
+        got = iirc_embed._post(base + "/v1/embeddings", {"model": name, "input": ["iirc doctor"]}, iirc_embed.EMBED_TIMEOUT)
         return None, len(got["data"][0]["embedding"])
     except urllib.error.HTTPError as e:
         return f"a test embed got HTTP {e.code}", 0
@@ -3685,9 +3747,10 @@ def embed_refusal(base: str, model: iirc_embed.Model) -> tuple[str | None, int]:
         return "a test embed got no embedding back", 0
 
 
-def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
-    """The ollama host answers and has the model; with --fix, start ollama here and pull the model. True when the host answers."""
-    base, source, up = resolve_host()
+def doctor_ollama(entry: Entry, fix_it: bool, report) -> bool:
+    """The entry's ollama host answers and has its build; with --fix, start ollama here and pull the build. True when the host answers."""
+    base = entry.host
+    up = host_answers(base)
     local = any(h in base for h in ("127.0.0.1", "localhost", "[::1]"))
     if not up and fix_it and local and platform.system() == "Darwin" and shutil.which("brew"):
         if shutil.which("ollama") is None:
@@ -3701,19 +3764,20 @@ def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     if local:
         fix = "brew install ollama && brew services start ollama" if platform.system() == "Darwin" else "curl -fsSL https://ollama.com/install.sh | sh"
     else:
-        fix = "start ollama on that host, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring` if ollama cannot run here"
-    report(f"embedding host {base} answers (from {source})", up, fix)
-    has_model = up and model_present(base, model.id)
+        fix = ("start ollama on that host, `iirc show-embedding-models` to see this machine's other hosts, "
+               "or `iirc search-mode string` if no embedding model can run here")
+    report(f"embedding host {base} answers (from this machine's list)", up, fix)
+    has_model = up and model_present(base, entry.name)
     if up and not has_model and fix_it and shutil.which("ollama"):
         env = dict(os.environ, OLLAMA_HOST=base)
-        has_model = subprocess.run(["ollama", "pull", model.id], env=env).returncode == 0
-    report(f"model {model.id} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {model.id}")
+        has_model = subprocess.run(["ollama", "pull", entry.name], env=env).returncode == 0
+    report(f"model {entry.name} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {entry.name}")
     return up
 
 
 TIMEOUT_FIX = (f"a cold embedding model is the usual cause; iirc asks ollama to keep the model loaded for {iirc_embed.KEEP_ALIVE}, so the "
                f"likely causes are no search or index in over {iirc_embed.KEEP_ALIVE}, another model loaded in its place, or a host that "
-               "restarted; check the host with iirc set-search-backend")
+               "restarted; check the host with iirc doctor")
 
 
 def setup_checks(fix_it: bool, report, counts: dict) -> bool:
@@ -3747,28 +3811,32 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
         pinned = install_tool(pin) and pin_matches(pin, installed_rev())
     report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
 
-    model = active_model()
+    model, e = active_model(), HOST_ENTRY
     report(f"embedding model {model.id}, set in {MODEL_SOURCE}", True)
     up = False   # embeddings work, so --fix can reindex
     if not config_file().is_file():
-        # the creator has not chosen a backend; --fix must not install or pull for one they did not choose
-        report("search backend chosen on this machine", False, "not set up; run iirc set-search-backend")
+        # the creator has not chosen a model or a host; --fix must not install or pull for one they did not choose
+        report("search set up on this machine", False, "not set up; run iirc add-embedding-model MODEL HOST, or iirc search-mode string")
     elif not semantic_enabled():
-        report("search mode: string, the fallback (iirc set-search-backend --local or --host URL switches to semantic)", True)
-    elif model.backend == "onnx":
-        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
-    elif no_url():
-        report(f"an OpenAI-compatible URL for {model.id} on this machine", False, no_url())
-    elif model.backend == "openai":
-        base, source, up = resolve_host()
-        status = host_status(base)
-        why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
-        # the host's width, not the table's: it may serve another size of the model under this name
-        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
-                    up and why is None,
-                    (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
+        report("search mode: string, the fallback (iirc search-mode semantic switches to semantic)", True)
+    elif e is None:
+        report(f"this machine cannot serve {model.id}", False, ways_out(model))
     else:
-        up = doctor_ollama(model, fix_it, report)
+        if unpreferred(model.id):
+            print(f"note two hosts serve {model.id} on this machine and none is preferred, so it uses {e.host}; "
+                  f"iirc prefer-embedding-host {model.id} HOST picks one")
+        if e.protocol == "onnx":
+            up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), f"iirc add-embedding-model {model.id} cpu")
+        elif e.protocol == "openai":
+            up = host_answers(e.host, no_route=True)
+            status = host_status(e.host)
+            why, width = embed_refusal(e.host, e.name) if up else (f"it answered HTTP {status}" if status else None, 0)
+            up = report(f"embedding endpoint {e.host} answers within {HOST_TIMEOUT:g} s (serving {e.name}" + (f", {width} wide)" if width else ")"),
+                        up and why is None and width == model.dims,
+                        (f"{why}; " if why else f"{width} wide, and {model.id} is {model.dims}; " if width else "")
+                        + "check the endpoint, or `iirc show-embedding-models` to see this machine's other hosts")
+        else:
+            up = doctor_ollama(e, fix_it, report)
 
     for store in STORES:
         if store.kind == "remote" and not store.dir.is_dir() and fix_it:
@@ -3843,7 +3911,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             emit(MIGRATION_LINE)
             return
         if not config_file().is_file():
-            emit("iirc: not set up on this machine. Ask the creator where embeddings should come from: ollama on this machine (`--local`) or on a remote host (`--host URL`), an OpenAI-compatible host (`--openai URL`), this CPU (`--cpu`, no ollama needed), or none (`--substring`, string search only); then run `iirc set-search-backend` with that flag, `iirc init` if this repository has no .iirc/, and `iirc doctor --fix`.")
+            emit("iirc: not set up on this machine. Ask the creator which embedding model to use and where it runs: ollama here (`local`), "
+                 "the URL of an ollama or OpenAI-compatible host, or this CPU (`cpu`, all-minilm-l6-v2, no ollama needed); then run "
+                 "`iirc add-embedding-model MODEL HOST`, `iirc set-embedding-model MODEL`, `iirc init` if this repository has no .iirc/, "
+                 "and `iirc doctor --fix`. For string search only, `iirc search-mode string`.")
             return
         if not live_stores():
             if project_store() is None:
@@ -3859,7 +3930,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         per_store = [(s, list_pages(s.dir)) for s in live_stores()]
         pages = [p for _, ps in per_store for p in ps]
         n = len(pages)
-        mode = search_mode()
+        mode = search_status()
         counts: dict[str, int] = {}
         cited = 0
         scan_start = time.monotonic()
@@ -3873,6 +3944,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         scan = time.monotonic() - scan_start
         top = ", ".join(f"{t} {c}" for t, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
         parts = [f"iirc: {n} page{'' if n == 1 else 's'}, {mode}."] + pulled_notes
+        if MODEL_SOURCE == FIRST_LISTED:
+            # a hook never writes the repository's model; the first command that needs one does
+            parts.append(f"This repository names no embedding model, so it uses {MODEL.id}, the first on this machine's list; "
+                         f"ask the creator whether to keep it, and `iirc set-embedding-model {MODEL.id}` writes it.")
+        if semantic_enabled() and unpreferred(MODEL.id):
+            parts.append(f"Two hosts serve {MODEL.id} on this machine and none is preferred, so it uses {where(HOST_ENTRY)}; "
+                         f"ask the creator which to use, and `iirc prefer-embedding-host {MODEL.id} HOST` records it.")
         if len(STORES) > 1:
             parts.append("Stores: " + ", ".join(f"{s.name} {len(ps)}" for s, ps in per_store) + ".")
         pin = read_pin()
@@ -3916,6 +3994,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         ok = ok and good
         return good
 
+    ask_host(MODEL.id)
     counts = logged_counts()
     if not setup_checks(args.fix, report, counts):
         sys.exit(1)
@@ -4612,12 +4691,13 @@ def own_title_skip(vectors: dict) -> str | None:
         return "no vectors"
     if not semantic_enabled():
         return "string search"
-    url, _, answers = resolve_host()
-    if answers:
+    if HOST_ENTRY is None:
+        return f"this machine cannot serve {active_model().id}"
+    if host_up():
         return None
-    if active_model().backend == "onnx":
+    if HOST_ENTRY.protocol == "onnx":
         return f"the {active_model().id} model files are missing"
-    return f"{re.sub(r'^https?://', '', url)} does not answer"
+    return f"{where(HOST_ENTRY)} does not answer"
 
 
 def candidate_row(judgment: dict, evals: dict[str, list[dict]]) -> dict | None:
@@ -4949,20 +5029,21 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="iirc", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
     # each command's parser may set: fail_open, a hook entry that stays quiet on a bad config; runs_with_bad_config;
     # skips_format_check, a command that runs before or without a store in the current format
-    parser.set_defaults(fail_open=False, runs_with_bad_config=False, skips_format_check=False)
+    # needs_model, a command that uses the repository's embedding model and so writes the machine list's first when the repository names none
+    parser.set_defaults(fail_open=False, runs_with_bad_config=False, skips_format_check=False, needs_model=False)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("run-maintenance", help="the one upkeep command, about weekly: sync, check, and list what is left to decide; changes no page")
-    p.set_defaults(func=cmd_run_maintenance)
+    p.set_defaults(func=cmd_run_maintenance, needs_model=True)
 
     p = sub.add_parser("search", help="ranked pages for one or more queries; several terms are searched separately and merged")
     p.add_argument("query", nargs="+")
     p.add_argument("--json", action="store_true")
-    p.set_defaults(func=cmd_search)
+    p.set_defaults(func=cmd_search, needs_model=True)
 
     p = sub.add_parser("read-matching-pages", help="full text of matching pages")
     p.add_argument("query")
-    p.set_defaults(func=cmd_read_matching_pages)
+    p.set_defaults(func=cmd_read_matching_pages, needs_model=True)
 
     p = sub.add_parser("read", help="print pages")
     p.add_argument("pages", nargs="+")
@@ -5011,23 +5092,23 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("audit-page-findability", help="pages search shows badly: title and summary shape, secrets, own title, hubs, superseded text")
     p.add_argument("page", nargs="?", help="one page; default: every page")
     p.add_argument("--json", action="store_true")
-    p.set_defaults(func=cmd_audit_page_findability)
+    p.set_defaults(func=cmd_audit_page_findability, needs_model=True)
 
     p = sub.add_parser("rebuild-search-index", help="full reindex")
     p.add_argument("--vectors-only", action="store_true", help=argparse.SUPPRESS)   # the vector cache only: no index.md stamp, no commit
-    p.set_defaults(func=cmd_rebuild_search_index)
+    p.set_defaults(func=cmd_rebuild_search_index, needs_model=True)
 
     p = sub.add_parser("estimate-context-tokens", help="bytes and tokens of index.md and a search")
     p.add_argument("--query", default="how to install and configure tools")
-    p.set_defaults(func=cmd_estimate_context_tokens)
+    p.set_defaults(func=cmd_estimate_context_tokens, needs_model=True)
 
     p = sub.add_parser("show-suggestion-thresholds", help="the suggestion gate's distances in .claude/iirc.toml, with their ranges")
-    p.set_defaults(func=cmd_show_suggestion_thresholds)
+    p.set_defaults(func=cmd_show_suggestion_thresholds, needs_model=True)
 
     p = sub.add_parser("set-suggestion-threshold", help="write one of the suggestion gate's distances into .claude/iirc.toml")
     p.add_argument("name", choices=list(KNOB_TEXT))
     p.add_argument("value", type=float)
-    p.set_defaults(func=cmd_set_suggestion_threshold)
+    p.set_defaults(func=cmd_set_suggestion_threshold, needs_model=True)
 
     p = sub.add_parser("tune-suggestions", help="evidence for judging suggestions, the judgments, and an evaluation of the gate's thresholds")
     tsub = p.add_subparsers(dest="tune_cmd", required=True)
@@ -5049,22 +5130,33 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--brief", action="store_true", help="one line; to name the search mode it probes the embedding hosts, 2 s each; nothing if no field")
     p.add_argument("--hook", action="store_true", help="with --brief: read the hook payload on stdin and frame the line for its event")
     p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
-    p.set_defaults(func=cmd_doctor, runs_with_bad_config=True, skips_format_check=True)
+    p.set_defaults(func=cmd_doctor, runs_with_bad_config=True, skips_format_check=True, needs_model=True)
 
-    p = sub.add_parser("set-search-backend", help="the embedding model, for this repository or the machine, and where it runs; or substring search; prompts if no flags")
-    p.add_argument("--substring", action="store_true", help="string search: exact text only; the fallback where no embedding model can run")
-    p.add_argument("--semantic", action="store_true", help="semantic search through ollama, the default; needs --local or --host")
-    p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine")
-    p.add_argument("--host", help="embeddings from a remote ollama host")
-    p.add_argument("--openai", metavar="URL", help="embeddings from an OpenAI-compatible host (POST URL/v1/embeddings)")
-    p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
-    p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
-                   help="the model for --local, --host, or --openai; ollama defaults to qwen3-embedding:0.6b, --openai to qwen3-embedding")
-    target = p.add_mutually_exclusive_group()
-    target.add_argument("--repository", action="store_true",
-                        help="set the model in this repository's .claude/iirc.toml; the default where .claude/settings.json or settings.local.json enables iirc")
-    target.add_argument("--machine", action="store_true", help="set the model as this machine's default; the default elsewhere, and always for --substring")
-    p.set_defaults(func=cmd_set_search_backend, runs_with_bad_config=True, skips_format_check=True)
+    p = sub.add_parser("set-embedding-model", help="this repository's embedding model, in .claude/iirc.toml for every machine")
+    p.add_argument("model", help=", ".join(iirc_embed.MODELS))
+    p.set_defaults(func=cmd_set_embedding_model, runs_with_bad_config=True, skips_format_check=True)
+
+    p = sub.add_parser("show-embedding-models", help="this machine's embedding models and where each runs; marks the one this repository uses")
+    p.set_defaults(func=cmd_show_embedding_models, runs_with_bad_config=True, skips_format_check=True)
+
+    p = sub.add_parser("add-embedding-model", help="add a model and where it runs to this machine's list; checks the host, never pulls")
+    p.add_argument("model", help=", ".join(iirc_embed.MODELS))
+    p.add_argument("host", help="a URL of an ollama or OpenAI-compatible host, `local` for ollama here, or `cpu` for all-minilm-l6-v2 on this CPU")
+    p.set_defaults(func=cmd_add_embedding_model, runs_with_bad_config=True, skips_format_check=True)
+
+    p = sub.add_parser("remove-embedding-model", help="remove a model from this machine's list, on one host or on all")
+    p.add_argument("model")
+    p.add_argument("host", nargs="?", help="default: every host")
+    p.set_defaults(func=cmd_remove_embedding_model, runs_with_bad_config=True, skips_format_check=True)
+
+    p = sub.add_parser("prefer-embedding-host", help="which listed host serves a model on this machine, when two do")
+    p.add_argument("model")
+    p.add_argument("host")
+    p.set_defaults(func=cmd_prefer_embedding_host, runs_with_bad_config=True, skips_format_check=True)
+
+    p = sub.add_parser("search-mode", help="this machine's search mode: semantic, or string, the fallback; bare, print it")
+    p.add_argument("mode", nargs="?", choices=["semantic", "string"])
+    p.set_defaults(func=cmd_search_mode, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("show-page-topics", help="every topic with its page count, computed from the pages")
     p.set_defaults(func=cmd_show_page_topics)
@@ -5074,7 +5166,7 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_max_suggested_pages, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("init", help="create .iirc/ and the CLAUDE.md paragraph")
-    p.set_defaults(func=cmd_init, skips_format_check=True)
+    p.set_defaults(func=cmd_init, skips_format_check=True, needs_model=True)
 
     p = sub.add_parser("sync", help="commit, pull with rebase, and push every remote store")
     p.set_defaults(func=cmd_sync)
@@ -5127,6 +5219,9 @@ def main(argv: list[str] | None = None) -> None:
             die(CONFIG_ERROR)
     if not args.skips_format_check:
         check_format()
+    # a hook's commands never write the repository's model: the brief, the health card, and the index a search starts in the background
+    if args.needs_model and not (getattr(args, "brief", False) or getattr(args, "health", False) or getattr(args, "vectors_only", False)):
+        adopt_model()
     args.func(args)
 
 

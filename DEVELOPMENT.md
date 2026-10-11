@@ -45,19 +45,19 @@ the local loop runs.
 
 ## Search mode and embedding host
 
-Semantic search is on unless `semantic = false` in the setup file, and
-that choice wins over an exported `OLLAMA_HOST`, which only names the
-first host to try. The `[embedding]` table of
-the setup file names the backend (`ollama`, `openai`, or `onnx`) and the
-model; without it the model is nomic through ollama. The wrapper always
-points the tool at a closed port (`NO_EMBEDDING_HOST`), because the tool
-no longer embeds. In string mode it skips reindexing. An `openai`
-backend has one host, the URL setup wrote; `onnx` has none. An ollama
-host, when semantic is on, is resolved in this order: `OLLAMA_HOST` in the environment, then
-`embedding_host` in `~/.config/dokidlc-iirc/config.toml` (written by
-`iirc set-search-backend`; `XDG_CONFIG_HOME` is honoured), then `127.0.0.1:11434`.
-`doctor` names the source. `doctor --fix` installs ollama only for a local
-host.
+Semantic search is on unless `search_mode = "string"` in the setup file,
+`~/.config/dokidlc-iirc/config.toml` (`XDG_CONFIG_HOME` is honoured). The
+model is the repository's: `embedding_model` in `.claude/iirc.toml`, else the
+first model on the machine's list, which the first command that needs a model
+writes there. Where it runs is the machine's: `embedding_models` in the setup
+file lists pairs of a model and a host, each with the protocol (`ollama`,
+`openai`, or `onnx`) and the build's name that `iirc add-embedding-model`
+found. The entry that serves the repository's model is the one
+`embedding_preferred` names, else the only one, else the first. No
+environment variable and no other key names a host. The wrapper always points
+the tool at a closed port (`NO_EMBEDDING_HOST`), because the tool no longer
+embeds. In string mode it skips reindexing. `doctor --fix` installs ollama
+only for a local host.
 
 ## Tests
 

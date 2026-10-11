@@ -290,7 +290,13 @@ describes each one.
 | `iirc read-matching-pages QUERY` | Searches, then prints the full text of each matching page, as `read` does. |
 | `iirc write`, `iirc verify`, `iirc delete`, `iirc approve-page-check` | Write, confirm, remove, or approve the check of a page. |
 | `iirc audit-page-findability [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
-| `iirc set-search-backend`, `iirc init`, `iirc migrate`, `iirc max-suggested-pages N` | Machine setup, the repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
+| `iirc init`, `iirc migrate`, `iirc max-suggested-pages N` | The repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
+| `iirc set-embedding-model MODEL` | Writes `embedding_model` to this repository's `.claude/iirc.toml`, for every machine. It says what a switch costs: every page is embedded again, the thresholds start at the new model's defaults, and tuning judgments made under the old model stop counting. |
+| `iirc show-embedding-models` | This machine's list of embedding models and where each runs, with the entry that serves this repository marked. |
+| `iirc add-embedding-model MODEL HOST` | Adds a model and where it runs to this machine's list. HOST is a URL, `local` for ollama here, or `cpu` for `all-minilm-l6-v2` on this CPU. It asks the host whether it speaks ollama or the OpenAI-compatible API and which build it has, and refuses a host without the model. It never pulls a model. |
+| `iirc remove-embedding-model MODEL [HOST]` | Removes the model from this machine's list, on one host or on all. |
+| `iirc prefer-embedding-host MODEL HOST` | When two listed hosts serve a model, records which one this machine uses. |
+| `iirc search-mode [semantic\|string]` | This machine's search mode. Bare, it prints it; `string` is the fallback where no embedding model can run. |
 | `iirc tune-suggestions gather-suggestion-data`, `record-relevance-judgments`, `evaluate-suggestion-thresholds`, `mark-session-tuned` | The tune steps. `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` replays judged prompts through today's search and gate. |
 | `iirc suggest-pages`, `iirc record-command-success`, `iirc remind-to-write`, `iirc record-session-summary` | Hook entries: `suggest-pages` names pages for a prompt or a failed command; `record-command-success` logs a command that worked and asks for a page when it had failed twice before; `remind-to-write --at stop` asks for a page at the end of a turn; `record-session-summary --hook` logs the session's numbers before compaction and at its end. |
 | `iirc summarize-session-usage [ID]`, `iirc show-compaction-instructions` | Run by the hooks module: one session's pages as JSON for the line under the prompt, and the line compaction's summary keeps. The module also runs `remind-to-write --at compaction` near compaction. |
