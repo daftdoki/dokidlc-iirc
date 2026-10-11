@@ -257,9 +257,20 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
   return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}), problems }, warnings }
 }
 
-/** A brief sentence as the reason in the line under the prompt: its first clause, without the full stop, the command it names left to the line. */
+/**
+ * A brief sentence as the reason in the line under the prompt, without the full stop. The clause that names
+ * the command goes, since the line names it: the sentence is cut at the first '; ' outside parentheses that a
+ * command or "run" follows. A '; ' inside parentheses, or between the items of a list, stays.
+ */
 function reason(sentence: string): string {
-  const why = sentence.split('; ')[0].replace(/\.$/, '')
+  let depth = 0
+  let cut = sentence.length
+  for (let k = 0; k < sentence.length && cut === sentence.length; k++) {
+    if (sentence[k] === '(') depth++
+    else if (sentence[k] === ')') depth = Math.max(0, depth - 1)
+    else if (depth === 0 && sentence.startsWith('; ', k) && /`|\/iirc|\brun\b/.test(sentence.slice(k))) cut = k
+  }
+  const why = sentence.slice(0, cut).replace(/\.$/, '')
   // a sentence's capital goes, unless the word is a name in capitals
   return /^[A-Z][a-z]/.test(why) ? why[0].toLowerCase() + why.slice(1) : why
 }

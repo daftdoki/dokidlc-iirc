@@ -1175,6 +1175,13 @@ test('the line under the prompt: what to do and why, in the brief\'s words, the 
     .toBe('✖ Update the plugin: this repository needs a newer iirc plugin, and 1 more')
 })
 
+test('the line under the prompt keeps a reason\'s parentheses whole, and cuts only at a top-level semicolon', () => {
+  const due = parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (1 near-duplicate pair; 2 store commits not pushed); run /iirc run-maintenance.')!.status
+  expect(actionText(due, counts())).toBe('▲ Run /iirc run-maintenance: maintenance is due (1 near-duplicate pair; 2 store commits not pushed)')
+  const git = parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist; .gitignore does not ignore .iirc/.cache.')!.status
+  expect(actionText(git, counts())).toBe('▲ Run iirc doctor --fix: persistence: .claude/settings.json does not exist; .gitignore does not ignore .iirc/.cache')
+})
+
 test('the drawn line under the prompt: the mark and the reason in the level\'s color, the command bold', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
