@@ -367,6 +367,13 @@ export function bandParts(s: IircStatus, c: SessionCounts, model: string | null,
   return { line: statusParts(s, c, lit), context: [] }
 }
 
+/** How search runs, as the help names it, the band's rule: the model with semantic search, and the mode only when it is string search. */
+export function searchSetting(s: IircStatus | null, model: string | null): [string, string] {
+  if (s === null) return ['search', '?']
+  if (isStringSearch(s)) return ['search:', 'string, the fallback']
+  return model ? ['model', model] : ['search', 'semantic']
+}
+
 /** The circle's level: the brief's, and yellow while search runs on terms alone. */
 function bandLevel(s: IircStatus, c: SessionCounts): IircStatus['level'] {
   const level = liveStatus(s, c).level
@@ -491,7 +498,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `summary line ${shown} · max-suggested-pages ${max} · search ${s?.mode ?? '?'}`,
+    `summary line ${shown} · max-suggested-pages ${max} · ${searchSetting(s, (await read($, health))?.model ?? null).join(' ')}`,
     row(SET_LINE, 'on|off: show or hide the summary line'),
     row(SET_MAX, 'pages per suggestion line (1-10)'),
     row(SET_SEARCH, 'the embedding model and where it runs'),
@@ -1268,7 +1275,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('summary line, on|off', isShown ? 'on' : 'off', SET_LINE)}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, SET_MAX)}
-      {setting('search', s?.mode ?? '?', SET_SEARCH)}
+      {(([label, value]) => setting(label.replace(/:$/, ''), value, SET_SEARCH))(searchSetting(s, checkup?.model ?? null))}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>

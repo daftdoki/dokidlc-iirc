@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { actions, actionText, liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import { actions, actionText, liveStatus, searchSetting, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
 import type { IircStatus, SessionCounts } from '../types'
 
 const RECALL =
@@ -356,7 +356,10 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).toContain('/iirc max-suggested-pages N')
   expect(helpText).toContain('/iirc summary-line-visibility ')
   for (const cmd of ['tune-suggestions', 'audit-page-findability', 'set-embedding-model', 'estimate-context-tokens', 'find-suspect-pages', 'rebuild-search-index', 'show-page-topics', 'unfold-suggested-pages', 'show-suggestion-thresholds', 'show-page-stores', 'summarize-page-usage']) expect(helpText).toContain(`/iirc ${cmd} `)
-  expect(helpText).toContain('summary line on · max-suggested-pages 4 · search semantic+keyword')
+  expect(helpText).toContain('summary line on · max-suggested-pages 4 · search semantic')
+  // the help names the mode only when it is string search, and the model otherwise
+  expect(searchSetting(parseBrief(BRIEF)!.status, 'qwen3-embedding-0.6b')).toEqual(['model', 'qwen3-embedding-0.6b'])
+  expect(searchSetting(parseBrief('iirc: 9 pages, string search. Topics: x 9.')!.status, 'qwen3-embedding-0.6b')).toEqual(['search:', 'string, the fallback'])
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate thresholds/)
   expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
