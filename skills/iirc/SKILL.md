@@ -23,9 +23,12 @@ iirc audit-page-findability [PAGE]                pages search shows badly, each
 iirc verify PAGE.md                               you re-confirmed it; re-run its check, refresh its refs
 iirc approve-page-check PAGE.md                   run a page's check once and approve it here (ask first)
 iirc delete PAGE.md
-iirc set-search-backend [--local|--host URL|--openai URL|--cpu|--substring] [--repository|--machine]
-                                                  the embedding model and where it runs, or the string fallback; the model goes to
-                                                  embedding_model in .claude/iirc.toml where this repository enables iirc, else the machine default
+iirc set-embedding-model MODEL                    this repository's model, in .claude/iirc.toml for every machine; commit it
+iirc show-embedding-models                        this machine's models and where each runs; marks the one in use
+iirc add-embedding-model MODEL HOST               add a model on HOST (a URL, local, or cpu) to this machine's list; never pulls
+iirc remove-embedding-model MODEL [HOST]          remove it from this machine's list
+iirc prefer-embedding-host MODEL HOST             which listed host this machine uses when two serve the model
+iirc search-mode [semantic|string]                this machine's search mode; string is the fallback
 iirc migrate                                      move a repository and this machine from the memory plugin's layout
 iirc doctor --fix                                 install or repair prerequisites; clone missing remote stores
 iirc init                                         create .iirc/, the CLAUDE.md paragraph, and .claude/settings.json if absent
@@ -78,9 +81,11 @@ creator asks; it changes the repository's configuration.
 
 When the session-start line says iirc is not set up, or the creator
 asks for iirc, follow `references/setup.md`: three questions, then you
-run the commands yourself. The creator never has to run one. When the
-creator asks to change what they see of the iirc hooks, the same file
-has the switches.
+run the commands yourself. The creator never has to run one. The same
+file holds the four ways out when the session-start line says this
+machine cannot serve the repository's model, what to do when it says the
+settings have the old shape, and the switches for what the creator sees
+of the iirc hooks.
 
 When the session-start line says the repository or machine still uses the
 memory plugin's layout, ask the creator whether to migrate. On yes, run

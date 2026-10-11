@@ -41,26 +41,33 @@ The shorthand clones over SSH and fails with
 shorthand is fine on a machine that already has github.com in
 `known_hosts`.
 
-### 3. Choose the search mode
+### 3. Choose the embedding model and where it runs
 
 ```sh
-iirc set-search-backend --local                      # ollama on this machine
-iirc set-search-backend --host http://frame:11434    # ollama on another host
-iirc set-search-backend --openai https://llm.example.net   # an OpenAI-compatible host
-iirc set-search-backend --cpu                        # all-MiniLM-L6-v2 on this CPU, no ollama
-iirc set-search-backend --substring                  # string search only
+iirc add-embedding-model qwen3-embedding-0.6b local                     # ollama on this machine
+iirc add-embedding-model qwen3-embedding-0.6b http://frame:11434        # ollama on another host
+iirc add-embedding-model qwen3-embedding-0.6b https://llm.example.net   # an OpenAI-compatible host
+iirc add-embedding-model all-minilm-l6-v2 cpu                           # all-MiniLM-L6-v2 on this CPU, no ollama
+iirc set-embedding-model qwen3-embedding-0.6b                           # this repository's model; commit .claude/iirc.toml
+iirc search-mode string                                                 # instead: string search only
 ```
 
-With ollama, the model is `qwen3-embedding:0.6b` unless `--model` names
-`nomic-embed-text` or `embeddinggemma`. `--cpu` fetches about 90 MB of
-model files from a pinned commit, checks their sha256, and runs the
-model once, so onnxruntime installs now and not in a hook.
+`add-embedding-model` writes to this machine's list in
+`~/.config/dokidlc-iirc/config.toml`. It finds whether the host speaks
+ollama or the OpenAI-compatible API, takes the first build of the model
+the host has (`qwen3-embedding:0.6b-fp16`, then `qwen3-embedding:0.6b`
+on ollama), and refuses a host without the model, printing the
+`ollama pull` command; it never pulls. It compares the host's vector for
+a probe sentence with the plugin's reference and warns under 0.995
+cosine. `cpu` fetches about 90 MB of model files from a pinned commit,
+checks their sha256, and runs the model once, so onnxruntime installs
+now and not in a hook. `set-embedding-model` writes `embedding_model` to
+the repository's `.claude/iirc.toml`, the same on every machine.
 
-Pass a flag. `cmd_setup` in `bin/iirc` calls `sys.stdin.isatty()` and
-stops with "not a terminal" when it gets neither flags nor a tty. The
-Claude Code Bash tool gives it no tty, so the interactive prompts only
-work from a real terminal. The answer goes to
-`~/.config/dokidlc-iirc/config.toml`.
+The commands take arguments and ask nothing, except when two listed
+hosts serve the repository's model: then a command on a terminal asks
+which one this machine uses. `iirc prefer-embedding-host MODEL HOST`
+answers it without a terminal.
 
 ### 4. Install the dependencies
 
@@ -73,15 +80,18 @@ overrides file that drops `pysqlite3-binary`. That package ships a Linux
 x86_64 wheel only, and the tool falls back to stdlib sqlite3 without it.
 See `install_tool()` in `bin/iirc`. On macOS, when the embedding host is
 local and does not answer, `--fix` also runs `brew install ollama` and
-`brew services start ollama`, then pulls the model setup chose. On Linux
-it prints the one ollama command to run.
+`brew services start ollama`, then pulls the model on this machine's
+ollama (`http://127.0.0.1:11434`). For any other host it prints the
+`OLLAMA_HOST=URL ollama pull NAME` command and pulls nothing; that pull
+waits for whoever runs the host. On Linux it prints the one ollama
+command to run.
 
 Doctor exits 1 here, and that is expected. The repository has no `.iirc/`
 yet, so the field, CLAUDE.md, and persistence rows report FAIL. Only four
 rows must read `ok` at this point: `uv on PATH`, `memoryfield-tool`, and
 the search rows for the choice in step 3: `embedding host` and `model`
 for ollama, `embedding endpoint` for an OpenAI-compatible host, or the
-model files for the CPU. The rest turn green at step 9.
+model files for the CPU, then the `fingerprint` row. The rest turn green at step 9.
 
 ## Per repository
 

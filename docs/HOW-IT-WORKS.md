@@ -498,7 +498,7 @@ Each query runs a semantic search and a string search, and
 
 Semantic search matches meaning: "why does install fail on a mac" finds
 the page about a missing wheel, though they share no words. It needs an
-embedding model, chosen per repository or per machine with `iirc set-search-backend`; see
+embedding model, chosen per repository with `iirc set-embedding-model`, that runs where this machine's list says; see
 [Models](#models). It is weak on exact identifiers such as
 "pysqlite3-binary".
 
@@ -565,49 +565,62 @@ is in [USAGE.md](USAGE.md#suggestion-thresholds-per-model).
 
 ### Models
 
-`iirc_embed.MODELS` holds every model iirc can embed with. Each one has
-its query and document prefixes, its thresholds, a cut (a page farther than
+`iirc_embed.MODELS` holds every model iirc can embed with, under one id
+whatever serves it. Each one has the names each protocol knows it by,
+preferred first, its query and document prefixes, its thresholds, a cut (a page farther than
 this never reaches the gate), and its near-duplicate distances.
 
-| Model | Runs on | Page text it embeds | Thresholds `semantic_only` / `both` | Cut |
+| Model | Runs on, by name | Page text it embeds | Thresholds `semantic_only` / `both` | Cut |
 |---|---|---|---|---|
-| `nomic-embed-text` | ollama | the page file cut at 8,192 bytes, as memoryfield-tool embeds it | 0.28 / 0.38 | 0.45 |
-| `qwen3-embedding:0.6b` | ollama | the page file cut at 8,192 bytes; the query takes qwen3's instruction prefix | 0.40 / 0.60 | 0.90 |
-| `embeddinggemma` | ollama | the page file cut at 8,192 bytes, with gemma's document prefix | 0.40 / 0.68 | 0.90 |
-| `qwen3-embedding` | an OpenAI-compatible host (`POST URL/v1/embeddings`) | as `qwen3-embedding:0.6b` | 0.40 / 0.60, qwen3's values, not measured on this host | 0.90 |
+| `nomic-embed-text` | ollama `nomic-embed-text` | the page file cut at 8,192 bytes, as memoryfield-tool embeds it | 0.28 / 0.38 | 0.45 |
+| `qwen3-embedding-0.6b` | ollama `qwen3-embedding:0.6b-fp16` or `qwen3-embedding:0.6b`; an OpenAI-compatible host (`POST URL/v1/embeddings`) `qwen3-embedding` | the page file cut at 8,192 bytes; the query takes qwen3's instruction prefix | 0.40 / 0.60 | 0.90 |
+| `embeddinggemma` | ollama `embeddinggemma` | the page file cut at 8,192 bytes, with gemma's document prefix | 0.40 / 0.68 | 0.90 |
 | `all-minilm-l6-v2` | this CPU, through `bin/iirc-cpu` and onnxruntime | title, summary, topics, and the body before Sources, in 200-token windows at a stride of 150 | 0.60 / 0.68 | 0.90 |
 
 The threshold defaults come from one pooling round: each model's best F1 on
 the agent-builder replay that refuses no relevant pair the model passed
 before on the neckbeard replay. Under strict labels the models nearly
-tie at the gate. An OpenAI-compatible host sets its own vector width, so
-any size of Qwen3-Embedding served as `qwen3-embedding` works, and
-`iirc doctor` names the width it answered. See [SEARCH-QUALITY.md](SEARCH-QUALITY.md#results).
+tie at the gate. See [SEARCH-QUALITY.md](SEARCH-QUALITY.md#results).
 
-`iirc set-search-backend` offers ollama here, ollama on a host, an OpenAI-compatible
-host, this CPU, and string search. Its default is ollama, here or on the
-machine's host, when one answers, with `qwen3-embedding:0.6b`; otherwise
-this CPU. String search comes last. A machine with no `embedding` key in
-its setup file uses nomic, so an existing machine changes only when
-setup runs again.
+Every host answers at the model's width; another width is another model
+under the same name, and its vectors are refused. A fingerprint checks
+the build behind a name: `bin/fingerprints.json` holds one probe
+sentence and each model's vector for it from the creator's Mac
+(`scripts/fingerprints.py` regenerates it), and `add-embedding-model`
+and `doctor` compare the host's vector with it. Under 0.995 cosine is a
+warning, another width an error, and an ollama host's
+`quantization_level` is shown. qwen3's Q8_0 and F16 builds and an
+OpenAI-compatible bf16 build measured 0.99917 to 0.99987 against each
+other, so the cut passes every build of the right model.
 
-`active_model()` takes `embedding_model` from `.claude/iirc.toml`, else
-`embedding.model` from the machine setup file
-(`~/.config/dokidlc-iirc/config.toml`), else nomic. So two repositories
-on one machine can search with two models at once. An `embedding_model`
-not in `MODELS` is a configuration error. Where the model runs stays per
-machine: `embedding_host`, `embedding.url`, or the CPU files.
-`set-search-backend` writes `embedding_model` where the repository's
-`.claude/settings.json` or `.claude/settings.local.json` enables an
-`iirc@` plugin, and the machine default elsewhere; `--repository` and
-`--machine` override that. Each candidate row records its `model`, and
-the threshold evaluation and the audit's hub check read only the active
-model's rows, because each model has its own distance scale.
+The model is the repository's: `active_model()` takes `embedding_model`
+from `.claude/iirc.toml`, else the first model on the machine's list,
+which the first command that needs a model writes there; a hook only
+names it. So two repositories on one machine can search with two models
+at once. An `embedding_model` not in `MODELS` is a configuration error.
+Where the model runs is the machine's: `embedding_models` in
+`~/.config/dokidlc-iirc/config.toml` lists entries of a model, a host
+(a URL, or `cpu`), the protocol (`ollama`, `openai`, `onnx`), and the
+build's name, which `iirc add-embedding-model` finds by asking the host.
+`serving_entry()` picks the entry for the repository's model: the one
+`embedding_preferred` names, else the only one, else the first, and the
+session-start line says when two serve it and none is preferred. No
+entry means "this machine cannot serve MODEL": search matches strings,
+and the skill offers the ways out. Each candidate row records its
+`model`, and the threshold evaluation and the audit's hub check read
+only the active model's rows, because each model has its own distance
+scale.
+
+`iirc doctor --fix` converts a setup file of the earlier shape
+(`semantic`, `embedding`, `embedding_host`) and a repository that named
+a model by a protocol's name, once; no other code reads them. It pulls a
+missing model only on `http://127.0.0.1:11434` and prints the pull
+command for any other host.
 
 ### Without ollama
 
 Two tiers need no ollama. The CPU tier runs all-MiniLM-L6-v2 in a fresh
-process on each search. `iirc set-search-backend --cpu` fetches its fp32 model and
+process on each search. `iirc add-embedding-model all-minilm-l6-v2 cpu` fetches its fp32 model and
 tokenizer, about 90 MB, from a pinned commit, checks each file's
 sha256, and runs the model once so that onnxruntime installs then and
 not in a hook. A page longer than a window is embedded in windows, and

@@ -65,6 +65,7 @@ const MAINTAIN = '/iirc run-maintenance'
 const WARNING_FIX: [RegExp, string][] = [
   [/memoryfield-tool is not at the pin/, 'iirc doctor --fix'],
   [/Persistence:/, 'iirc doctor --fix'],
+  [/settings have the old shape/, 'iirc doctor --fix'],
   [/Maintenance is due/, MAINTAIN],
   [/not committed/, MAINTAIN],
 ]

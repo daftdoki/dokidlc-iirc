@@ -88,7 +88,8 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 | `· run /iirc run-maintenance` | shown when the circle is yellow or red: the command that clears it; setup and config errors name `iirc doctor --fix` |
 
 The line updates after each `iirc read`, `read-matching-pages`, `write`, `delete`, `sync`,
-`migrate`, `set-search-backend`, `init`, and `doctor`, and after each suggestion line. A status
+`migrate`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`,
+`prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line. A status
 line cannot carry color, so the line sits in the hint row.
 
 `/iirc summary-line-visibility off` hides it and `/iirc summary-line-visibility on` brings it
@@ -142,7 +143,7 @@ doctor card from sample checks.
 ![The /iirc help card: settings with their values, the maintenance commands, and the look-up commands](images/iirc-card-help.png)
 
 - SETTINGS: the line under the prompt, the number of suggested pages,
-  and the search mode, each with its command and current value. `set-search-backend`
+  and the search mode, each with its command and current value. `set-embedding-model`
   goes to the skill, which asks which embedding model and where it runs
 - MAINTENANCE and LOOK UP: first `run-maintenance`, the only thing you
   need to run, about weekly, which goes to the skill. Then the iirc commands `/iirc` runs for you

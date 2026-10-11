@@ -30,5 +30,5 @@ nothing. Do this instead:
 
 Tell the creator when a search came back empty in string mode, so they
 know the limit is the mode and not the pages. If ollama cannot run on
-this machine, `iirc set-search-backend --cpu` gives search by meaning without it;
-offer it, and run it on their yes.
+this machine, the CPU model gives search by meaning without it; offer it,
+with the costs of a switch in references/setup.md, and run it on their yes.

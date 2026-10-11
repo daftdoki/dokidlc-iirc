@@ -2828,7 +2828,7 @@ def cmd_init(args: argparse.Namespace) -> None:
 OLD_INVOCATIONS = {
     **{v: v for v in ("search", "read", "write", "delete", "verify", "doctor", "init", "sync")},
     "pull": "read-matching-pages", "doubt": "find-suspect-pages", "approve": "approve-page-check", "cost": "estimate-context-tokens",
-    "setup": "set-search-backend", "index": "rebuild-search-index", "index --vectors": "rebuild-search-index --vectors-only",
+    "setup": "add-embedding-model", "index": "rebuild-search-index", "index --vectors": "rebuild-search-index --vectors-only",
     "stores": "show-page-stores", "stores add": "add-remote-store",
     "stats": "summarize-page-usage", "stats --snapshot": "record-session-summary", "stats --session": "summarize-session-usage",
     "recall": "suggest-pages", "recall --success": "record-command-success", "recall --failure": "suggest-pages --failure",
@@ -3247,6 +3247,119 @@ def cmd_search_mode(args: argparse.Namespace) -> None:
         return
     path = set_machine(search_mode=args.mode)
     print(f"search_mode = \"{args.mode}\" in {path}")
+
+
+# --- the settings' old shape --------------------------------------------------
+# Before quest 2610112037-68 the setup file held `semantic`, `embedding = {backend, model, url}`, and `embedding_host`, and a
+# repository could name a model by a protocol's name. `doctor` reports them and `doctor --fix` converts them once; nothing else reads them.
+
+OLD_MACHINE_KEYS = {"semantic": "search_mode", "embedding": "embedding_models", "embedding_host": "embedding_models"}
+
+
+def old_table_model(table: str) -> iirc_embed.Model | None:
+    """The model a [suggestions.TABLE] named by a protocol's name belongs to, such as qwen3-embedding; None for a model's own table."""
+    if table in {iirc_embed.table_name(m) for m in iirc_embed.MODELS}:
+        return None
+    return next((m for m in iirc_embed.MODELS.values() for names in m.names.values() for n in names if iirc_embed.table_name(n) == table), None)
+
+
+def repository_settings() -> tuple[str, dict]:
+    """.claude/iirc.toml's text and its parsed settings; empty when it is missing or does not parse."""
+    path = ROOT / STORE_CONFIG
+    try:
+        text = path.read_text() if path.is_file() else ""
+        return text, tomllib.loads(text)
+    except (OSError, tomllib.TOMLDecodeError):
+        return "", {}
+
+
+def old_shape() -> list[str]:
+    """Each setting still in the old shape, as doctor reports it."""
+    found = [f"{config_file()}: {key} is the old shape of {new}" for key, new in OLD_MACHINE_KEYS.items() if key in read_config()]
+    _, cfg = repository_settings()
+    model = cfg.get("embedding_model")
+    if isinstance(model, str) and model not in iirc_embed.MODELS and iirc_embed.model_named(model):
+        found.append(f'{STORE_CONFIG}: embedding_model = "{model}" is a protocol\'s name for {iirc_embed.model_named(model).id}')
+    tables = cfg.get("suggestions")
+    for table in tables if isinstance(tables, dict) else {}:
+        m = old_table_model(table)
+        if m:
+            found.append(f"{STORE_CONFIG}: [{table_header(table)}] is the old name of [{table_header(iirc_embed.table_name(m.id))}]")
+    return found
+
+
+def convert_machine() -> str | None:
+    """The setup file's old keys as the list and search_mode, written once; the model a repository that named none ran on, or None
+    when the file had no old key. An ollama model with no URL runs where embedding_host says, else on this machine's ollama."""
+    cfg = dict(read_config())
+    if not any(key in cfg for key in OLD_MACHINE_KEYS):
+        return None
+    old, host, semantic = cfg.pop("embedding", None), cfg.pop("embedding_host", None), cfg.pop("semantic", None)
+    entries = [e for e in cfg.get("embedding_models") or [] if isinstance(e, dict)]
+    ran_on, entry = iirc_embed.DEFAULT_MODEL, None
+    name = str(old.get("model") or iirc_embed.DEFAULT_MODEL) if isinstance(old, dict) else iirc_embed.DEFAULT_MODEL
+    model = iirc_embed.model_named(name)
+    if isinstance(old, dict) and model is not None:
+        protocol = str(old.get("backend") or next(p for p, names in model.names.items() if name in names))
+        ran_on = model.id
+        if protocol in model.names:
+            where = {"openai": host_url(str(old["url"])) if old.get("url") else None, "onnx": CPU}.get(
+                protocol, host_url(str(host)) if host else LOCAL_OLLAMA)
+            if where:
+                entry = Entry(model.id, where, protocol, name if name in model.names[protocol] else model.names[protocol][0])
+    elif host or semantic is not False:
+        entry = Entry(iirc_embed.DEFAULT_MODEL, host_url(str(host)) if host else LOCAL_OLLAMA, "ollama", iirc_embed.DEFAULT_MODEL)
+    if entry and all((e.get("model"), e.get("host")) != (entry.model, entry.host) for e in entries):
+        entries.append(entry._asdict())
+    cfg.setdefault("search_mode", "string" if semantic is False else "semantic")
+    cfg["embedding_models"] = entries
+    write_config_file(cfg)
+    return ran_on
+
+
+def convert_repository(ran_on: str | None) -> list[str]:
+    """.claude/iirc.toml with a protocol's name turned into the model's id, an old table renamed or, when the model's own table exists,
+    commented out, and, when the machine was just converted, the model a repository that named none ran on. Edits lines."""
+    text, cfg = repository_settings()
+    if not text and not (ROOT / ".iirc").is_dir():
+        return []
+    notes, model = [], cfg.get("embedding_model")
+    new = text
+    if isinstance(model, str) and model not in iirc_embed.MODELS and iirc_embed.model_named(model):
+        new = set_top_level_text(new, "embedding_model", iirc_embed.model_named(model).id)
+        notes.append(f'{STORE_CONFIG}: embedding_model = "{iirc_embed.model_named(model).id}", was "{model}"')
+    elif model is None and ran_on:
+        new = set_top_level_text(new, "embedding_model", ran_on)
+        notes.append(f'{STORE_CONFIG}: embedding_model = "{ran_on}", the model this repository ran on (commit it)')
+    tables = cfg.get("suggestions") if isinstance(cfg.get("suggestions"), dict) else {}
+    lines, out, dropping = new.splitlines(), [], None
+    for line in lines:
+        table = table_of(line, "suggestions")
+        if table is not None or line.lstrip().startswith("["):
+            dropping = None
+        m = old_table_model(table) if table else None
+        if m:
+            target = iirc_embed.table_name(m.id)
+            if target in tables:
+                dropping = target
+                out.append(f"# {line.rstrip()}  # iirc doctor --fix: [{table_header(target)}] has its own")
+                notes.append(f"{STORE_CONFIG}: [{table_header(table)}] commented out; [{table_header(target)}] has its own")
+                continue
+            out.append(re.sub(r"^\s*\[[^\]]*\]", f"[{table_header(target)}]", line))
+            notes.append(f"{STORE_CONFIG}: [{table_header(table)}] is now [{table_header(target)}]")
+            continue
+        out.append(f"# {line}" if dropping and line.strip() and not line.lstrip().startswith("#") else line)
+    new = "\n".join(out) + "\n" if out else ""
+    if new != text:
+        write_checked_config(new, lambda c: c.get("embedding_model") in (None, *iirc_embed.MODELS), "embedding_model names no model", "doctor --fix")
+    return notes
+
+
+def convert_old_shape() -> list[str]:
+    """Convert the setup file, then this repository's .claude/iirc.toml; what changed, one line each."""
+    ran_on = convert_machine()
+    notes = [f"{config_file()}: converted to search_mode and embedding_models"] if ran_on else []
+    return notes + convert_repository(ran_on)
 
 
 # --- git ---------------------------------------------------------------------
@@ -3813,7 +3926,8 @@ def embed_refusal(base: str, name: str) -> tuple[str | None, int]:
 
 
 def doctor_ollama(entry: Entry, fix_it: bool, report) -> bool:
-    """The entry's ollama host answers and has its build; with --fix, start ollama here and pull the build. True when the host answers."""
+    """The entry's ollama host answers and has its build; with --fix, start ollama here, and pull the build on this machine's ollama only.
+    Another host gets the pull command: a pull there waits for the creator. True when the host answers."""
     base = entry.host
     up = host_answers(base)
     local = any(h in base for h in ("127.0.0.1", "localhost", "[::1]"))
@@ -3833,10 +3947,11 @@ def doctor_ollama(entry: Entry, fix_it: bool, report) -> bool:
                "or `iirc search-mode string` if no embedding model can run here")
     report(f"embedding host {base} answers (from this machine's list)", up, fix)
     has_model = up and model_present(base, entry.name)
-    if up and not has_model and fix_it and shutil.which("ollama"):
+    if up and not has_model and fix_it and base == LOCAL_OLLAMA and shutil.which("ollama"):
         env = dict(os.environ, OLLAMA_HOST=base)
         has_model = subprocess.run(["ollama", "pull", entry.name], env=env).returncode == 0
-    report(f"model {entry.name} present on {base}", has_model, f"OLLAMA_HOST={base} ollama pull {entry.name}")
+    report(f"model {entry.name} present on {base}", has_model,
+           pull_command(base, entry.name) + ("" if base == LOCAL_OLLAMA else ", with the creator's approval; doctor --fix pulls on this machine's ollama only"))
     return up
 
 
@@ -3852,6 +3967,14 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
     pin = read_pin()
     counts.setdefault("ahead", 0)
     counts.setdefault("pairs", [])
+    old = old_shape()
+    if old and fix_it:
+        for note in convert_old_shape():
+            print(f"iirc: {note}")
+        set_root(ROOT)
+        old = old_shape()
+    for line in old:
+        report(line, False, "iirc doctor --fix converts it")
     if CONFIG_ERROR and fix_it and knob_error_only():
         for note in fix_knobs():
             print(f"iirc: {STORE_CONFIG}: {note}")
@@ -3977,7 +4100,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         def emit(line: str) -> None:
             print(hook_output(hook, line))
         if CONFIG_ERROR:
-            fix = "iirc doctor --fix" if knob_error_only() else "iirc doctor"
+            fix = "iirc doctor --fix" if knob_error_only() or old_shape() else "iirc doctor"
             emit(f"iirc: hooks off, {CONFIG_ERROR}. Every iirc hook stays quiet until it is fixed; run `{fix}`.")
             return
         if old_layout():
@@ -4017,6 +4140,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         scan = time.monotonic() - scan_start
         top = ", ".join(f"{t} {c}" for t, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:4])
         parts = [f"iirc: {n} page{'' if n == 1 else 's'}, {mode}."] + pulled_notes
+        if old_shape():
+            parts.append("This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")
         if MODEL_SOURCE == FIRST_LISTED:
             # a hook never writes the repository's model; the first command that needs one does
             parts.append(f"This repository names no embedding model, so it uses {MODEL.id}, the first on this machine's list; "

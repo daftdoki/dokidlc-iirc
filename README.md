@@ -85,10 +85,11 @@ Once per machine, in Claude Code:
 ```
 
 Then open a session in a repository and say "set up iirc". The agent
-asks where the embedding model runs, and recommends qwen3-embedding when
-ollama answers, the CPU model otherwise. It then runs `iirc set-search-backend`,
+asks which embedding model to use and where it runs, and recommends
+qwen3-embedding-0.6b through ollama, the CPU model where ollama cannot run.
+It then runs `iirc add-embedding-model`, `iirc set-embedding-model`,
 `iirc init`, and `iirc doctor --fix`, which installs memoryfield-tool at
-the pinned commit and, for a local model on macOS, ollama and the model.
+the pinned commit and, for this machine's ollama on macOS, ollama and the model.
 You commit what it staged. [INSTALL.md](INSTALL.md) has every step as a command you
 run yourself, for a bootstrap script or a container.
 
@@ -167,8 +168,9 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 
 | Setting | Where | Changed by |
 |---|---|---|
-| embedding model | `.claude/iirc.toml`, `embedding_model`, where the repository installs iirc; else the machine default in `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc set-search-backend` again |
-| search mode and where the model runs | `~/.config/dokidlc-iirc/config.toml` | the same command |
+| embedding model, the same on every machine | `.claude/iirc.toml`, `embedding_model` | `iirc set-embedding-model MODEL` |
+| the models this machine can run and where each runs | `~/.config/dokidlc-iirc/config.toml`, `embedding_models` | `iirc add-embedding-model MODEL HOST`, `iirc remove-embedding-model` |
+| search mode | the same file, `search_mode` | `iirc search-mode semantic\|string` |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested-pages N` |
 | how close a page must be for the hook to suggest it, per model | `.claude/iirc.toml`, `[suggestions.MODEL-ID]` | `/iirc tune-suggestions`, on your yes; `/iirc show-suggestion-thresholds` prints them |
 

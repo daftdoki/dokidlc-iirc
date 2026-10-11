@@ -61,41 +61,58 @@ URL; the summary names those steps and the commands to run them later.
 ### Set up a machine
 
 Install the plugin once per machine ([README](../README.md)). Then open
-a session in a repository and say "set up iirc". The agent asks where
-embeddings come from, and offers five choices:
+a session in a repository and say "set up iirc". The agent asks two
+things: which embedding model this repository uses, and where it runs
+on this machine.
 
-| Choice | `iirc set-search-backend` flag | Needs |
+| Where it runs | `iirc add-embedding-model MODEL HOST` | Needs |
 |---|---|---|
-| ollama on this machine | `--local` | ollama here; doctor installs it on macOS |
-| ollama on another host | `--host URL` | ollama on that host |
-| an OpenAI-compatible host, such as vLLM serving qwen3-embedding | `--openai URL` | a server that answers `POST URL/v1/embeddings` |
-| this CPU, all-MiniLM-L6-v2 through onnxruntime | `--cpu` | about 90 MB of model files, which setup fetches; no ollama |
-| string search | `--substring` | nothing; it matches exact text only |
+| ollama on this machine | `local` | ollama here; doctor installs it on macOS |
+| ollama on another host | the host's URL | ollama there, with the model pulled |
+| an OpenAI-compatible host, such as vLLM serving qwen3-embedding | the base URL | a server that answers `POST URL/v1/embeddings` |
+| this CPU, all-MiniLM-L6-v2 through onnxruntime | `cpu` | about 90 MB of model files, which the command fetches; no ollama |
 
-With ollama, `--model` picks `qwen3-embedding:0.6b` (the default),
-`nomic-embed-text`, or `embeddinggemma`. The agent recommends ollama,
-here or on the host this machine already names, when one answers, and
-this CPU otherwise. String search is the last choice. The agent then
-runs `iirc set-search-backend`, `iirc init` if you want pages in this repository, then
-`iirc doctor --fix`, which installs memoryfield-tool and, for a local
-host on macOS, ollama and the model. You see doctor's report.
-[INSTALL.md](../INSTALL.md) has every step as a command.
+The models are `qwen3-embedding-0.6b`, `nomic-embed-text`,
+`embeddinggemma`, and `all-minilm-l6-v2`. A model has one name whatever
+serves it: qwen3 0.6B is `qwen3-embedding:0.6b-fp16` or
+`qwen3-embedding:0.6b` to ollama and `qwen3-embedding` to an
+OpenAI-compatible server, and one repository can use it through ollama
+on one machine and a server on another, with one threshold table. The
+agent recommends qwen3 through ollama, and the CPU model where ollama
+cannot run. `add-embedding-model` asks the host which protocol it
+speaks and which build it has, and refuses a host without the model; it
+never pulls one. It also compares the host's vector for a probe sentence
+with the plugin's reference: under 0.995 cosine it warns that the host
+serves another build, and another width it refuses.
 
-A machine set up before the model choice keeps nomic until setup runs
-again. A new model embeds every page again: the next `iirc rebuild-search-index` does
-it, or the first search that finds the pages missing starts it in the
-background.
+The agent then runs `iirc set-embedding-model MODEL`, which writes
+`embedding_model` to `.claude/iirc.toml` (commit it), `iirc init` if you
+want pages in this repository, then `iirc doctor --fix`, which installs
+memoryfield-tool and, for this machine's ollama on macOS, ollama and the
+model. You see doctor's report. String search, the fallback where no
+model can run, is `iirc search-mode string`. [INSTALL.md](../INSTALL.md)
+has every step as a command.
 
-The model can differ per repository; where it runs is per machine. In a
-repository whose `.claude/settings.json` or `.claude/settings.local.json`
-enables an `iirc@` plugin, `iirc set-search-backend` writes the model as
-`embedding_model` in `.claude/iirc.toml`, which you commit, and writes
-only where it runs (the ollama host, the OpenAI-compatible URL, or this
-CPU) to this machine's setup file. In any other repository it sets the
-machine default, which every repository without `embedding_model` uses.
-`--repository` and `--machine` choose the target in either case.
-`--substring` always sets the machine. After a switch, run
-`iirc rebuild-search-index`. `iirc doctor` names the model and where it is set.
+The model is the repository's and the same on every machine. Where it
+runs is the machine's: its list of models and hosts in
+`~/.config/dokidlc-iirc/config.toml`. A repository that names no model
+gets the first model on the machine's list, written to its
+`.claude/iirc.toml` by the first command that needs a model. When two
+listed hosts serve the model, a command on a terminal asks once which
+this machine uses; `iirc prefer-embedding-host MODEL HOST` changes it.
+When no listed host serves it, the session-start line says "this machine
+cannot serve MODEL", search matches strings, and the agent offers four
+ways out: add a host that serves it, pull it on an ollama host, switch
+the repository to a model a listed host serves, or switch to the CPU
+model. A switch embeds every page again, starts the thresholds at the
+new model's defaults, and stops counting tuning judgments made under the
+old model.
+
+A machine set up before this list has `semantic`, `embedding`, or
+`embedding_host` in its setup file; `iirc doctor` reports them, and
+`iirc doctor --fix` converts them once, with a repository's
+`embedding_model` that names a protocol's name such as
+`qwen3-embedding:0.6b`.
 
 ### Start iirc in a repository
 
@@ -171,7 +188,7 @@ similar pairs up to the model's near-duplicate distance:
 | Model | Duplicate: the line turns yellow | Near-duplicate: doctor notes it |
 |---|---|---|
 | `nomic-embed-text` | 0.07 | 0.10 |
-| `qwen3-embedding:0.6b`, `qwen3-embedding` | 0.12 | 0.17 |
+| `qwen3-embedding-0.6b` | 0.12 | 0.17 |
 | `embeddinggemma` | 0.10 | 0.14 |
 | `all-minilm-l6-v2` | 0.14 | 0.20 |
 
@@ -195,18 +212,19 @@ On another machine, `iirc doctor --fix` clones a missing remote store.
 
 ### Work without ollama
 
-Say "search on this CPU". The agent runs `iirc set-search-backend --cpu`, which
-fetches all-MiniLM-L6-v2 and runs it once, so onnxruntime installs then
-and not in a hook. Search still matches meaning. If onnxruntime has no
-wheel for this machine, setup says so and writes nothing.
+Say "search on this CPU". The agent runs
+`iirc add-embedding-model all-minilm-l6-v2 cpu`, which fetches
+all-MiniLM-L6-v2 and runs it once, so onnxruntime installs then and not
+in a hook, and then `iirc set-embedding-model all-minilm-l6-v2`. Search
+still matches meaning. If onnxruntime has no wheel for this machine, the
+command says so and writes nothing.
 
 Say "use string search" when nothing else can run. The agent runs
-`iirc set-search-backend --substring`. Search then matches exact text only, and the
+`iirc search-mode string`. Search then matches exact text only, and the
 agent searches for the words a page contains
 ([references/search.md](../skills/iirc/references/search.md)). The suggestion hook
 names a page only on a shared identifier, and the line under the prompt
-shows `[keyword] mode`. To go back, ask for `iirc set-search-backend` with another
-choice. If ollama is only down for a while, change nothing: iirc skips a
+shows `[keyword] mode`. To go back, ask for `iirc search-mode semantic`. If ollama is only down for a while, change nothing: iirc skips a
 host that does not answer a two-second probe and searches by string
 until it answers.
 
@@ -269,14 +287,15 @@ The `command.run` handler in
 | `/iirc reader`, `/iirc reader PAGE` | The reader, a pane with this session's suggested, written, and suspect pages, or open on one page. A click on a page name, here or anywhere iirc draws one, opens the page in the reader's page tab. See [UI.md](UI.md#the-reader). |
 | `/iirc show PAGE` | One page as a card in the transcript; your read, not the agent's. |
 | `/iirc audit-page-findability` | Goes to the skill: the agent lists the pages search shows badly and proposes each fix for your yes. See [Audit the pages](#audit-the-pages). |
-| `/iirc set-search-backend` | Goes to the skill: the agent asks which embedding model and where it runs, or substring search, then runs `iirc set-search-backend`. |
+| `/iirc set-embedding-model` | Goes to the skill: the agent asks which embedding model and where it runs, then runs `iirc add-embedding-model` and `iirc set-embedding-model`. |
+| `/iirc show-embedding-models`, `/iirc search-mode` | This machine's list of models and hosts, and its search mode. |
 | `/iirc tune-suggestions` | Goes to the skill: the agent runs `audit-page-findability` and proposes each page fix, judges the recorded sessions, evaluates the thresholds, and proposes page fixes and threshold changes, each for your yes. See [Tune the thresholds on evidence](#tune-the-thresholds-on-evidence). |
 
 The direct commands print what the `iirc` command prints. `doctor --fix`,
 `sync`, and `rebuild-search-index` may run for up to ten minutes; the rest stop after
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
-`add-remote-store`, `set-search-backend`, `init`, `write`, `delete`, `approve-page-check`,
+`add-remote-store`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`, `prefer-embedding-host`, `search-mode semantic|string`, `init`, `write`, `delete`, `approve-page-check`,
 `set-suggestion-threshold`, `find-suspect-pages --network`, and `verify --network`.
 
 ### The agent's commands
@@ -305,12 +324,11 @@ describes each one.
 
 | Setting | Where it lives | Default | Range or values | What it changes | When to turn it |
 |---|---|---|---|---|---|
-| `semantic` | `~/.config/dokidlc-iirc/config.toml`, this machine | `true` | `true`, `false` | Semantic and string search, or string search only. | Ask the agent to run `iirc set-search-backend` again; it writes the file. |
-| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); `url` for `openai` only | The machine's default model, for a repository with no `embedding_model`, and the OpenAI-compatible host's URL. | `iirc set-search-backend` writes it. |
-| `embedding_model` | `.claude/iirc.toml`, committed, so every clone | none, which means the machine's `[embedding]` `model` | a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); another name is a configuration error | Which model embeds this repository's pages and queries. It wins over the machine default. | `iirc set-search-backend` writes it where this repository enables iirc, or with `--repository`. |
-| `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc set-search-backend --host URL`. |
+| `search_mode` | `~/.config/dokidlc-iirc/config.toml`, this machine | `"semantic"` | `"semantic"`, `"string"` | Semantic and string search, or string search only. | `iirc search-mode string` where no embedding model can run. |
+| `embedding_models` | the same file | none | entries of `model`, `host` (a URL, or `cpu`), `protocol` (`ollama`, `openai`, `onnx`), and `name`, the build's name | The models this machine can run and where each runs. | `iirc add-embedding-model` and `iirc remove-embedding-model` write it. |
+| `embedding_preferred` | the same file | none | a model and one of its listed hosts | Which host serves a model when two listed hosts do. | `iirc prefer-embedding-host MODEL HOST`. |
+| `embedding_model` | `.claude/iirc.toml`, committed, so every clone | none, which means the first model on the machine's list, written by the first command that needs a model | a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); another name is a configuration error | Which model embeds this repository's pages and queries, on every machine. | `iirc set-embedding-model MODEL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one suggestion line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested-pages N`, when the row brings too much or too little. |
-| `OLLAMA_HOST` | the environment | unset | host or URL | The first host tried while search is semantic. `iirc set-search-backend --substring` wins over it. A host that does not answer loses to one that does. | Rarely. Prefer `iirc set-search-backend`, which warns when this is exported. |
 | `[suggestions.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune-suggestions` proposes a value, and the agent sets it with `iirc set-suggestion-threshold` on your yes. |
 | `[suggestions.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
 | `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
@@ -336,8 +354,9 @@ records are kept 90 days.
 ### Suggestion thresholds per model
 
 Each model has its own distance scale, so each has its own table in
-`.claude/iirc.toml`, named after the model with `:` changed to `-`. The
-hooks read the table of the active model (`embedding_model`, else the machine default); a threshold left out takes its
+`.claude/iirc.toml`, named after the model. Every build of a model reads
+the same table, whatever serves it. The hooks read the table of the
+repository's model (`embedding_model`); a threshold left out takes its
 default. `iirc show-suggestion-thresholds` prints the table name and the values in force.
 
 ```toml
@@ -354,13 +373,12 @@ both = 0.62
 | `nomic-embed-text` | 0.28 | 0.38 | 0.10 to 0.60 | 0.45 |
 | `qwen3-embedding-0.6b` | 0.40 | 0.60 | 0.10 to 0.90 | 0.90 |
 | `embeddinggemma` | 0.40 | 0.68 | 0.10 to 0.90 | 0.90 |
-| `qwen3-embedding` (OpenAI-compatible) | 0.40 | 0.60 | 0.10 to 0.90 | 0.90 |
 | `all-minilm-l6-v2` | 0.60 | 0.68 | 0.10 to 0.90 | 0.90 |
 
 The defaults come from a replay of judged prompts
-([SEARCH-QUALITY.md](SEARCH-QUALITY.md#results)). The OpenAI-compatible
-`qwen3-embedding` takes the ollama qwen3's values without a measurement
-of its own.
+([SEARCH-QUALITY.md](SEARCH-QUALITY.md#results)). qwen3's values were
+measured on its ollama build and hold for its OpenAI-compatible build,
+whose vectors measured at 0.9993 cosine or closer.
 
 ### How a bad value fails
 
@@ -376,7 +394,7 @@ change. `iirc doctor --fix` renames each `[recall.MODEL-ID]` table to
 `[suggestions.nomic-embed-text]`, the only model there was then, and comments out
 each bad threshold, with a note, so its default applies; a broken store table
 is yours to fix.
-Every other command except `set-search-backend`, `summarize-page-usage`,
+Every other command except `doctor`, the six embedding model and search mode commands, `summarize-page-usage`,
 `record-session-summary`, `summarize-session-usage`, and `max-suggested-pages` stops
 with the error.
 

@@ -31,7 +31,7 @@ claude --plugin-dir /path/to/dokidlc-iirc
 Outside a session:
 
 ```
-CLAUDE_PROJECT_DIR=/path/to/repo OLLAMA_HOST=127.0.0.1:11434 bin/iirc search "query"
+CLAUDE_PROJECT_DIR=/path/to/repo bin/iirc search "query"
 ```
 
 ## Search

@@ -1899,7 +1899,7 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     page = (repo / ".iirc" / "a-page.md").read_text()
     assert "`iirc read b.md`" in page and "`iirc doctor --fix`" in page and "memory as a word stays" in page
     assert "`iirc find-suspect-pages`" in page and "`iirc estimate-context-tokens`" in page   # renamed since the memory plugin
-    assert "`iirc read-matching-pages x`" in page and "`iirc approve-page-check p.md`" in page and "`iirc rebuild-search-index`" in page and "`iirc set-search-backend --local`" in page
+    assert "`iirc read-matching-pages x`" in page and "`iirc approve-page-check p.md`" in page and "`iirc rebuild-search-index`" in page and "`iirc add-embedding-model --local`" in page
     assert "`iirc show-page-stores`" in page and "`iirc summarize-page-usage`" in page and "`iirc suggest-pages`" in page and "`iirc remind-to-write`" in page
     for new in ("`iirc record-session-summary --hook`", "`iirc summarize-session-usage`", "`iirc record-command-success`", "`iirc suggest-pages --failure`",
                 "`iirc remind-to-write --at stop`", "`iirc remind-to-write --at compaction`", "`iirc show-compaction-instructions`",
@@ -5009,3 +5009,91 @@ def test_fingerprint_warns_and_refuses(tmp_path, monkeypatch, capsys):
         with pytest.raises(SystemExit):
             iirc.main(["add-embedding-model", "nomic-embed-text", url])
         assert "1024 wide" in capsys.readouterr().err and iirc.machine_models() == []
+
+
+def _doctor(argv, capsys):
+    with pytest.raises(SystemExit):
+        iirc.main(argv)
+    return capsys.readouterr().out
+
+
+def _doctor_ready(monkeypatch):
+    """doctor finds uv and memoryfield-tool at the pin without this machine's tools."""
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+
+
+def test_doctor_fix_converts_the_old_shape(tmp_path, monkeypatch, capsys):
+    """doctor reports the old settings and --fix converts them once: the machine's keys into the list and search_mode, and the
+    repository's protocol names into the model's id, its [suggestions] table with it."""
+    _project(tmp_path, monkeypatch)
+    _doctor_ready(monkeypatch)
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
+    path = iirc.config_file(); path.parent.mkdir(parents=True)
+    path.write_text('semantic = true\nembedding_host = "http://frame:11434"\nmax_suggested = 4\n'); iirc._CONFIG = None
+    toml = tmp_path / ".claude" / "iirc.toml"; toml.parent.mkdir()
+    toml.write_text('# the model\nembedding_model = "qwen3-embedding:0.6b"\n\n[suggestions.qwen3-embedding]  # tuned on neckbeard\nboth = 0.7\n')
+    iirc.set_root(tmp_path)
+    out = _doctor(["doctor"], capsys)
+    for old in ("embedding_host", "semantic", 'embedding_model = "qwen3-embedding:0.6b"', "[suggestions.qwen3-embedding]"):
+        assert re.search(rf"FAIL .*{re.escape(old)}.*\(iirc doctor --fix converts it\)", out), old
+    assert path.read_text() == 'semantic = true\nembedding_host = "http://frame:11434"\nmax_suggested = 4\n'   # doctor alone writes nothing
+    out = _doctor(["doctor", "--fix"], capsys)
+    assert iirc.read_config() == {"max_suggested": 4, "search_mode": "semantic",
+                                  "embedding_models": [_entry("nomic-embed-text", "http://frame:11434")]}
+    assert toml.read_text() == (f'# the model\nembedding_model = "{QWEN}"\n\n[suggestions."{QWEN}"]  # tuned on neckbeard\nboth = 0.7\n')
+    assert iirc.CONFIG_ERROR is None and iirc.RECALL["both"] == 0.7 and "old shape" not in _doctor(["doctor"], capsys)
+    # an OpenAI-compatible machine in string mode, and a repository that names no model: it gets the model it ran on
+    path.write_text('semantic = false\nembedding = {backend = "openai", model = "qwen3-embedding", url = "https://llm.example.net/v1"}\n'); iirc._CONFIG = None
+    toml.write_text('show_hooks = true\n\n[suggestions.qwen3-embedding]\nboth = 0.7\n\n[suggestions."qwen3-embedding-0.6b"]\nboth = 0.6\n')
+    iirc.set_root(tmp_path)
+    _doctor(["doctor", "--fix"], capsys)
+    assert iirc.read_config() == {"search_mode": "string", "embedding_models": [_entry(QWEN, "https://llm.example.net", "openai")]}
+    text = toml.read_text()
+    assert text.startswith(f'show_hooks = true\nembedding_model = "{QWEN}"\n') and tomllib.loads(text)["suggestions"] == {QWEN: {"both": 0.6}}
+    assert "# both = 0.7" in text                                       # the table that lost to the one already there stays, commented out
+    # an ollama table with no URL runs where embedding_host says, else on this machine's ollama
+    path.write_text('embedding = {backend = "ollama", model = "embeddinggemma"}\n'); iirc._CONFIG = None
+    toml.unlink(); iirc.set_root(tmp_path)
+    _doctor(["doctor", "--fix"], capsys)
+    assert iirc.read_config() == {"search_mode": "semantic", "embedding_models": [_entry("embeddinggemma", "http://127.0.0.1:11434")]}
+    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n'
+
+
+def test_no_reader_of_the_old_shape(tmp_path, monkeypatch, capsys):
+    """The old keys alone serve nothing: no host is asked, search matches strings, and doctor and the brief name the conversion.
+    Only the conversion reads embedding_host, and nothing reads OLLAMA_HOST."""
+    import ast
+    _project(tmp_path, monkeypatch)
+    _doctor_ready(monkeypatch)
+    monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: pytest.fail("the old keys named a host"))
+    _machine_config({"semantic": True, "embedding_host": "http://127.0.0.1:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+    assert iirc.machine_models() == [] and iirc.HOST_ENTRY is None and iirc.semantic_search("alpha") == []
+    capsys.readouterr()
+    assert "`iirc doctor --fix` converts" in _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
+    assert "FAIL" in _doctor(["doctor"], capsys) and "embedding_host" in iirc.config_file().read_text()
+    tree = ast.parse((ROOT / "bin" / "iirc").read_text())
+    readers = {f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+               for n in ast.walk(f) if isinstance(n, ast.Constant) and n.value in ("embedding_host", "OLLAMA_HOST")}
+    assert readers <= {"old_shape", "convert_machine", "tool_env"}, readers   # tool_env sets OLLAMA_HOST for the tool; it reads nothing
+    assert "os.environ.get(\"OLLAMA_HOST\")" not in (ROOT / "bin" / "iirc").read_text()
+
+
+def test_doctor_fix_pulls_only_on_the_local_host(tmp_path, monkeypatch, capsys):
+    """doctor --fix pulls a missing build on this machine's ollama only; for another host it prints the pull command and pulls nothing."""
+    _project(tmp_path, monkeypatch)
+    _doctor_ready(monkeypatch)
+    shims = tmp_path / "shims"; shims.mkdir(); calls = tmp_path / "calls.log"
+    (shims / "ollama").write_text(f'#!/bin/sh\necho "ollama $*" >> "{calls}"\n'); (shims / "ollama").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shims}:{os.environ['PATH']}")
+    with _fake_ollama(monkeypatch, "nomic-embed-text", tags=[], listed=False) as host:
+        _machine_config({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", host.url)]})
+        _repo_model(tmp_path, "nomic-embed-text")
+        out = _doctor(["doctor", "--fix"], capsys)
+        assert not calls.exists()
+        assert f"OLLAMA_HOST={host.url} ollama pull nomic-embed-text" in out and "approval" in out
+        monkeypatch.setattr(iirc, "LOCAL_OLLAMA", host.url)
+        _doctor(["doctor", "--fix"], capsys)
+        assert calls.read_text() == "ollama pull nomic-embed-text\n"
