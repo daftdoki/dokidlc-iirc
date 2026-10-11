@@ -236,7 +236,7 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     const why = line.split('. ')[0].replace(/^iirc: /, '')
     const warnings = MIGRATE_RE.test(line) ? [] : [why]
     const problems: Problem[] = [{ level: 'error', ...(fix ? { fix } : {}), why: reason(why) }]
-    return { status: { level: 'error', pages: null, mode: null, note, ...(fix ? { fix } : {}), problems }, warnings }
+    return { status: { level: 'error', pages: null, mode: null, note, problems }, warnings }
   }
   // semantic search also matches terms; without an embedding host it matches terms alone, and the parentheses name the command that helps
   const isHostDown = m[2].startsWith('string only')
@@ -245,7 +245,6 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     .split(/(?<=\.)\s+(?=[A-Z0-9])/)
     .map(s => s.trim())
     .filter(s => s && !BRIEF_QUIET.test(s))
-  const fix = isHostDown ? (/`(iirc [^`]+)`/.exec(m[2])?.[1] ?? 'iirc doctor') : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
   const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
   // each warning with the command that clears it; a warning that names no command, such as the start scan's, is the model's to raise: it draws no action
   const problems: Problem[] = warnings.flatMap(w => {
@@ -253,8 +252,8 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     return f ? [{ level: 'warn' as const, fix: f, why: reason(w) }] : []
   })
   // the parentheses say why search fell back to terms: the part before the command
-  if (isHostDown) problems.push({ level: 'warn', fix: fix!, why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
-  return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}), problems }, warnings }
+  if (isHostDown) problems.push({ level: 'warn', fix: /`(iirc [^`]+)`/.exec(m[2])?.[1] ?? 'iirc doctor', why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
+  return { status: { level, pages: Number(m[1]), mode, note: null, problems }, warnings }
 }
 
 /** The command that clears a warning: WARNING_FIX's, else the iirc command the sentence names in backticks or after "run". */
@@ -283,7 +282,7 @@ function reason(sentence: string): string {
 /** The brief's status, turned yellow by a problem this session found, such as a recall that ran past the hook's time limit. */
 export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
   const first = actions(s, c)[0]
-  return s.level === 'ok' && first ? { ...s, level: first.level, fix: first.fix } : s
+  return s.level === 'ok' && first ? { ...s, level: first.level } : s
 }
 
 /** One part of the summary line: its text and how it is drawn. */
@@ -974,34 +973,20 @@ export const register: Register = on => {
     const s = await read($, status)
     if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
-    const original = await next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column">
-        {original}
-        <Box key="iirc-line" flexDirection="row">
-          <Text color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>
-          {accentBar($, e)}
-          {statusParts(s, c).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>)}
-        </Box>
-      </Box>
-    )
+    const { Text } = $.ui.resolve(e)
+    return withRow($, e, await next(e), 'iirc-line', [
+      <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>,
+      accentBar($, e, 'bar'),
+      ...statusParts(s, c).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>),
+    ])
   })
 
   // Under the prompt, beside the engine's hint: a line only when the person needs to act.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const todo = actionParts(await read($, status), await read($, counts))
     if (todo.length === 0) return next(e)
-    const original = await next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column">
-        {original}
-        <Box key="iirc-todo" flexDirection="row">
-          {todo.map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>)}
-        </Box>
-      </Box>
-    )
+    const { Text } = $.ui.resolve(e)
+    return withRow($, e, await next(e), 'iirc-todo', todo.map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>))
   })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
@@ -1079,7 +1064,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   if (s) s = liveStatus(s, c)
   // the brief is as old as the session start; maintenance the CLI finds due since then turns the chip yellow
   const isHealthWarn = !!checkup && (checkup.due ?? []).length > 0
-  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: MAINTAIN }
+  const isDueSinceStart = !!s && s.level === 'ok' && isHealthWarn
+  if (s && isDueSinceStart) s = { ...s, level: 'warn' }
+  const fix = isDueSinceStart ? MAINTAIN : s ? actions(s, c)[0]?.fix : undefined
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
   // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
@@ -1108,8 +1095,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     <Box key="label" width={12} flexShrink={0}>{heading('STATUS')}</Box>,
     <Text key="chip" bold color="#0d1117" backgroundColor={tone}>{` ${chipText} `}</Text>,
   ]
-  if (s && level !== 'ok' && s.fix) {
-    statusRow.push(<Text key="fixlead" color="subtle">{'   fix with '}</Text>, <Text key="fix" bold color="claude">{s.fix}</Text>)
+  if (level !== 'ok' && fix) {
+    statusRow.push(<Text key="fixlead" color="subtle">{'   fix with '}</Text>, <Text key="fix" bold color="claude">{fix}</Text>)
   }
   if (s && s.mode && s.mode !== 'semantic+keyword') statusRow.push(<Text key="mode" color={LEVEL_COLOR.warn}>{`   ${s.mode} mode`}</Text>)
   const tiles: [string, string][] = s && s.pages !== null
@@ -1256,7 +1243,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     if (s && s.pages !== null) widths.push(2 + 'STORE'.length, 2 + String(s.pages).length, 2 + 'pages'.length)
     if (c.suggested > 0) widths.push(GAUGE_W, 2 + `${c.used} of ${c.suggested} suggested pages were read`.length, c.match.all !== null ? 2 + 'average match '.length + matchText(c.match).length : 0)
   } else if (view === 'status') {
-    const fixWidth = s && level !== 'ok' && s.fix ? '   fix with '.length + s.fix.length : 0
+    const fixWidth = level !== 'ok' && fix ? '   fix with '.length + fix.length : 0
     const modeWidth = s && s.mode && s.mode !== 'semantic+keyword' ? `   ${s.mode} mode`.length : 0
     widths.push(12 + chipText.length + 2 + fixWidth + modeWidth)
     if (tiles.length > 0) {
@@ -1481,10 +1468,21 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
   )
 }
 
+/** What the engine drew, with one row of iirc's under it. */
+function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, row: RenderChildren[]) {
+  const { Box } = $.ui.resolve(e)
+  return (
+    <Box flexDirection="column">
+      {original}
+      <Box key={key} flexDirection="row">{row}</Box>
+    </Box>
+  )
+}
+
 /** The accent bar that opens a section title and the summary line. */
-function accentBar($: EngineInterface, e: ResolveInput) {
+function accentBar($: EngineInterface, e: ResolveInput, key?: string) {
   const { Text } = $.ui.resolve(e)
-  return <Text color={TAGLINE_FROM}>▍</Text>
+  return <Text key={key} color={TAGLINE_FROM}>▍</Text>
 }
 
 /** A filled chip, as the card's STATUS: dark text on a color. */

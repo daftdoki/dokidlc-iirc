@@ -2,8 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { actionText, liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
-import type { SessionCounts } from '../types'
+import { actions, actionText, liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import type { IircStatus, SessionCounts } from '../types'
 
 const RECALL =
   'iirc: 2 pages may apply. Read a page whose summary bears on this task; skip the rest: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -67,6 +67,9 @@ function hintRow($: Engine) {
   })
 }
 
+// the command that clears a status's first problem, as the card and the line under the prompt name it
+const fixOf = (s: IircStatus) => actions(s, counts())[0]?.fix
+
 // a session's counts: none, except what the test names
 function counts(some: Partial<SessionCounts> = {}): SessionCounts {
   return { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0, ...some }
@@ -120,34 +123,37 @@ test('parses the recall line', () => {
 test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
-    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: '/iirc run-maintenance', problems: [{ level: 'warn', fix: '/iirc run-maintenance', why: 'maintenance is due (1 near-duplicate pair)' }] },
+    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, problems: [{ level: 'warn', fix: '/iirc run-maintenance', why: 'maintenance is due (1 near-duplicate pair)' }] },
     warnings: ['Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.'],
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc add-embedding-model MODEL HOST` with their answer.')!.status
   expect(setup.level).toBe('error')
   expect(statusText(setup, counts())).toBe('iirc')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!
-  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc doctor' })
+  expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword' })
+  expect(fixOf(down.status)).toBe('iirc doctor')
   // a model id may hold a dot; inside the parentheses it does not end the mode
   const unserved = parseBrief('iirc: 5 pages, string only (this machine cannot serve qwen3-embedding-0.6b; `iirc doctor` names the ways out). Topics: x 5.')!
-  expect(unserved.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc doctor' })
+  expect(unserved.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword' })
+  expect(fixOf(unserved.status)).toBe('iirc doctor')
   expect(unserved.warnings).toEqual([])
   const cpu = parseBrief('iirc: 5 pages, string only (all-minilm-l6-v2 model files missing; `iirc add-embedding-model all-minilm-l6-v2 cpu` to fix).')!
-  expect(cpu.status.fix).toBe('iirc add-embedding-model all-minilm-l6-v2 cpu')
+  expect(fixOf(cpu.status)).toBe('iirc add-embedding-model all-minilm-l6-v2 cpu')
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, counts())).toBe('iirc')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status.fix).toBe('/iirc run-maintenance')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 store changes not committed.')!.status.fix).toBe('/iirc run-maintenance')
+  expect(fixOf(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status)).toBe('/iirc run-maintenance')
+  expect(fixOf(parseBrief('iirc: 9 pages, semantic via h:1. 2 store changes not committed.')!.status)).toBe('/iirc run-maintenance')
   // setup errors keep doctor --fix, even when maintenance is due too
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. memoryfield-tool is not at the pin abc1234; every write refuses until `iirc doctor --fix` runs. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
+  expect(fixOf(parseBrief('iirc: 9 pages, semantic via h:1. memoryfield-tool is not at the pin abc1234; every write refuses until `iirc doctor --fix` runs. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance.')!.status)).toBe('iirc doctor --fix')
+  expect(fixOf(parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')!.status)).toBe('iirc doctor --fix')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   // a host with dots and a path: the mode ends at '. ', not at the first dot
   const dotted = parseBrief('iirc: 9 pages, semantic via llm.example.net/ollama. 2 store changes not committed.')!
-  expect(dotted.status).toMatchObject({ level: 'warn', pages: 9, mode: 'semantic+keyword', fix: '/iirc run-maintenance' })
+  expect(dotted.status).toMatchObject({ level: 'warn', pages: 9, mode: 'semantic+keyword' })
+  expect(fixOf(dotted.status)).toBe('/iirc run-maintenance')
   expect(dotted.warnings).toEqual(['2 store changes not committed.'])
   expect(parseBrief('iirc: 9 pages, semantic via llm.example.net/ollama.')!.status).toMatchObject({ level: 'ok', pages: 9, mode: 'semantic+keyword' })
-  expect(parseBrief("iirc: 9 pages, string only (this machine cannot serve nomic-embed-text; `iirc doctor` names the ways out). This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status.fix).toBe('iirc doctor')
+  expect(fixOf(parseBrief("iirc: 9 pages, string only (this machine cannot serve nomic-embed-text; `iirc doctor` names the ways out). This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status)).toBe('iirc doctor --fix')
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
   expect(statusText(one, counts({ reads: 3, writes: 1, suggested: 4, used: 2 }))).toBe('iirc ███░░ 2/4 suggested read · 3 read · 1 written · string search')
@@ -549,7 +555,7 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   expect(statusText(ok, c)).toBe('iirc ███░░ 1/2 suggested read · 1 read')
   const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. Maintenance is due (3 suggestion lookups timed out in the last 7 days and since the last run); run /iirc run-maintenance.')!
   expect(brief.status.level).toBe('warn')
-  expect(brief.status.fix).toBe('/iirc run-maintenance')
+  expect(fixOf(brief.status)).toBe('/iirc run-maintenance')
 })
 
 test('/iirc reader opens the Session tab; a page name opens the reader tab, a linked page replaces it, Back returns', async ($: Engine, on: On) => {
@@ -1171,7 +1177,7 @@ test('the line under the prompt: what to do and why, in the brief\'s words, the 
   const two = parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance. Persistence: .claude/settings.json does not exist.')!.status
   expect(actionText(two, counts({ timeouts: 1 }))).toBe('▲ Run iirc doctor --fix: persistence: .claude/settings.json does not exist, and 2 more')
   // a fix that is not a command is the instruction itself
-  expect(actionText({ level: 'error', pages: null, mode: null, note: 'needs a plugin update', fix: 'update the plugin', problems: [{ level: 'error', fix: 'update the plugin', why: 'this repository needs a newer iirc plugin' }] }, counts({ timeouts: 1 })))
+  expect(actionText({ level: 'error', pages: null, mode: null, note: 'needs a plugin update', problems: [{ level: 'error', fix: 'update the plugin', why: 'this repository needs a newer iirc plugin' }] }, counts({ timeouts: 1 })))
     .toBe('✖ Update the plugin: this repository needs a newer iirc plugin, and 1 more')
 })
 

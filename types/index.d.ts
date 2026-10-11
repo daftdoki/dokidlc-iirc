@@ -2,8 +2,8 @@
 export type RecalledPage = { name: string; summary: string; isSuspect: boolean; match?: string }
 
 /** What iirc said about one tool call: pages its error recalled, and commands it asked to have written up. */
-/** What the lines at the prompt show of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears the first problem, and `problems` each one the brief names, most severe first. */
-export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string; problems?: Problem[] }
+/** What the lines at the prompt show of the brief: green, yellow for a warning, red when iirc needs setup or migration; `problems` each one the brief names with a command, in its order (`actions` sorts them). */
+export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; problems?: Problem[] }
 
 /** One thing the person needs to do: the command that does it, if the brief names one, and why, in the brief's words. */
 export type Problem = { level: 'warn' | 'error'; fix?: string; why: string }
