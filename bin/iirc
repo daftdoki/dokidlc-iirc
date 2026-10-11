@@ -3700,25 +3700,27 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
         pinned = install_tool(pin) and pin_matches(pin, installed_rev())
     report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
 
-    model = active_model()
+    model, source = model_and_source()
     up = False   # embeddings work, so --fix can reindex
     if not config_file().is_file():
         # the creator has not chosen a backend; --fix must not install or pull for one they did not choose
         report("search backend chosen on this machine", False, "not set up; run iirc set-search-backend")
     elif not semantic_enabled():
         report("search mode: string, the fallback (iirc set-search-backend --local or --host URL switches to semantic)", True)
-    elif model.backend == "onnx":
-        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
-    elif model.backend == "openai":
-        base, source, up = resolve_host()
-        status = host_status(base)
-        why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
-        # the host's width, not the table's: it may serve another size of the model under this name
-        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
-                    up and why is None,
-                    (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
     else:
-        up = doctor_ollama(model, fix_it, report)
+        report(f"embedding model {model.id}, set in {source}", True)
+        if model.backend == "onnx":
+            up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
+        elif model.backend == "openai":
+            base, source, up = resolve_host()
+            status = host_status(base)
+            why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
+            # the host's width, not the table's: it may serve another size of the model under this name
+            up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
+                        up and why is None,
+                        (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
+        else:
+            up = doctor_ollama(model, fix_it, report)
 
     for store in STORES:
         if store.kind == "remote" and not store.dir.is_dir() and fix_it:

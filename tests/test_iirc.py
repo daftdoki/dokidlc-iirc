@@ -4796,3 +4796,23 @@ def test_audit_hub_skips_other_models_rows(tmp_path, monkeypatch, capsys):
                         **({"model": model} if model else {})} for i in range(6)])
         iirc.main(["audit-page-findability", "hub.md"])
         assert ("hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2" in capsys.readouterr().out) is hub, model
+
+
+def test_doctor_names_the_model_and_its_source(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    _page(field, "a.md")
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+    for toml, says in (("", f"embedding model nomic-embed-text, set in the machine default in {iirc.config_file()}"),
+                       ('embedding_model = "qwen3-embedding:0.6b"\n', "embedding model qwen3-embedding:0.6b, set in this repository's .claude/iirc.toml")):
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        (tmp_path / ".claude" / "iirc.toml").write_text(toml)
+        iirc._RESOLVED = None
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        assert f"ok  {says}" in capsys.readouterr().out
+    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
