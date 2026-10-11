@@ -288,27 +288,25 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
 
-const LINE_CELLS = 5
-
 /**
- * The summary line above the prompt, after its circle and accent bar: the name, then what this session did.
- * A counter at zero is left out, the gauge with nothing suggested, and the page count once the session
+ * The summary line above the prompt, after its circle and accent bar: "iirc status", then what this session did.
+ * A counter at zero is left out, the suggested pages read with nothing suggested, and the page count once the session
  * suggested, searched, read, or wrote anything. Problems go to the line under the prompt, not here.
  */
 export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
-  const out: LinePart[] = [{ text: 'iirc', bold: true, color: 'claude' }]
+  const out: LinePart[] = [{ text: 'iirc status', bold: true, color: 'claude' }]
   const num = (text: string): LinePart => ({ text, bold: true, color: 'claude' })
   const word = (text: string): LinePart => ({ text, color: 'subtle' })
   const items: LinePart[][] = []
   const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
   if (s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
-  if (c.suggested > 0) items.push([...gaugeCells(c.used, c.suggested, LINE_CELLS), { text: ' ' }, num(`${c.used}/${c.suggested}`), word(' suggested read')])
+  if (c.suggested > 0) items.push([num(`${c.used}/${c.suggested}`), word(' suggested read')])
   for (const [n, label] of [[c.searches, 'searched'], [c.reads, 'read'], [c.writes, 'written']] as const) {
     if (n > 0) items.push([num(String(n)), word(` ${label}`)])
   }
   // the mode shows only when it is not the default, so a weaker search stands out
   if (s.mode && s.mode !== 'semantic+keyword') items.push([{ text: 'string search', color: 'warning' }])
-  items.forEach((item, k) => out.push(k === 0 ? { text: ' ' } : word(' · '), ...item))
+  items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(' · '), ...item))
   return out
 }
 
@@ -421,7 +419,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   // the engine puts the plugin's name in front of a command's text
   const c = await read($, counts)
   const todo = actionText(s, c)
-  const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc\s*/, ''), todo].filter(Boolean).join('\n')
+  const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
   if (view === 'status') {

@@ -106,7 +106,7 @@ names the fixing command only when something needs doing:
 
 ```
 [+] iirc: [3] pages suggested
-● ▍iirc ██░░░ 2/5 suggested read · 4 searched · 3 read · 1 written
+● ▍iirc status  2/5 suggested read · 4 searched · 3 read · 1 written
 ```
 
 Run `/iirc run-maintenance` about once a week while you use iirc; iirc
