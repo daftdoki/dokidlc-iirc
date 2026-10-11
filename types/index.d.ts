@@ -11,6 +11,9 @@ export type Problem = { level: 'warn' | 'error'; fix?: string; why: string }
 /** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `searches` counts its own `iirc search` and `iirc read-matching-pages` runs; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
 export type SessionCounts = { reads: number; writes: number; searches: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number }
 
+/** Counters that rose a moment ago, by SessionCounts key: how much, and which rise lit it, so its timer puts out only its own. */
+export type Flash = Partial<Record<'suggested' | 'used' | 'searches' | 'reads' | 'writes', { by: number; gen: number }>>
+
 /** The average match percentage of this session's suggestions: all of them, the ones read, and the ones not read; null with none. */
 export type MatchAverages = { all: number | null; read: number | null; unread: number | null }
 
@@ -74,6 +77,10 @@ declare module 'claude-code' {
       demoSession: SessionView | null
       /** `iirc max-suggested-pages` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
+      /** Counters that rose a moment ago, which the band lights up until a timer puts each out. */
+      flash: Flash
+      /** Whether this session's counts loaded once: the first load rises from nothing and lights nothing. */
+      countsLoaded: boolean
       /** Whether this compaction window asked `iirc remind-to-write --at compaction` already. */
       compactAsked: boolean
       /** The line `iirc remind-to-write --at compaction` printed, waiting for the next tool result or prompt. */

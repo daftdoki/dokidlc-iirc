@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { Cursor, IircHealth, IircStatus, MatchAverages, Problem, Reader, RecalledPage, SessionCounts, SessionPages, SessionView, ShownPage, ToolNote } from '../types'
+import type { Cursor, Flash, IircHealth, IircStatus, MatchAverages, Problem, Reader, RecalledPage, SessionCounts, SessionPages, SessionView, ShownPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -52,6 +52,11 @@ const COMPACT_NEAR = 0.9
 const compactAsked = atom({ plugin: 'iirc', key: 'compactAsked' } as const, false)
 const compactNudge = atom({ plugin: 'iirc', key: 'compactNudge' } as const, null)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
+// counters that rose a moment ago, for the band to light up, and whether this session's counts loaded once,
+// so the first load, which rises from nothing, lights nothing
+const flash = atom({ plugin: 'iirc', key: 'flash' } as const, {} as Flash)
+const countsLoaded = atom({ plugin: 'iirc', key: 'countsLoaded' } as const, false)
+let flashGen = 0
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears on this task; skip the rest: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -290,6 +295,8 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
 const BAND_DIVIDER = ' │ '
 // "iirc status" along the card's gradient, letter by letter; false draws it in the claude color
 const BAND_GRADIENT = true
+// how long a counter that rose stays lit with its +N, in milliseconds; 0 lights nothing
+const BAND_FLASH_MS = 4000
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
@@ -299,18 +306,23 @@ type LinePart = { text: string; color?: string; bold?: boolean }
  * A counter at zero is left out, the suggested pages read with nothing suggested, and the page count once the session
  * suggested, searched, read, or wrote anything. Problems go to the line under the prompt, not here.
  */
-export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
+export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}): LinePart[] {
   const out: LinePart[] = BAND_GRADIENT
     ? gradient('iirc status').map(p => ({ ...p, bold: true }))
     : [{ text: 'iirc status', bold: true, color: 'claude' }]
   const num = (text: string): LinePart => ({ text, bold: true, color: 'claude' })
+  // a counter that rose a moment ago: its number bright, and how much it rose, dim
+  const count = (key: keyof SessionCounts & keyof Flash): LinePart[] => {
+    const rose = lit[key]
+    return rose ? [{ text: String(c[key]), bold: true, color: 'text' }, { text: ` +${rose.by}`, color: 'subtle' }] : [num(String(c[key]))]
+  }
   const word = (text: string): LinePart => ({ text, color: 'subtle' })
   const items: LinePart[][] = []
   const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
   if (s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
-  if (c.suggested > 0) items.push([num(`${c.used}/${c.suggested}`), word(' suggested read')])
-  for (const [n, label] of [[c.searches, 'searched'], [c.reads, 'read'], [c.writes, 'written']] as const) {
-    if (n > 0) items.push([num(String(n)), word(` ${label}`)])
+  if (c.suggested > 0) items.push([...count('used'), num('/'), ...count('suggested'), word(' suggested read')])
+  for (const [key, label] of [['searches', 'searched'], ['reads', 'read'], ['writes', 'written']] as const) {
+    if (c[key] > 0) items.push([...count(key), word(` ${label}`)])
   }
   // the mode shows only when it is not the default, so a weaker search stands out
   if (s.mode && s.mode !== 'semantic+keyword') items.push([{ text: 'string search', color: 'warning' }])
@@ -682,7 +694,22 @@ async function loadCounts($: EngineInterface) {
       await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
       const searches = typeof got.searches === 'number' ? got.searches : 0
-      await update($, counts, () => ({ reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
+      const next = { reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts }
+      const before = await read($, counts)
+      await update($, counts, () => next)
+      if ((await read($, countsLoaded)) && BAND_FLASH_MS > 0) await lightRises($, before, next)
+      await update($, countsLoaded, () => true)
+}
+
+/** Light each counter that rose, and put it out after BAND_FLASH_MS; a later rise of the same counter keeps it lit for its own time. */
+async function lightRises($: EngineInterface, before: SessionCounts, after: SessionCounts) {
+  const gen = ++flashGen
+  const rose = (['suggested', 'used', 'searches', 'reads', 'writes'] as const).filter(k => after[k] > before[k])
+  if (rose.length === 0) return
+  await update($, flash, f => ({ ...f, ...Object.fromEntries(rose.map(k => [k, { by: after[k] - before[k], gen }])) }))
+  $.clock.after(BAND_FLASH_MS, () => {
+    void update($, flash, f => Object.fromEntries(Object.entries(f).filter(([, v]) => v?.gen !== gen))).catch(() => {})
+  })
 }
 
 /** Ask iirc which pages are suspect and what each store holds back, for the card. */
@@ -983,7 +1010,7 @@ export const register: Register = on => {
     return withRow($, e, await next(e), 'iirc-line', [
       <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>,
       accentBar($, e, 'bar'),
-      ...statusParts(s, c).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>),
+      ...statusParts(s, c, await read($, flash)).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>),
     ])
   })
 

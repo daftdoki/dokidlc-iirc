@@ -1091,7 +1091,7 @@ const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text
     usage: { read: ['a.md', 'b.md', 'c.md'], written: ['w.md'], suggested: ['a.md', 'b.md', 'x.md', 'y.md', 'z.md'], used: ['a.md', 'b.md'], searches: 4, timeouts: 0 },
     text: 'iirc status  2/5 suggested read │ 4 searched │ 3 read │ 1 written',
     drawn: [
-      ...head('success'), SP, num('2/5'), word(' suggested read'), DOT, num('4'), word(' searched'), DOT, num('3'), word(' read'), DOT, num('1'), word(' written'),
+      ...head('success'), SP, num('2'), num('/'), num('5'), word(' suggested read'), DOT, num('4'), word(' searched'), DOT, num('3'), word(' read'), DOT, num('1'), word(' written'),
     ],
     todo: '',
   },
@@ -1126,6 +1126,33 @@ for (const ex of LINE_EXAMPLES) {
     expect(await hint.find({ text: 'engine row' })).toBeDefined()
   })
 }
+
+test('a counter that rises lights up with its +N for four seconds, then settles; the first count lights nothing', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  let usage: Record<string, unknown> = { read: ['a.md'], written: [], suggested: [], used: [], searches: 1 }
+  on('session.id', () => ({ value: 's1' }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => (e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ missed: [], match: {}, gone: [], timeouts: 0, ...usage })) : ran(OK_BRIEF)))
+  await hookRow($, 'SessionStart', OK_BRIEF, 'hf1')
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'tf1' })
+  await clock.settle()
+  expect(await waitFor($, 'iirc status  1 searched │ 1 read')).toBe(true)
+  usage = { read: ['a.md', 'b.md', 'c.md'], written: [], suggested: [], used: [], searches: 1 }
+  await $.tool.call({ tool: 'Bash', command: 'iirc read b.md c.md', tool_use_id: 'tf2' })
+  await clock.settle()
+  expect(await waitFor($, '1 searched │ 3 +2 read')).toBe(true)
+  const lit = parts(await (await bandRow($)).find({ key: 'iirc-line' }))
+  expect(lit).toContainEqual(['3', { bold: true, color: 'text' }])
+  expect(lit).toContainEqual([' +2', { color: 'subtle' }])
+  expect(lit).toContainEqual(['1', { bold: true, color: 'claude' }])          // searched did not rise
+  await clock.advance(3900)
+  expect(await (await bandRow($)).find({ text: '+2' })).toBeDefined()
+  await clock.advance(200)
+  expect(await waitFor($, '1 searched │ 3 read')).toBe(true)
+  expect(await (await bandRow($)).find({ text: '+2' })).toBeUndefined()
+})
 
 test('the band\'s wordmark runs from the accent orange to violet, letter by letter', () => {
   expect(WORDMARK[0][1].color).toBe('#e8875f')
