@@ -219,9 +219,17 @@ age. `find-suspect-pages` also runs each page's `--check` command and marks fail
 - Run `iirc find-suspect-pages` when the session-start line names a suspect, after a
   `git pull` or `iirc sync`, and before you close a quest stage. A page
   another project wrote is not checked here; `find-suspect-pages` counts them.
-- A `--check` must be read-only and must pass when you write it; the
-  wrapper refuses one that does not. Checks run only from `find-suspect-pages`,
-  `verify`, and `approve-page-check`, never from hooks.
+- A `--check` reads local state: files, git history, installed commands.
+  It must be read-only, must stay off the network, and must pass when you
+  write it; the wrapper refuses one that does not. Off the network means
+  no curl, wget, gh, `git fetch|pull|push|clone|ls-remote`, ssh, scp,
+  rsync to a host, nc, ncat, or http. The wrapper cannot see inside a
+  script the check calls, so call only a script that stays local.
+  Checks run only from `find-suspect-pages`, `verify`, `approve-page-check`,
+  and `write`, never from hooks.
+- A page whose check contacts the network: `find-suspect-pages` lists it
+  as suspect without running the check, and `verify` refuses it. Rewrite
+  the page with a local check.
 - A check that came with a clone is not approved on this machine.
   `find-suspect-pages` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run

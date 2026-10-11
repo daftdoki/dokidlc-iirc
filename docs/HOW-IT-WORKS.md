@@ -344,7 +344,7 @@ summary: Why the wrapper probes the host with a two-second timeout
 topics: [ollama, memoryfield-tool]
 kind: finding
 refs: [docs/research.md@61b6f00]
-check: curl -s localhost:11434 >/dev/null
+check: command -v ollama >/dev/null
 verified: '2026-09-04T22:42:52Z'
 ---
 The tool hangs about 75 seconds on a host that goes silent.
@@ -361,7 +361,7 @@ The tool hangs about 75 seconds on a host that goes silent.
 | `topics` | One or two tags. `iirc show-page-topics` counts them. |
 | `kind` | `environment`, `procedure`, `finding`, or `decision`. |
 | `refs` | Files the page cites, each at a commit, or URLs. See [Sources](#sources). |
-| `check` | A read-only command. If it fails, the page becomes suspect. |
+| `check` | A read-only command that reads local state and contacts no host. If it fails, the page becomes suspect. |
 | `verified` | When the agent last confirmed the page. |
 
 The kind sets an age: 30 days for `environment`, 90 for `procedure`, 180
@@ -372,7 +372,17 @@ wrong.
 
 A check written on this machine is approved when it is written. A check
 that arrived with a clone runs only after the agent asks you and runs
-`iirc approve-page-check`. The guard refuses a raw read of a remote store's pages by
+`iirc approve-page-check`.
+
+A check may not contact the network. `iirc write` refuses a check that
+calls curl, wget, gh, `git fetch`, `pull`, `push`, `clone`, or
+`ls-remote`, ssh, scp, rsync to a host, nc, ncat, or http as a command.
+`find-suspect-pages` lists an existing page with such a check as suspect
+and does not run the check; `verify` refuses the page. The match is on
+the check's own command line. iirc does not read a script the check
+calls, so a script that reaches a host is the author's call to avoid.
+
+The guard refuses a raw read of a remote store's pages by
 path pattern, which is a convention, not a boundary.
 
 Two pages that read as duplicates make search name the wrong one.

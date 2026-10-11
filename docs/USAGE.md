@@ -126,7 +126,9 @@ also writes at [the skill's moments](../skills/iirc/SKILL.md#when-to-write).
 Ask: "What in iirc might be out of date?" The agent runs `iirc find-suspect-pages`.
 It lists the pages with evidence against them, strongest first. A page
 is suspect when a file it cites changed since it cited it, or when its
-check command now fails. For each one, the agent reads the page and
+check command now fails. A check that contacts the network, such as
+`curl` or `gh api`, makes the page suspect without running; rewrite it
+with a check that reads local state. For each one, the agent reads the page and
 the diff, then verifies, rewrites, or deletes the page in the same turn.
 `/iirc find-suspect-pages` prints the same list, and `/iirc find-suspect-pages --all` adds the
 clean pages. Ask for a doubt pass after a `git pull`. `/iirc run-maintenance`

@@ -4239,3 +4239,72 @@ def test_memoryfield_tool_never_reaches_ollama(tmp_path, monkeypatch):
         iirc.tool(verb, "page.md", root=tmp_path, field="f")
     assert [argv[1] for argv, _ in runs] == ["write", "delete", "index"]
     assert all(env["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST for _, env in runs)
+
+
+NETWORK_CHECKS = ("curl -sfIL https://example.com", "scripts/x && curl -s localhost:11434", "wget -q https://x", "gh api repos/a/b",
+                  "true; gh release list", "test -n \"$(gh auth status)\"", "git fetch origin", "git -C sub pull",
+                  "git push", "git clone https://x", "git ls-remote origin", "ssh host true", "scp host:f .",
+                  "rsync -a host:/srv/x .", "rsync -a ./x rsync://h/m", "echo hi | nc host 80", "ncat -z host 22",
+                  "http GET https://x", "https example.com", "timeout 5 curl x", "env A=1 wget x", "/usr/bin/curl x",
+                  "if curl -s x; then true; fi", "sudo ssh h")
+LOCAL_CHECKS = ("command -v curl >/dev/null", "command -v gh", "which gh", "grep -q curl README.md", "git log -1 gh-pages",
+                "git status --porcelain", "test -f scripts/fetch", "ls ~/.ssh", "rsync --version", "grep -q 'git fetch' Makefile",
+                "test -x /usr/bin/curl-config", "git remote -v")
+
+
+def test_network_check_re_matches_commands_not_names():
+    for bad in NETWORK_CHECKS:
+        assert iirc.NETWORK_CHECK_RE.search(bad), bad
+    for good in LOCAL_CHECKS:
+        assert not iirc.NETWORK_CHECK_RE.search(good), good
+
+
+def test_validate_check_refuses_a_check_that_contacts_the_network(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); iirc.set_root(tmp_path)
+    marker = tmp_path / "ran"
+    with pytest.raises(SystemExit):
+        iirc.validate_check(f"gh api x; touch {marker}")
+    err = capsys.readouterr().err
+    assert "contact the network" in err and "local state" in err and not marker.exists()
+    assert iirc.approved_checks() == {}
+
+
+def _network_page(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    field = tmp_path / ".iirc"; field.mkdir(); iirc.set_root(tmp_path)
+    marker = tmp_path / "ran"
+    cmd = f"curl -sfIL https://example.com; touch {marker}"
+    (field / "net.md").write_text(f"---\ntitle: N\nsummary: n\nkind: finding\ncheck: {cmd}\n---\nx\n")
+    iirc.approve_check(cmd, "net.md")            # approved before this rule existed
+    return field, marker
+
+
+def test_find_suspect_pages_lists_a_network_check_without_running_it(tmp_path, monkeypatch, capsys):
+    field, marker = _network_page(tmp_path, monkeypatch)
+    iirc.main(["find-suspect-pages"])
+    out = capsys.readouterr().out
+    assert "net.md" in out and "suspect: its check contacts the network; rewrite it with a local check" in out
+    assert not marker.exists()
+
+
+def test_verify_refuses_a_network_check(tmp_path, monkeypatch, capsys):
+    field, marker = _network_page(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "tool", lambda *a, **k: type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+    with pytest.raises(SystemExit):
+        iirc.main(["verify", "net.md"])
+    assert "its check contacts the network; rewrite it with a local check" in capsys.readouterr().err
+    assert not marker.exists()
+
+
+def test_write_refuses_a_network_check(tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    field = tmp_path / ".iirc"; field.mkdir(); iirc.set_root(tmp_path)
+    monkeypatch.setattr(iirc, "tool", _fake_tool(field)); monkeypatch.setattr(iirc, "reindex", lambda **k: None)
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    with pytest.raises(SystemExit):
+        iirc.main(["write", "up.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding",
+                   "--check", "scripts/upstream check && gh api repos/a/b"])
+    assert "contact the network" in capsys.readouterr().err and not (field / "up.md").exists()
