@@ -306,12 +306,7 @@ export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
   const items: LinePart[][] = []
   const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
   if (s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
-  if (c.suggested > 0) {
-    const filled = Math.round((c.used / c.suggested) * LINE_CELLS)
-    // each filled cell takes the gradient color of its position, as the card's gauge does
-    const cells = Array.from({ length: LINE_CELLS }, (_, k): LinePart => (k < filled ? { text: '█', color: gaugeColor(k / (LINE_CELLS - 1)) } : { text: '░', color: 'inactive' }))
-    items.push([...cells, { text: ' ' }, num(`${c.used}/${c.suggested}`), word(' suggested read')])
-  }
+  if (c.suggested > 0) items.push([...gaugeCells(c.used, c.suggested, LINE_CELLS), { text: ' ' }, num(`${c.used}/${c.suggested}`), word(' suggested read')])
   for (const [n, label] of [[c.searches, 'searched'], [c.reads, 'read'], [c.writes, 'written']] as const) {
     if (n > 0) items.push([num(String(n)), word(` ${label}`)])
   }
@@ -1050,6 +1045,12 @@ export const register: Register = on => {
 
 }
 
+/** A gauge of `used` out of `total` in `width` cells: each filled cell takes the gradient color of its position, so a fuller bar runs from red into green. */
+function gaugeCells(used: number, total: number, width: number): LinePart[] {
+  const filled = total > 0 ? Math.round((used / total) * width) : 0
+  return Array.from({ length: width }, (_, k) => (k < filled ? { text: '█', color: gaugeColor(k / (width - 1)) } : { text: '░', color: 'inactive' }))
+}
+
 /** The gauge color at position t, 0 to 1: red to amber to green. */
 function gaugeColor(t: number): string {
   return t < 0.5 ? mix(GAUGE[0], GAUGE[1], t * 2) : mix(GAUGE[1], GAUGE[2], (t - 0.5) * 2)
@@ -1106,13 +1107,9 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
     : []
   const share = c.suggested > 0 ? c.used / c.suggested : 0
-  const filled = Math.round(share * BAR)
   const pct = Math.round(share * 100)
   const band = pct >= 50 ? GAUGE[2] : pct >= 25 ? GAUGE[1] : GAUGE[0]
-  // each cell takes the gradient color of its position, so a fuller bar runs from red into green
-  const cells = Array.from({ length: BAR }, (_, k) =>
-    k < filled ? <Text key={k} color={gaugeColor(k / (BAR - 1))}>█</Text> : <Text key={k} color="inactive">░</Text>,
-  )
+  const cells = gaugeCells(c.used, c.suggested, BAR).map((p, k) => <Text key={k} color={p.color}>{p.text}</Text>)
   // command first, in the same column as the MAINTENANCE and LOOK UP rows
   const setting = (label: string, value: string, command: string) => (
     <Box key={label} flexDirection="row" paddingLeft={2}>
