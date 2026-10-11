@@ -233,6 +233,7 @@ The `command.run` handler in
 | `/iirc status` | Every number: the status chip, TRUST (suspect pages), each store's uncommitted and unpushed state, the session counts, the hit rate, and SUGGESTED, NOT READ. It runs `iirc doctor --health` first. |
 | `/iirc help` | The three settings with their current values, then the maintenance and look-up commands. |
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
+| `/iirc demo doctor` | The doctor card from sample checks; it does not run doctor. |
 | `/iirc summary-line-visibility` | Whether the line under the prompt is on or off. |
 | `/iirc summary-line-visibility on`, `/iirc summary-line-visibility off` | Shows or hides that line, on this machine. |
 | `/iirc max-suggested-pages` | How many pages a suggestion line names at most. |

@@ -99,6 +99,7 @@ const DEMO_HEALTH: IircHealth = {
 }
 // `/iirc demo doctor`: doctor's own lines for a sample machine, 13 checks with one failure and one note,
 // so a screenshot shows every part of the card and none of the capturing machine's own failures
+const DEMO_DOCTOR_RE = /^demo\s+doctor$/
 const DEMO_DOCTOR = [
   'ok  .claude/iirc.toml loads, so the hooks run',
   'ok  suggest-pages finished inside the hook\'s 3 s limit in the last 7 days',
@@ -754,7 +755,7 @@ export const register: Register = on => {
     // the card with sample numbers, for a screenshot that shows the design rather than one session
     if (/^demo(\s+status)?$/.test(e.args.trim())) return { text: 'the /iirc card with sample numbers' }
     // the doctor card with sample checks; the text is doctor's lines, which the card parses as it parses doctor's
-    if (e.args.trim() === 'demo doctor') return { text: DEMO_DOCTOR }
+    if (DEMO_DOCTOR_RE.test(e.args.trim())) return { text: DEMO_DOCTOR }
     const direct = DIRECT_RE.exec(e.args.trim())
     if (direct) return { text: await runDirect($, direct[1]) }
     const maxArgs = MAX_SUGGESTED_ARGS_RE.exec(e.args)
@@ -788,8 +789,8 @@ export const register: Register = on => {
       const page = pages[name] ?? pages[`${name}.md`]
       return page ? drawPageCard($, e, page) : next(e)
     }
-    if (isIirc && !e.props.isErrored && (args === 'doctor' || args === 'doctor --fix' || args === 'demo doctor')) {
-      const report = parseDoctor(args === 'demo doctor' ? DEMO_DOCTOR : e.props.text)
+    if (isIirc && !e.props.isErrored && (args === 'doctor' || args === 'doctor --fix' || DEMO_DOCTOR_RE.test(args))) {
+      const report = parseDoctor(e.props.text)
       return report ? drawDoctor($, e, report, args === 'doctor --fix') : next(e)
     }
     if (!isIirc || !['', 'status', 'help', 'demo', 'demo status'].includes(args) || e.props.isErrored) return next(e)

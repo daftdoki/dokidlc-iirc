@@ -920,7 +920,14 @@ test('/iirc demo doctor draws the doctor card from sample checks and never runs 
   })
   expect(await card.find({ text: ' ✖ 1 of 13 failed ' })).toBeDefined()
   expect(await card.find({ text: 'NOTES' })).toBeDefined()
-  expect(await card.find({ text: 'a real failure on this machine' })).toBeUndefined()
+  expect(await card.find({ text: 'a real failure on this machine' })).toBeUndefined()  // spaced as /iirc demo  status may be
+  const spaced = (await $.command.run({ command: 'iirc', args: 'demo  doctor' })).text
+  expect(spaced).toBe(text)
+  const spacedCard = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'demo-doctor-spaced',
+    props: { command: 'iirc', args: 'demo  doctor', text: spaced, isErrored: false },
+  })
+  expect(await spacedCard.find({ text: ' ✖ 1 of 13 failed ' })).toBeDefined()
 })
 
 // a session with real numbers and twelve page names for the demo, for the tests of how the demo ends
