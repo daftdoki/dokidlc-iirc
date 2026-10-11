@@ -70,7 +70,8 @@ const WARNING_FIX: [RegExp, string][] = [
   [/not committed/, MAINTAIN],
 ]
 // sentences of the brief that are instructions to the model, not news for the person
-const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
+// "Pulled N pages" is news: the pull worked
+const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted|Pulled \d+ pages?)/
 // commands that change the page count or the setup the brief reports, and commands that read, write, or search pages (read also matches read-matching-pages)
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-embedding-model|add-embedding-model|remove-embedding-model|prefer-embedding-host|search-mode|init|doctor|run-maintenance)\b/
 const COUNTS_RE = /\biirc\s+(read|write|search)\b/
@@ -248,13 +249,19 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
   const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
   // each warning with the command that clears it, setup errors first, as WARNING_FIX orders them; a warning no command clears comes last
   const rank = (w: string) => { const k = WARNING_FIX.findIndex(([re]) => re.test(w)); return k < 0 ? WARNING_FIX.length : k }
-  const problems: Problem[] = [...warnings].sort((a, b) => rank(a) - rank(b)).map(w => {
-    const f = WARNING_FIX.find(([re]) => re.test(w))?.[1]
-    return { level: 'warn', ...(f ? { fix: f } : {}), why: reason(w) }
+  // a warning that names no command, such as the start scan's, is the model's to raise: it draws no action
+  const problems: Problem[] = [...warnings].sort((a, b) => rank(a) - rank(b)).flatMap(w => {
+    const f = fixFor(w)
+    return f ? [{ level: 'warn' as const, fix: f, why: reason(w) }] : []
   })
   // the parentheses say why search fell back to terms: the part before the command
   if (isHostDown) problems.unshift({ level: 'warn', fix: fix!, why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
   return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}), problems }, warnings }
+}
+
+/** The command that clears a warning: WARNING_FIX's, else the iirc command the sentence names in backticks or after "run". */
+function fixFor(w: string): string | undefined {
+  return WARNING_FIX.find(([re]) => re.test(w))?.[1] ?? /`(\/?iirc [^`]+)`/.exec(w)?.[1] ?? /\brun (\/?iirc [^;]+?)\.?$/.exec(w)?.[1]
 }
 
 /**

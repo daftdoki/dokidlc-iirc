@@ -1182,6 +1182,19 @@ test('the line under the prompt keeps a reason\'s parentheses whole, and cuts on
   expect(actionText(git, counts())).toBe('▲ Run iirc doctor --fix: persistence: .claude/settings.json does not exist; .gitignore does not ignore .iirc/.cache')
 })
 
+test('only a warning with a command to run reaches the line under the prompt, and it names that command', () => {
+  const at = (sentence: string) => actionText(parseBrief(`iirc: 9 pages, semantic via h:1. ${sentence}`)!.status, counts())
+  expect(at('Store shared was not pulled (diverged from origin); run iirc sync.')).toBe('▲ Run iirc sync: store shared was not pulled (diverged from origin)')
+  expect(at("This repository names no embedding model, so it uses nomic-embed-text, the first on this machine's list; ask the creator whether to keep it, and `iirc set-embedding-model nomic-embed-text` writes it."))
+    .toBe("▲ Run iirc set-embedding-model nomic-embed-text: this repository names no embedding model, so it uses nomic-embed-text, the first on this machine's list")
+  expect(at('Two hosts serve nomic-embed-text on this machine and none is preferred, so it uses a:1; ask the creator which to use, and `iirc prefer-embedding-host nomic-embed-text HOST` records it.'))
+    .toBe('▲ Run iirc prefer-embedding-host nomic-embed-text HOST: two hosts serve nomic-embed-text on this machine and none is preferred, so it uses a:1')
+  // news, and a warning that names no command, draw nothing
+  expect(at('Pulled 3 pages from remote stores; reindexing in the background.')).toBe('')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. Pulled 3 pages from remote stores; reindexing in the background.')!.status.level).toBe('ok')
+  expect(at('The start scan took 2.4 s over 30 cited files, past the 1 s budget; tell the creator.')).toBe('')
+})
+
 test('the drawn line under the prompt: the mark and the reason in the level\'s color, the command bold', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
