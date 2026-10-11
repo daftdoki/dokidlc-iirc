@@ -2827,6 +2827,25 @@ def test_audit_finds_each_check(tmp_path, monkeypatch, capsys):
     assert out.splitlines()[-1] == "6 findings in 11 pages; no vectors: own-title skipped"
 
 
+# chore 2610111531-qq step 2
+
+def test_audit_hub_skips_pairs_the_gate_now_refuses(tmp_path, monkeypatch, capsys):
+    """hub.md's six noise judgments get failure candidate rows; its two relevant ones have no row, so they count."""
+    _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: {})
+    evals = tmp_path / "st" / "dokidlc-iirc" / "eval-2026-10.jsonl"
+
+    def rows(rare):
+        _jsonl(evals, [{"cmd": "candidate", "repo": str(tmp_path.resolve()), "recall_id": f"r{i}", "via": "failure", "rank": 1,
+                        "page": "hub.md", "distance": 0.0, "paths": ["semantic"], "rare_terms": rare, "head_terms": []} for i in range(6)])
+    rows([])   # meaning alone: the failure gate refuses it
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert "hub.md: hub: " not in capsys.readouterr().out
+    rows(["axolotl_v2"])   # an identifier: meaning+term passes
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2" in capsys.readouterr().out
+
+
 # p5 step 18
 
 def test_evaluate_suggestion_thresholds_leaves_the_audit_out(tmp_path, monkeypatch, capsys):

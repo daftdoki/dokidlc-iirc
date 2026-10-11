@@ -4486,13 +4486,25 @@ def own_title_skip(vectors: dict) -> str | None:
     return f"{re.sub(r'^https?://', '', url)} does not answer"
 
 
+def gate_still_passes(judgment: dict, evals: dict[str, list[dict]]) -> bool:
+    """Whether the gate under the active knobs would still suggest the judged page for its recall.
+    A pair with no candidate row counts: eval rows began 2026-10-09 and age out, and the gate cannot run without one."""
+    row = next((r for r in evals.get(str(judgment.get("recall")), []) if base(r.get("page")) == base(judgment.get("page"))), None)
+    if row is None:
+        return True
+    return gate(row.get("paths") or [], row.get("distance"), row.get("rare_terms") or [], row.get("head_terms") or [], RECALL,
+                row.get("via") or "prompt", semantic_enabled())[0] is not None
+
+
 def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | None]:
     """Findings {page, check, what, fix} for these pages, and why own-title did not run (None when it ran). Reads only."""
     vectors = page_vectors()
     skip = own_title_skip(vectors)
     judged: dict[str, dict[str, int]] = {}
+    evals = eval_rows()
     for (repo, _, _, page), j in judgments().items():
-        if repo == str(ROOT) and j.get("label") in ("relevant", "noise"):
+        # a suggestion the hook no longer makes says nothing about the page as search shows it now
+        if repo == str(ROOT) and j.get("label") in ("relevant", "noise") and gate_still_passes(j, evals):
             judged.setdefault(page, {"relevant": 0, "noise": 0})[j["label"]] += 1
     findings: list[dict] = []
     for store, path in pages:
