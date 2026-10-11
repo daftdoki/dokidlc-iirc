@@ -672,7 +672,7 @@ async function loadCounts($: EngineInterface) {
       const list = (key: string) => (Array.isArray(got[key]) ? (got[key] as string[]) : [])
       await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
-      const searches = typeof got.searched === 'number' ? got.searched : 0
+      const searches = typeof got.searches === 'number' ? got.searches : 0
       await update($, counts, () => ({ reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
 }
 

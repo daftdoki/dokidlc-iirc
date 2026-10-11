@@ -4347,7 +4347,7 @@ def cmd_remind_to_write(args: argparse.Namespace) -> None:
 
 def session_summary(session: str) -> dict:
     """One session in numbers: distinct pages read or pulled, written, suggested by recall, suggested then read,
-    suggested and never read, the average match, and what tuning recall looks at first."""
+    suggested and never read, the average match, the searches it ran (search and read-matching-pages), and what tuning recall looks at first."""
     rows = [r for r in read_log(session=session) if r.get("repo") == str(ROOT)]
     read = sorted({p for r in rows if r["cmd"] in ("read", "pull") for p in r.get("pages") or []})
     written = sorted({r["page"] for r in rows if r["cmd"] == "write" and r.get("page")})
@@ -4379,7 +4379,7 @@ def session_summary(session: str) -> dict:
     def touched(cmd: str) -> list[str]:
         return sorted({r["page"] for r in rows if r["cmd"] == cmd and r.get("page") in suggested})
     return {"session": session, "read": read, "written": written, "suggested": suggested, "used": used, "missed": missed, "match": match,
-            "read_unsuggested": unsuggested, "searches": sum(1 for r in rows if r["cmd"] == "search"),
+            "read_unsuggested": unsuggested, "searches": sum(1 for r in rows if r["cmd"] in ("search", "pull")),
             "recalls": sum(1 for r in rows if r["cmd"] == "recall"), "recalls_with_pages": sum(1 for r in rows if r["cmd"] == "recall" and r.get("pages")),
             "skipped": sum(1 for r in rows if r["cmd"] == "skipped"), "timeouts": sum(1 for r in rows if r["cmd"] == "timeout"),
             "suggested_verified": touched("verify"), "suggested_rewritten": touched("write"), "suggested_deleted": touched("delete")}
@@ -4402,9 +4402,7 @@ def cmd_summarize_session_usage(args: argparse.Namespace) -> None:
     summary = session_summary(args.session or session_id())
     # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
     gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
-    # the session's own searches: an `iirc search` logs a search row, `iirc read-matching-pages` a pull row; recall's are hook rows
-    searched = sum(1 for r in read_log(session=summary["session"]) if r.get("repo") == str(ROOT) and r["cmd"] in ("search", "pull"))
-    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "searched": searched, "gone": gone}))
+    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts", "searches")}, "gone": gone}))
 
 
 def cmd_summarize_page_usage(args: argparse.Namespace) -> None:

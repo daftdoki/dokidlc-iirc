@@ -722,7 +722,7 @@ def test_stats_session_counts_the_sessions_own_searches(tmp_path, monkeypatch, c
     iirc.log_event("recall", hits=1, pages=["d.md"], via="prompt")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("search", query="x", hits=0, pages=[])
     iirc.main(["summarize-session-usage", "s9"])
-    assert json.loads(capsys.readouterr().out)["searched"] == 3
+    assert json.loads(capsys.readouterr().out)["searches"] == 3
 
 
 def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeypatch, capsys):
@@ -1032,7 +1032,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["summarize-session-usage", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "searched": 2, "gone": ["f.md"]}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "searches": 2, "gone": ["f.md"]}
     iirc.main(["summarize-session-usage"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

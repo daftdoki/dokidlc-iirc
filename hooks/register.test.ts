@@ -1076,7 +1076,7 @@ const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text
   },
   {
     name: 'a busy session shows the gauge and the counters',
-    usage: { read: ['a.md', 'b.md', 'c.md'], written: ['w.md'], suggested: ['a.md', 'b.md', 'x.md', 'y.md', 'z.md'], used: ['a.md', 'b.md'], searched: 4, timeouts: 0 },
+    usage: { read: ['a.md', 'b.md', 'c.md'], written: ['w.md'], suggested: ['a.md', 'b.md', 'x.md', 'y.md', 'z.md'], used: ['a.md', 'b.md'], searches: 4, timeouts: 0 },
     text: 'iirc ██░░░ 2/5 suggested read · 4 searched · 3 read · 1 written',
     drawn: [
       ...head('success'), SP,
@@ -1087,7 +1087,7 @@ const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text
   },
   {
     name: 'a timed-out recall turns the circle yellow and asks for maintenance under the prompt',
-    usage: { read: ['a.md', 'b.md', 'c.md'], written: [], suggested: [], used: [], searched: 0, timeouts: 1 },
+    usage: { read: ['a.md', 'b.md', 'c.md'], written: [], suggested: [], used: [], searches: 0, timeouts: 1 },
     text: 'iirc 3 read',
     drawn: [...head('warning'), SP, num('3'), word(' read')],
     todo: '▲ Run /iirc run-maintenance: 1 suggestion lookup timed out this session',
