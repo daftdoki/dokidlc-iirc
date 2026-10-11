@@ -4222,3 +4222,19 @@ def test_ollama_embed_asks_to_keep_the_model_loaded(monkeypatch):
     assert url == "http://h:11434/api/embed" and body["keep_alive"] == emb.KEEP_ALIVE == "24h" and body["truncate"] is True
     assert emb.embed(emb.Backend(emb.MODELS["qwen3-embedding"], "http://h:8000"), ["a"]) is not None
     assert "keep_alive" not in sent[-1][1]   # an OpenAI-compatible host gets the body it knows
+
+
+def test_memoryfield_tool_never_reaches_ollama(tmp_path, monkeypatch):
+    # the tool's ollama client sends no keep_alive; were it to embed after iirc, ollama would unload the model at its 5-minute default
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: "/bin/" + name)
+    monkeypatch.setattr(iirc, "require_pin", lambda: None)
+    runs = []
+    monkeypatch.setattr(iirc.subprocess, "run", lambda argv, **k: runs.append((argv, k["env"])))
+    for verb in ("write", "delete", "index"):    # iirc write and verify run `write`, iirc delete runs `delete`
+        iirc.tool(verb, "page.md", root=tmp_path, field="f")
+    assert [argv[1] for argv, _ in runs] == ["write", "delete", "index"]
+    assert all(env["OLLAMA_HOST"] == iirc.NO_EMBEDDING_HOST for _, env in runs)
