@@ -190,11 +190,16 @@ CPU = "cpu"                                   # an entry's host for the model th
 LOCAL_OLLAMA = "http://127.0.0.1:11434"       # `local` in add-embedding-model
 
 
+def raw_models() -> list[dict]:
+    """The setup file's embedding_models as written, each a table, before machine_models checks them."""
+    return [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
+
+
 def machine_models() -> list[Entry]:
     """The setup file's embedding_models: each a known model on a protocol it has a name for. An entry that is not is left out."""
     out = []
-    for e in read_config().get("embedding_models") or []:
-        model = iirc_embed.MODELS.get(str(e.get("model"))) if isinstance(e, dict) else None
+    for e in raw_models():
+        model = iirc_embed.MODELS.get(str(e.get("model")))
         if model is None or e.get("protocol") not in model.names or e.get("name") not in model.names[e["protocol"]] \
                 or not isinstance(e.get("host"), str) or not e["host"]:
             continue
@@ -233,6 +238,14 @@ def host_entry(model: str | None = None) -> tuple[Entry | None, bool]:
 def semantic_enabled() -> bool:
     """Semantic search is the default. String search is the fallback chosen with `iirc search-mode string`."""
     return read_config().get("search_mode", "semantic") != "string"
+
+
+def set_preferred(model: str, host: str) -> Path:
+    """Record HOST as the one that serves MODEL on this machine. The choice is in memory before the write, so a failed write still
+    leaves this process using it."""
+    read_config()["embedding_preferred"] = prefs = {**preferred_hosts(), model: host}
+    _ENTRY.pop(model, None)
+    return set_machine(embedding_preferred=prefs)
 
 
 def set_machine(**values) -> Path:
@@ -3049,7 +3062,7 @@ def ask_host(model: str) -> None:
         print(f"  {i}. {e.host} ({PROTOCOL_TEXT[e.protocol]}, as {e.name})")
     pick = input(f"1-{len(entries)} [1]: ").strip()
     chosen = entries[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(entries) else entries[0]
-    set_machine(embedding_preferred={**preferred_hosts(), model: chosen.host})
+    set_preferred(model, chosen.host)
     print(f"{model} runs through {chosen.host} on this machine; `iirc prefer-embedding-host` changes it")
 
 
@@ -3212,7 +3225,7 @@ def cmd_add_embedding_model(args: argparse.Namespace) -> None:
     verdict, line = fingerprint(entry)
     if verdict == "error":
         die(f"{line}. Nothing was added.")
-    raw = [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
+    raw = raw_models()
     at = next((i for i, e in enumerate(raw) if (e.get("model"), e.get("host")) == (entry.model, entry.host)), len(raw))
     raw[at:at + 1] = [entry._asdict()]
     path = set_machine(embedding_models=raw)
@@ -3225,7 +3238,7 @@ def cmd_remove_embedding_model(args: argparse.Namespace) -> None:
     """Remove MODEL's entry on HOST from this machine's list, or every entry of MODEL, and a preference for a host removed."""
     model = known_model(args.model)
     host = host_url(args.host) if args.host else None
-    raw = [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
+    raw = raw_models()
     gone = [e for e in raw if e.get("model") == model.id and (host is None or e.get("host") == host)]
     if not gone:
         die(f"this machine's list has no {model.id}" + (f" on {host}" if host else "") + "; `iirc show-embedding-models` lists it")
@@ -3244,7 +3257,7 @@ def cmd_prefer_embedding_host(args: argparse.Namespace) -> None:
     host = host_url(args.host)
     if host not in {e.host for e in model_entries(model.id)}:
         die(f"{host} is not listed for {model.id} on this machine; `iirc add-embedding-model {model.id} {args.host}` adds it")
-    path = set_machine(embedding_preferred={**preferred_hosts(), model.id: host})
+    path = set_preferred(model.id, host)
     print(f"{model.id} runs through {host} on this machine; written to {path}")
 
 
@@ -3303,7 +3316,7 @@ def convert_machine() -> str | None:
     if not any(key in cfg for key in OLD_MACHINE_KEYS):
         return None
     old, host, semantic = cfg.pop("embedding", None), cfg.pop("embedding_host", None), cfg.pop("semantic", None)
-    entries = [e for e in cfg.get("embedding_models") or [] if isinstance(e, dict)]
+    entries = raw_models()
     ran_on, entry = iirc_embed.DEFAULT_MODEL, None
     name = str(old.get("model") or iirc_embed.DEFAULT_MODEL) if isinstance(old, dict) else iirc_embed.DEFAULT_MODEL
     model = iirc_embed.model_named(name)
