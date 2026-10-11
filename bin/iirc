@@ -180,7 +180,7 @@ def host_candidates() -> list[tuple[str, str]]:
     """(base url, source) in order of preference: OLLAMA_HOST, then iirc set-search-backend, then the local default.
     An OpenAI-compatible backend has one candidate, the URL setup wrote."""
     if active_model().backend == "openai":
-        return [(openai_url(str(read_config()["embedding"].get("url") or "")), "iirc set-search-backend")]
+        return [(openai_url(str((read_config().get("embedding") or {}).get("url") or "")), "iirc set-search-backend")]
     out: list[tuple[str, str]] = []
     env = os.environ.get("OLLAMA_HOST")
     if env:
@@ -326,11 +326,35 @@ FLAT_TABLE = iirc_embed.table_name(iirc_embed.DEFAULT_MODEL)
 TABLE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def active_model() -> iirc_embed.Model:
-    """The embedding model this machine uses: `embedding.model` in the setup file, else nomic-embed-text."""
+def read_store_config(root: Path) -> dict:
+    path = root / STORE_CONFIG
+    if not path.is_file():
+        return {}
+    try:
+        data = tomllib.loads(path.read_text())
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        raise ConfigError(f"{STORE_CONFIG}: {e}")
+    return data if isinstance(data, dict) else {}
+
+
+def model_and_source() -> tuple[iirc_embed.Model, str]:
+    """The embedding model this repository uses, and where it is set: `embedding_model` in .claude/iirc.toml,
+    else `embedding.model` in the machine setup file, else nomic-embed-text. Where the model runs is per machine."""
+    try:
+        name = read_store_config(ROOT).get("embedding_model")
+    except ConfigError:
+        name = None   # load_stores reports the bad file; until it is fixed, the machine default
+    if isinstance(name, str) and name in iirc_embed.MODELS:
+        return iirc_embed.MODELS[name], f"this repository's {STORE_CONFIG}"
     emb = read_config().get("embedding")
-    model = emb.get("model") if isinstance(emb, dict) else None
-    return iirc_embed.MODELS.get(model) or iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL]
+    name = emb.get("model") if isinstance(emb, dict) else None
+    if isinstance(name, str) and name in iirc_embed.MODELS:
+        return iirc_embed.MODELS[name], f"the machine default in {config_file()}"
+    return iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL], "the built-in default"
+
+
+def active_model() -> iirc_embed.Model:
+    return model_and_source()[0]
 
 
 def knob_spec() -> dict[str, tuple[float, float, float, str]]:
@@ -558,17 +582,6 @@ def remote_dir(name: str, url: str) -> Path:
     return data_dir() / "stores" / remote_field(name, url)
 
 
-def read_store_config(root: Path) -> dict:
-    path = root / STORE_CONFIG
-    if not path.is_file():
-        return {}
-    try:
-        data = tomllib.loads(path.read_text())
-    except (tomllib.TOMLDecodeError, OSError) as e:
-        raise ConfigError(f"{STORE_CONFIG}: {e}")
-    return data if isinstance(data, dict) else {}
-
-
 def load_stores(root: Path) -> tuple[list[Store], str | None]:
     """The stores .claude/iirc.toml names, and its write default. No file: one project store at .iirc."""
     root = Path(root).resolve()
@@ -576,6 +589,9 @@ def load_stores(root: Path) -> tuple[list[Store], str | None]:
     for key in ("show_hooks", "ui"):
         if not isinstance(cfg.get(key, False), bool):
             raise ConfigError(f"{STORE_CONFIG}: {key} must be true or false")
+    model = cfg.get("embedding_model")
+    if model is not None and not (isinstance(model, str) and model in iirc_embed.MODELS):
+        raise ConfigError(f"{STORE_CONFIG}: embedding_model = {model!r} names no embedding model; the models are {', '.join(iirc_embed.MODELS)}")
     if "stores" not in cfg and "write" not in cfg:
         return [Store("project", "project", root / ".iirc", root, None, field_name(root))], None
     sections = cfg.get("stores")

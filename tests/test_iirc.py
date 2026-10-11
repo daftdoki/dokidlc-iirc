@@ -4685,3 +4685,28 @@ def test_init_leaves_a_settings_file_it_did_not_write_unstaged(tmp_path, monkeyp
     iirc.main(["init"])
     staged = _git(tmp_path, "diff", "--cached", "--name-only")
     assert ".iirc/index.md" in staged and ".claude/settings.json" not in staged
+
+
+# chore 2610111741-jy
+
+def test_repository_model_wins_over_the_machine_default(tmp_path):
+    """Two repositories on one machine: the one that names a model searches with it, the other with the machine's default."""
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+    named, plain = tmp_path / "named", tmp_path / "plain"
+    (named / ".claude").mkdir(parents=True); plain.mkdir()
+    (named / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding:0.6b"\n')
+    iirc.set_root(named)
+    assert iirc.CONFIG_ERROR is None and iirc.active_model().id == "qwen3-embedding:0.6b"
+    assert iirc.RECALL == {k: v[0] for k, v in iirc.iirc_embed.MODELS["qwen3-embedding:0.6b"].knobs.items()}
+    iirc.set_root(plain)
+    assert iirc.active_model().id == "nomic-embed-text"
+
+
+def test_unknown_repository_model_is_a_config_error(tmp_path):
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "iirc.toml").write_text('embedding_model = "qwen9"\n')
+    iirc.set_root(tmp_path)
+    assert iirc.CONFIG_ERROR and "qwen9" in iirc.CONFIG_ERROR
+    assert all(m in iirc.CONFIG_ERROR for m in iirc.iirc_embed.MODELS)
+    assert iirc.active_model().id == "nomic-embed-text" and not iirc.knob_error_only()
+    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
