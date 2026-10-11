@@ -854,7 +854,7 @@ export const register: Register = on => {
   // The settings hooks run beneath this one, iirc suggest-pages among them: the band's circle turns while they run.
   // A throw in iirc's own work before next runs the hooks beneath; after it, the pulse is already put out
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    if (BAND_PULSE_MS <= 0 || e.agent_id !== undefined || !(await uiEnabled($))) return next(e)
+    if (BAND_PULSE_MS <= 0 || e.agent_id !== undefined || !(await read($, isStatusShown)) || !(await uiEnabled($))) return next(e)
     pulseTimer?.cancel()
     await update($, pulse, () => 0)
     pulseTimer = $.clock.every(BAND_PULSE_MS, () => void update($, pulse, f => (f === null ? null : (f + 1) % PULSE.length)).catch(() => {}))
