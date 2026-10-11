@@ -1154,6 +1154,33 @@ test('a counter that rises lights up with its +N for four seconds, then settles;
   expect(await (await bandRow($)).find({ text: '+2' })).toBeUndefined()
 })
 
+for (const isThrown of [false, true]) {
+  test(`the circle pulses while the suggestion hook runs, and settles when it ${isThrown ? 'fails' : 'ends'}`, async ($: Engine, on: On) => {
+    engine(on)
+    const clock = mock.clock(on)
+    on('ui.toast', () => ({ value: undefined }))
+    // the settings hook beneath: iirc suggest-pages, held until the test lets it finish
+    let finish = () => {}
+    on('classic.UserPromptSubmit', () => new Promise(resolve => { finish = () => (isThrown ? resolve(Promise.reject(new Error('hook failed'))) : resolve({})) }))
+    await hookRow($, 'SessionStart', OK_BRIEF, 'hpl')
+    const circle = async () => parts(await (await bandRow($)).find({ key: 'iirc-line' }))[0]
+    expect(await circle()).toEqual(['● ', { color: 'success' }])
+    const running = $.classic.UserPromptSubmit({ prompt: 'what do we know about ollama?' }).catch(() => {})
+    await clock.settle()
+    expect((await circle())[0]).toBe('◐ ')
+    await clock.advance(150)
+    expect((await circle())[0]).toBe('◓ ')
+    await clock.advance(150)
+    expect((await circle())[0]).toBe('◑ ')
+    finish()
+    await running
+    await clock.settle()
+    expect(await circle()).toEqual(['● ', { color: 'success' }])
+    await clock.advance(600)
+    expect(await circle()).toEqual(['● ', { color: 'success' }])     // the timer stopped
+  })
+}
+
 test('the band\'s wordmark runs from the accent orange to violet, letter by letter', () => {
   expect(WORDMARK[0][1].color).toBe('#e8875f')
   expect(WORDMARK[10][1].color).toBe('#a78bfa')

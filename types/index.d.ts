@@ -81,6 +81,8 @@ declare module 'claude-code' {
       flash: Flash
       /** Whether this session's counts loaded once: the first load rises from nothing and lights nothing. */
       countsLoaded: boolean
+      /** The frame of the band's circle while the suggestion hook runs; null when it does not. */
+      pulse: number | null
       /** Whether this compaction window asked `iirc remind-to-write --at compaction` already. */
       compactAsked: boolean
       /** The line `iirc remind-to-write --at compaction` printed, waiting for the next tool result or prompt. */

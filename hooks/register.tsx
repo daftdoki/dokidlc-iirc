@@ -57,6 +57,9 @@ const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null
 const flash = atom({ plugin: 'iirc', key: 'flash' } as const, {} as Flash)
 const countsLoaded = atom({ plugin: 'iirc', key: 'countsLoaded' } as const, false)
 let flashGen = 0
+// the frame of the circle's pulse while the suggestion hook runs, null when it does not; the timer that turns it
+const pulse = atom({ plugin: 'iirc', key: 'pulse' } as const, null as number | null)
+let pulseTimer: { cancel: () => void } | null = null
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears on this task; skip the rest: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -297,6 +300,9 @@ const BAND_DIVIDER = ' │ '
 const BAND_GRADIENT = true
 // how long a counter that rose stays lit with its +N, in milliseconds; 0 lights nothing
 const BAND_FLASH_MS = 4000
+// the circle's frames while the suggestion hook searches, one every BAND_PULSE_MS; 0 keeps the circle still
+const BAND_PULSE_MS = 150
+const PULSE = ['◐', '◓', '◑', '◒'] as const
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
@@ -798,6 +804,22 @@ export const register: Register = on => {
     return result
   }).catch(($, e, next) => (next.called ? undefined : next(e)))
 
+  // The settings hooks run beneath this one, iirc suggest-pages among them: the band's circle turns while they run.
+  // A throw in iirc's own work before next runs the hooks beneath; after it, the pulse is already put out
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    if (BAND_PULSE_MS <= 0 || e.agent_id !== undefined || !(await uiEnabled($))) return next(e)
+    pulseTimer?.cancel()
+    await update($, pulse, () => 0)
+    pulseTimer = $.clock.every(BAND_PULSE_MS, () => void update($, pulse, f => (f === null ? null : (f + 1) % PULSE.length)).catch(() => {}))
+    try {
+      return await next(e)
+    } finally {
+      pulseTimer?.cancel()
+      pulseTimer = null
+      await update($, pulse, () => null)
+    }
+  }).catch(($, e, next) => (next.called ? undefined : next(e)))
+
   on('prompt.submit', async ($, e, next) => {
     const line = await takeCompactNudge($)
     return next(line ? { ...e, context: [...(e.context ?? []), line] } : e)
@@ -1006,9 +1028,10 @@ export const register: Register = on => {
     const s = await read($, status)
     if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
+    const frame = await read($, pulse)
     const { Text } = $.ui.resolve(e)
     return withRow($, e, await next(e), 'iirc-line', [
-      <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>,
+      <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>{`${frame === null ? '●' : PULSE[frame]} `}</Text>,
       accentBar($, e, 'bar'),
       ...statusParts(s, c, await read($, flash)).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>),
     ])
