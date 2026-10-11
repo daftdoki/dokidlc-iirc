@@ -3230,9 +3230,11 @@ def found_entry(model: iirc_embed.Model, host: str) -> Entry:
     if "openai" not in model.names:
         die(f"{host} does not answer as ollama, and {model.id} has no OpenAI-compatible name. Nothing was added.")
     name = model.names["openai"][0]
-    why, _ = embed_refusal(host, name)
+    why, width = embed_refusal(host, name)
     if why:
         die(f"{host} answers neither as ollama nor as an OpenAI-compatible server for {name} ({why}). Nothing was added.")
+    if width != model.dims:
+        die(f"{host} serves {name} {width} wide, and {model.id} is {model.dims}; another model answers under this name. Nothing was added.")
     return Entry(model.id, host, "openai", name)
 
 

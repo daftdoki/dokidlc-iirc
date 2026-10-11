@@ -4790,6 +4790,16 @@ def test_add_embedding_model_takes_a_front_end_for_openai(tmp_path, monkeypatch,
     assert iirc.read_config()["embedding_models"] == [_entry(QWEN, host.url, "openai")]
 
 
+def test_add_embedding_model_refuses_an_openai_host_of_another_width(tmp_path, monkeypatch, capsys):
+    """An OpenAI-compatible host whose vectors are not the model's width is refused, as doctor refuses it, with or without a reference."""
+    _project(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "fingerprints", lambda: {"probe": iirc.PROBE, "models": {}})
+    with _fake_openai(monkeypatch, QWEN, dims=768, listed=False) as host:
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", QWEN, host.url])
+    assert f"768 wide, and {QWEN} is 1024" in capsys.readouterr().err and not iirc.config_file().exists()
+
+
 def test_add_embedding_model_refuses_a_host_without_the_model(tmp_path, monkeypatch, capsys):
     """An ollama host without the model is refused with the pull command, OLLAMA_HOST named for another host; nothing is pulled or written."""
     _project(tmp_path, monkeypatch)
