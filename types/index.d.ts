@@ -37,6 +37,8 @@ export type Cursor = { session: number; page: number; sessionTop: number; pageTo
 
 /** This session's pages by name, from `iirc summarize-session-usage`, for the Session tab; `gone` were renamed or deleted since. */
 export type SessionPages = { read: string[]; written: string[]; suggested: string[]; used: string[]; gone: string[] }
+/** What the reader's Session tab draws: this session's pages, counts, and health, or the demo's sample. */
+export type SessionView = { pages: SessionPages; counts: SessionCounts; health: IircHealth | null }
 
 export type ToolNote = { pages: RecalledPage[]; recovered: { command: string; failures: number }[] }
 
@@ -66,7 +68,7 @@ declare module 'claude-code' {
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
       health: IircHealth | null
       /** `/iirc reader demo`'s sample session, which only the reader's Session tab draws, until the reader closes. */
-      demoSession: { pages: SessionPages; counts: SessionCounts; health: IircHealth | null } | null
+      demoSession: SessionView | null
       /** `iirc max-suggested-pages` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
       /** Whether this compaction window asked `iirc remind-to-write --at compaction` already. */

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { Cursor, IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, ShownPage, ToolNote } from '../types'
+import type { Cursor, IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, SessionView, ShownPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
@@ -37,7 +37,6 @@ let scrollRest = 0
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
 // `/iirc reader demo`'s sample session: the pane draws it in place of the real one until the pane closes or a
 // plain `/iirc reader` opens. It never goes into sessionPages, counts, or health, which the summary line and the cards draw
-type SessionView = { pages: SessionPages; counts: SessionCounts; health: IircHealth | null }
 const demoSession = atom({ plugin: 'iirc', key: 'demoSession' } as const, null as SessionView | null)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
@@ -519,7 +518,7 @@ async function loadDemoSession($: EngineInterface) {
     pages: { read: used, written, suggested: [...used, ...unread], used, gone: [] },
     counts: {
       reads: used.length + 3, writes: written.length, suggested: used.length + unread.length, used: used.length,
-      missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: { all: 68, read: 74, unread: 55 }, timeouts: 0,
+      missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: DEMO_COUNTS.match, timeouts: DEMO_COUNTS.timeouts,
     },
     health: DEMO_HEALTH,
   }))
