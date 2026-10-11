@@ -100,6 +100,7 @@ test('parses the recovery nudge and the brief', () => {
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status.fix).toBe('/iirc run-maintenance')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 store changes not committed.')!.status.fix).toBe('/iirc run-maintenance')
   // setup errors keep doctor --fix, even when maintenance is due too
   expect(parseBrief('iirc: 9 pages, semantic via h:1. memoryfield-tool is not at the pin abc1234; every write refuses until `iirc doctor --fix` runs. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')

@@ -56,12 +56,13 @@ const STOP_RE = /iirc: before you stop, note that (.*?) failed and then worked/
 const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plugin's layout/
 const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S*[^\s.]|string only \([^)]*\)|string search)[^.]*\.\s*(.*)/s
 // the command that clears each kind of warning, in the order the line under the prompt names one:
-// setup errors first, then the one upkeep command, which covers suspect pages, unpushed commits, timeouts, and near-duplicates
+// setup errors first, then the one upkeep command, which covers suspect pages, loose and unpushed commits, timeouts, and near-duplicates
 const MAINTAIN = '/iirc run-maintenance'
 const WARNING_FIX: [RegExp, string][] = [
   [/memoryfield-tool is not at the pin/, 'iirc doctor --fix'],
   [/Persistence:/, 'iirc doctor --fix'],
   [/Maintenance is due/, MAINTAIN],
+  [/not committed/, MAINTAIN],
 ]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
