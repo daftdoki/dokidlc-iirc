@@ -4496,16 +4496,30 @@ def gate_still_passes(judgment: dict, evals: dict[str, list[dict]]) -> bool:
                 row.get("via") or "prompt", semantic_enabled())[0] is not None
 
 
+def is_hub(js: list[dict]) -> bool:
+    noise = sum(j["label"] == "noise" for j in js)
+    return len(js) >= HUB_JUDGED and noise >= HUB_RATIO * (len(js) - noise)
+
+
+def last_write(store: Store, name: str) -> float | None:
+    """When `iirc write` last committed this page in its store; None for a store outside git or a page never written there."""
+    try:
+        proc = run_git(store.repo, "log", "-1", "--format=%cI", "--fixed-strings", "--grep", f"iirc: write {name}")
+    except FileNotFoundError:
+        return None
+    return parse_ts(proc.stdout.strip()) if proc.returncode == 0 and proc.stdout.strip() else None
+
+
 def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | None]:
     """Findings {page, check, what, fix} for these pages, and why own-title did not run (None when it ran). Reads only."""
     vectors = page_vectors()
     skip = own_title_skip(vectors)
-    judged: dict[str, dict[str, int]] = {}
+    judged: dict[str, list[dict]] = {}
     evals = eval_rows()
     for (repo, _, _, page), j in judgments().items():
         # a suggestion the hook no longer makes says nothing about the page as search shows it now
         if repo == str(ROOT) and j.get("label") in ("relevant", "noise") and gate_still_passes(j, evals):
-            judged.setdefault(page, {"relevant": 0, "noise": 0})[j["label"]] += 1
+            judged.setdefault(page, []).append(j)
     findings: list[dict] = []
     for store, path in pages:
         label = page_label(store.name, path.name)
@@ -4532,9 +4546,14 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
                         else "a search for its title finds nothing")
                 add("own-title", what, "write the title in the words a prompt would use, or merge it with the page that ranks first")
         # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
-        c = judged.get(path.name)
-        if c and c["noise"] + c["relevant"] >= HUB_JUDGED and c["noise"] >= HUB_RATIO * c["relevant"]:
-            total = c["noise"] + c["relevant"]
+        js = judged.get(path.name, [])
+        if is_hub(js):
+            # only a page that would be a hub costs a git call; a judgment before the last rewrite judged other text
+            written = last_write(store, path.name)
+            js = [j for j in js if written is None or (t := parse_ts(j.get("ts"))) is None or t >= written]
+        if is_hub(js):
+            c = {label: sum(j["label"] == label for j in js) for label in ("relevant", "noise")}
+            total = len(js)
             add("hub", f"noise in {c['noise']} of {total} tune judgments ({round(100 * c['noise'] / total)}%), relevant in {c['relevant']}",
                 "narrow it or split it")
         # a page that names its successor and keeps the old text still wins searches with it

@@ -2846,6 +2846,36 @@ def test_audit_hub_skips_pairs_the_gate_now_refuses(tmp_path, monkeypatch, capsy
     assert "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2" in capsys.readouterr().out
 
 
+# chore 2610111531-qq step 3
+
+def test_audit_hub_resets_when_the_page_is_rewritten(tmp_path, monkeypatch, capsys):
+    """A judgment before the page's last `iirc: write` commit no longer counts; a verify commit is no rewrite."""
+    _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: {})
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+
+    def commit(message, when):
+        env = {**os.environ, "GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when}
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+                        "-m", message], check=True, env=env)
+
+    def judge(ts):
+        _jsonl(tmp_path / "st" / "dokidlc-iirc" / "tune" / "judgments.jsonl",
+               [{"ts": ts, "repo": str(tmp_path.resolve()), "session": "s", "recall": f"r{i}", "page": "hub.md",
+                 "label": "noise" if i < 6 else "relevant"} for i in range(8)])
+    hub = "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2"
+    judge("2026-10-10T11:00:00Z")
+    commit("iirc: verify hub.md", "2026-10-10T12:00:00Z")
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert hub in capsys.readouterr().out   # no write commit yet: every judgment counts
+    commit("iirc: write hub.md", "2026-10-10T12:00:00Z")
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert "hub.md: hub: " not in capsys.readouterr().out
+    judge("2026-10-10T13:00:00Z")
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert hub in capsys.readouterr().out
+
+
 # p5 step 18
 
 def test_evaluate_suggestion_thresholds_leaves_the_audit_out(tmp_path, monkeypatch, capsys):
