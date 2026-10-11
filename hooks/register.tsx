@@ -285,6 +285,10 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
   return s.level === 'ok' && first ? { ...s, level: first.level } : s
 }
 
+// The band above the prompt, one switch each, so a part the creator does not like goes with one edit:
+// the thin rule between its counters
+const BAND_DIVIDER = ' │ '
+
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
 
@@ -306,7 +310,7 @@ export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
   }
   // the mode shows only when it is not the default, so a weaker search stands out
   if (s.mode && s.mode !== 'semantic+keyword') items.push([{ text: 'string search', color: 'warning' }])
-  items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(' · '), ...item))
+  items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(BAND_DIVIDER), ...item))
   return out
 }
 

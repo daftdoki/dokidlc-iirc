@@ -73,7 +73,7 @@ folded group of tool calls, the rows appear under the group.
 In the band above the prompt, one line sums up iirc for the session:
 
 ```
-● ▍iirc status  2/5 suggested read · 4 searched · 3 read · 1 written
+● ▍iirc status  2/5 suggested read │ 4 searched │ 3 read │ 1 written
 ```
 
 | Part | Means |

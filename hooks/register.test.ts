@@ -158,8 +158,8 @@ test('parses the recovery nudge and the brief', () => {
   expect(fixOf(parseBrief("iirc: 9 pages, string only (this machine cannot serve nomic-embed-text; `iirc doctor` names the ways out). This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status)).toBe('iirc doctor --fix')
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
-  expect(statusText(one, counts({ reads: 3, writes: 1, suggested: 4, used: 2 }))).toBe('iirc status  2/4 suggested read · 3 read · 1 written · string search')
-  expect(statusText(one, counts())).toBe('iirc status  1 page · string search')
+  expect(statusText(one, counts({ reads: 3, writes: 1, suggested: 4, used: 2 }))).toBe('iirc status  2/4 suggested read │ 3 read │ 1 written │ string search')
+  expect(statusText(one, counts())).toBe('iirc status  1 page │ string search')
   expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, counts())).toBe('iirc status')
 })
 
@@ -306,7 +306,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  expect(await waitFor($, 'iirc status  1/3 suggested read · 2 read · 1 written')).toBe(true)
+  expect(await waitFor($, 'iirc status  1/3 suggested read │ 2 read │ 1 written')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
   // read-matching-pages reads pages too, so it refreshes the counts
   const before = argv.length
@@ -554,7 +554,7 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.')!.status
   const c = counts({ reads: 1, suggested: 2, used: 1, timeouts: 2 })
   expect(liveStatus(ok, c).level).toBe('warn')
-  expect(statusText(ok, c)).toBe('iirc status  1/2 suggested read · 1 read')
+  expect(statusText(ok, c)).toBe('iirc status  1/2 suggested read │ 1 read')
   const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. Maintenance is due (3 suggestion lookups timed out in the last 7 days and since the last run); run /iirc run-maintenance.')!
   expect(brief.status.level).toBe('warn')
   expect(fixOf(brief.status)).toBe('/iirc run-maintenance')
@@ -948,7 +948,7 @@ test('/iirc reader demo draws its sample numbers in the pane only; the summary l
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'td1' })
   await clock.settle()
   await hookRow($, 'SessionStart', BRIEF, 'hd2')
-  const REAL = 'iirc status  1/2 suggested read · 1 read'
+  const REAL = 'iirc status  1/2 suggested read │ 1 read'
   expect(await waitFor($, REAL)).toBe(true)
   const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
   const card = await $.ui.mount({
@@ -1073,7 +1073,7 @@ const head = (level: string): [string, Record<string, unknown>][] => [['● ', {
 const num = (n: string): [string, Record<string, unknown>] => [n, { bold: true, color: 'claude' }]
 const word = (w: string): [string, Record<string, unknown>] => [w, { color: 'subtle' }]
 const SP: [string, Record<string, unknown>] = ['  ', {}]
-const DOT = word(' · ')
+const DOT = word(' │ ')
 const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text: string; drawn: [string, Record<string, unknown>][]; todo: string }[] = [
   {
     name: 'a quiet session shows the page count',
@@ -1085,7 +1085,7 @@ const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text
   {
     name: 'a busy session shows the suggested pages read and the counters, with no gauge',
     usage: { read: ['a.md', 'b.md', 'c.md'], written: ['w.md'], suggested: ['a.md', 'b.md', 'x.md', 'y.md', 'z.md'], used: ['a.md', 'b.md'], searches: 4, timeouts: 0 },
-    text: 'iirc status  2/5 suggested read · 4 searched · 3 read · 1 written',
+    text: 'iirc status  2/5 suggested read │ 4 searched │ 3 read │ 1 written',
     drawn: [
       ...head('success'), SP, num('2/5'), word(' suggested read'), DOT, num('4'), word(' searched'), DOT, num('3'), word(' read'), DOT, num('1'), word(' written'),
     ],
@@ -1128,7 +1128,7 @@ test('the summary line hides zero counters, the suggested pages read with no sug
   expect(statusText(ok, counts())).toBe('iirc status  110 pages')
   expect(statusText(ok, counts({ searches: 1 }))).toBe('iirc status  1 searched')
   expect(statusText(ok, counts({ writes: 2 }))).toBe('iirc status  2 written')
-  expect(statusText(ok, counts({ reads: 1, writes: 1 }))).toBe('iirc status  1 read · 1 written')
+  expect(statusText(ok, counts({ reads: 1, writes: 1 }))).toBe('iirc status  1 read │ 1 written')
   // a suggestion nobody read still shows
   expect(statusText(ok, counts({ suggested: 3 }))).toBe('iirc status  0/3 suggested read')
   expect(statusText(ok, counts({ suggested: 10, used: 1 }))).toBe('iirc status  1/10 suggested read')
@@ -1140,7 +1140,7 @@ test('the summary line hides zero counters, the suggested pages read with no sug
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts({ reads: 2 }))).toBe('iirc status  2 read')
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts())).toBe('iirc status')
   expect(statusText(parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status, counts()))
-    .toBe('iirc status  5 pages · string search')
+    .toBe('iirc status  5 pages │ string search')
 })
 
 test('the drawn summary line: the circle takes the level\'s theme color, the search mode note is a warning, and a survey or off hides the line', async ($: Engine, on: On) => {
