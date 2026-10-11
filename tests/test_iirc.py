@@ -2836,7 +2836,7 @@ def test_audit_hub_skips_pairs_the_gate_now_refuses(tmp_path, monkeypatch, capsy
     evals = tmp_path / "st" / "dokidlc-iirc" / "eval-2026-10.jsonl"
 
     def rows(rare):
-        _jsonl(evals, [{"cmd": "candidate", "repo": str(tmp_path.resolve()), "recall_id": f"r{i}", "via": "failure", "rank": 1,
+        _jsonl(evals, [{"cmd": "candidate", "repo": str(tmp_path.resolve()), "session": "s", "recall_id": f"r{i}", "via": "failure", "rank": 1,
                         "page": "hub.md", "distance": 0.0, "paths": ["semantic"], "rare_terms": rare, "head_terms": []} for i in range(6)])
     rows([])   # meaning alone: the failure gate refuses it
     iirc.main(["audit-page-findability", "hub.md"])

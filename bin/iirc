@@ -4323,9 +4323,13 @@ def knob_grid() -> list[dict[str, float]]:
 
 def sweep_counts(pairs: list[tuple[dict, bool]], knobs: dict[str, float]) -> dict:
     """What the gate would do under these knobs to the judged pairs: (candidate, relevant)."""
-    return sweep_tally([(gate(cand.get("paths") or [], cand.get("distance"), cand.get("rare_terms") or [], cand.get("head_terms") or [], knobs,
-                              cand.get("via") or "prompt")[0] is not None,
-                         relevant) for cand, relevant in pairs])
+    return sweep_tally([(row_passes(cand, knobs), relevant) for cand, relevant in pairs])
+
+
+def row_passes(row: dict, knobs: dict[str, float], semantic: bool = True) -> bool:
+    """Whether the gate under these knobs lets a logged candidate row through."""
+    return gate(row.get("paths") or [], row.get("distance"), row.get("rare_terms") or [], row.get("head_terms") or [], knobs,
+                row.get("via") or "prompt", semantic)[0] is not None
 
 
 def sweep_tally(outcomes: list[tuple[bool, bool]]) -> dict:
@@ -4489,25 +4493,21 @@ def own_title_skip(vectors: dict) -> str | None:
 def gate_still_passes(judgment: dict, evals: dict[str, list[dict]]) -> bool:
     """Whether the gate under the active knobs would still suggest the judged page for its recall.
     A pair with no candidate row counts: eval rows began 2026-10-09 and age out, and the gate cannot run without one."""
-    row = next((r for r in evals.get(str(judgment.get("recall")), []) if base(r.get("page")) == base(judgment.get("page"))), None)
-    if row is None:
-        return True
-    return gate(row.get("paths") or [], row.get("distance"), row.get("rare_terms") or [], row.get("head_terms") or [], RECALL,
-                row.get("via") or "prompt", semantic_enabled())[0] is not None
+    row = next((r for r in evals.get(str(judgment.get("recall")), [])
+                if r.get("session") == judgment.get("session") and base(r.get("page")) == base(judgment.get("page"))), None)
+    return row is None or row_passes(row, RECALL, semantic_enabled())
 
 
-def is_hub(js: list[dict]) -> bool:
+def hub_counts(js: list[dict]) -> tuple[int, int] | None:
+    """(noise, relevant) when these judgments make a page a hub, else None."""
     noise = sum(j["label"] == "noise" for j in js)
-    return len(js) >= HUB_JUDGED and noise >= HUB_RATIO * (len(js) - noise)
+    return (noise, len(js) - noise) if len(js) >= HUB_JUDGED and noise >= HUB_RATIO * (len(js) - noise) else None
 
 
 def last_write(store: Store, name: str) -> float | None:
     """When `iirc write` last committed this page in its store; None for a store outside git or a page never written there."""
-    try:
-        proc = run_git(store.repo, "log", "-1", "--format=%cI", "--fixed-strings", "--grep", f"iirc: write {name}")
-    except FileNotFoundError:
-        return None
-    return parse_ts(proc.stdout.strip()) if proc.returncode == 0 and proc.stdout.strip() else None
+    out = git("log", "-1", "--format=%cI", "--fixed-strings", "--grep", f"iirc: write {name}", cwd=store.repo)
+    return parse_ts(out) if out else None
 
 
 def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | None]:
@@ -4515,8 +4515,9 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
     vectors = page_vectors()
     skip = own_title_skip(vectors)
     judged: dict[str, list[dict]] = {}
-    evals = eval_rows()
-    for (repo, _, _, page), j in judgments().items():
+    judged_all = judgments()
+    evals = eval_rows() if judged_all else {}
+    for (repo, _, _, page), j in judged_all.items():
         # a suggestion the hook no longer makes says nothing about the page as search shows it now
         if repo == str(ROOT) and j.get("label") in ("relevant", "noise") and gate_still_passes(j, evals):
             judged.setdefault(page, []).append(j)
@@ -4547,14 +4548,12 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
                 add("own-title", what, "write the title in the words a prompt would use, or merge it with the page that ranks first")
         # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
         js = judged.get(path.name, [])
-        if is_hub(js):
-            # only a page that would be a hub costs a git call; a judgment before the last rewrite judged other text
-            written = last_write(store, path.name)
-            js = [j for j in js if written is None or (t := parse_ts(j.get("ts"))) is None or t >= written]
-        if is_hub(js):
-            c = {label: sum(j["label"] == label for j in js) for label in ("relevant", "noise")}
-            total = len(js)
-            add("hub", f"noise in {c['noise']} of {total} tune judgments ({round(100 * c['noise'] / total)}%), relevant in {c['relevant']}",
+        # only a page that would be a hub costs a git call; a judgment before the last rewrite judged other text
+        if hub_counts(js) and (written := last_write(store, path.name)) is not None:
+            js = [j for j in js if (parse_ts(j.get("ts")) or written) >= written]   # no ts: nothing shows it predates the write
+        if c := hub_counts(js):
+            noise, relevant = c
+            add("hub", f"noise in {noise} of {len(js)} tune judgments ({round(100 * noise / len(js))}%), relevant in {relevant}",
                 "narrow it or split it")
         # a page that names its successor and keeps the old text still wins searches with it
         prose = [b for b in re.split(r"\n\s*\n", SOURCES_RE.sub("", body))
