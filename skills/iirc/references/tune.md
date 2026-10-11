@@ -110,7 +110,7 @@ Page fixes:
   the unrelated prompts into its own page, cut it, merge the page into
   the one it competes with, or delete it.
   A hub count leaves out a judgment on a suggestion that the gate refuses under the current thresholds.
-  A hub count leaves out a judgment recorded before the page's last `iirc write` commit, so a rewrite resets the count.
+  A hub count leaves out a judgment of a suggestion made before the page's last `iirc write` commit, so a rewrite resets the count.
 - A relevant page that the gate refused or search never found: add the
   missing identifier to its summary.
 - A prompt where the agent investigated and no page was suggested: write

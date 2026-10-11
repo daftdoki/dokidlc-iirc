@@ -4490,12 +4490,16 @@ def own_title_skip(vectors: dict) -> str | None:
     return f"{re.sub(r'^https?://', '', url)} does not answer"
 
 
-def gate_still_passes(judgment: dict, evals: dict[str, list[dict]]) -> bool:
-    """Whether the gate under the active knobs would still suggest the judged page for its recall.
-    A pair with no candidate row counts: eval rows began 2026-10-09 and age out, and the gate cannot run without one."""
-    row = next((r for r in evals.get(str(judgment.get("recall")), [])
-                if r.get("session") == judgment.get("session") and base(r.get("page")) == base(judgment.get("page"))), None)
-    return row is None or row_passes(row, RECALL, semantic_enabled())
+def candidate_row(judgment: dict, evals: dict[str, list[dict]]) -> dict | None:
+    """The logged candidate row of the judged pair; None before eval rows began on 2026-10-09, or once they age out."""
+    return next((r for r in evals.get(str(judgment.get("recall")), [])
+                 if r.get("session") == judgment.get("session") and base(r.get("page")) == base(judgment.get("page"))), None)
+
+
+def suggested_at(judgment: dict, row: dict | None) -> float | None:
+    """When the judged suggestion was made: its row's time, else a recall key that is a time, else when it was judged."""
+    recall = str(judgment.get("recall"))
+    return parse_ts((row or {}).get("ts")) or ("T" in recall and parse_ts(recall)) or parse_ts(judgment.get("ts"))
 
 
 def hub_counts(js: list[dict]) -> tuple[int, int] | None:
@@ -4518,9 +4522,12 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
     judged_all = judgments()
     evals = eval_rows() if judged_all else {}
     for (repo, _, _, page), j in judged_all.items():
-        # a suggestion the hook no longer makes says nothing about the page as search shows it now
-        if repo == str(ROOT) and j.get("label") in ("relevant", "noise") and gate_still_passes(j, evals):
-            judged.setdefault(page, []).append(j)
+        if repo != str(ROOT) or j.get("label") not in ("relevant", "noise"):
+            continue
+        row = candidate_row(j, evals)
+        # a suggestion the hook no longer makes says nothing about the page as search shows it now; a pair with no row counts
+        if row is None or row_passes(row, RECALL, semantic_enabled()):
+            judged.setdefault(page, []).append({**j, "suggested": suggested_at(j, row)})
     findings: list[dict] = []
     for store, path in pages:
         label = page_label(store.name, path.name)
@@ -4548,9 +4555,9 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
                 add("own-title", what, "write the title in the words a prompt would use, or merge it with the page that ranks first")
         # judgments alone: page-to-page distances are not on the prompt-to-page scale of the knobs
         js = judged.get(path.name, [])
-        # only a page that would be a hub costs a git call; a judgment before the last rewrite judged other text
+        # only a page that would be a hub costs a git call; a suggestion made before the last rewrite matched other text
         if hub_counts(js) and (written := last_write(store, path.name)) is not None:
-            js = [j for j in js if (parse_ts(j.get("ts")) or written) >= written]   # no ts: nothing shows it predates the write
+            js = [j for j in js if (j["suggested"] or written) >= written]   # no time: nothing shows it predates the write
         if c := hub_counts(js):
             noise, relevant = c
             add("hub", f"noise in {noise} of {len(js)} tune judgments ({round(100 * noise / len(js))}%), relevant in {relevant}",

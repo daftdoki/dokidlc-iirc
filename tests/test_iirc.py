@@ -2849,7 +2849,7 @@ def test_audit_hub_skips_pairs_the_gate_now_refuses(tmp_path, monkeypatch, capsy
 # chore 2610111531-qq step 3
 
 def test_audit_hub_resets_when_the_page_is_rewritten(tmp_path, monkeypatch, capsys):
-    """A judgment before the page's last `iirc: write` commit no longer counts; a verify commit is no rewrite."""
+    """A judgment of a suggestion made before the page's last `iirc: write` commit no longer counts; a verify commit is no rewrite."""
     _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: {})
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -2859,9 +2859,9 @@ def test_audit_hub_resets_when_the_page_is_rewritten(tmp_path, monkeypatch, caps
         subprocess.run(["git", "-C", str(tmp_path), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
                         "-m", message], check=True, env=env)
 
-    def judge(ts):
+    def judge(ts, recall=lambda i: f"r{i}"):
         _jsonl(tmp_path / "st" / "dokidlc-iirc" / "tune" / "judgments.jsonl",
-               [{"ts": ts, "repo": str(tmp_path.resolve()), "session": "s", "recall": f"r{i}", "page": "hub.md",
+               [{"ts": ts, "repo": str(tmp_path.resolve()), "session": "s", "recall": recall(i), "page": "hub.md",
                  "label": "noise" if i < 6 else "relevant"} for i in range(8)])
     hub = "hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2"
     judge("2026-10-10T11:00:00Z")
@@ -2874,6 +2874,16 @@ def test_audit_hub_resets_when_the_page_is_rewritten(tmp_path, monkeypatch, caps
     judge("2026-10-10T13:00:00Z")
     iirc.main(["audit-page-findability", "hub.md"])
     assert hub in capsys.readouterr().out
+    # recorded after the write, about suggestions made before it: the time that counts is the suggestion's
+    judge("2026-10-10T13:00:00Z", recall=lambda i: f"2026-10-10T11:3{i}:00Z")
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert "hub.md: hub: " not in capsys.readouterr().out
+    rows = {f"r{i}": [{"session": "s", "page": "hub.md", "ts": "2026-10-10T11:30:00Z"}] for i in range(8)}
+    monkeypatch.setattr(iirc, "eval_rows", lambda: rows)
+    monkeypatch.setattr(iirc, "row_passes", lambda row, knobs, semantic=True: True)
+    judge("2026-10-10T13:00:00Z")
+    iirc.main(["audit-page-findability", "hub.md"])
+    assert "hub.md: hub: " not in capsys.readouterr().out
 
 
 # p5 step 18
