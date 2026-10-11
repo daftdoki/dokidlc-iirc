@@ -104,7 +104,9 @@ with "needs migration". Say "yes, migrate". The agent runs
 `CLAUDE.md` section, the plugin setting, and this machine's directories
 to their iirc names. It stages the changes and prints a suggested
 commit. It never commits; the agent shows you the output and commits on
-your word.
+your word. The old memory plugin stays installed but turned off; once a
+restart shows iirc running, `claude plugin uninstall memory@dokidlc
+--scope project` removes it, and the migrate output names that command.
 
 ### Ask what iirc knows
 

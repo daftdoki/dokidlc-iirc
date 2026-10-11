@@ -1913,6 +1913,8 @@ def test_migrate_fixture(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out.strip().splitlines()
     assert out[-1] == 'Suggested commit: git commit -m "iirc: migrate from the memory plugin"'
     assert any("settings.local.json" in line and "memory@memory-dev" in line for line in out)
+    # migrate turns the old plugin off and leaves its install; the line says how to remove it
+    assert any("claude plugin uninstall memory@dokidlc --scope project" in line for line in out)
     assert not (repo / ".memory").exists() and sorted(p.name for p in (repo / ".iirc").iterdir()) == ["a-page.md", "index.md"]
     assert not (repo / ".claude" / "memory.toml").exists()
     assert 'path = ".iirc"' in (repo / ".claude" / "iirc.toml").read_text()

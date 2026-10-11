@@ -86,7 +86,9 @@ memory plugin's layout, ask the creator whether to migrate. On yes, run
 `iirc migrate`. It moves `.memory/` to `.iirc/` and the config,
 CLAUDE.md section, settings, and machine directories with it, stages the
 changes, and prints a suggested commit. Show the creator what it printed,
-and commit on their word.
+and commit on their word. After the restart that loads iirc, offer the
+uninstall command its output names; the old plugin stays installed
+until then.
 
 ## When to search
 

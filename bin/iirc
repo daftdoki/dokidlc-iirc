@@ -2836,6 +2836,9 @@ def cmd_migrate(args: argparse.Namespace) -> None:
                 done.append("the search index was not rebuilt; run iirc rebuild-search-index")
         staged.append(str(store.dir.relative_to(ROOT)))
     notes = []
+    if SETTINGS_FILE in staged:
+        # the rename turns the old plugin off; its install record and cache stay until someone removes them
+        notes.append("once a restart shows iirc running, remove the old plugin: claude plugin uninstall memory@dokidlc --scope project")
     local = ROOT / ".claude" / "settings.local.json"
     if local.is_file():
         for key in re.findall(r'"(memory@[^"]+)"', local.read_text()):
