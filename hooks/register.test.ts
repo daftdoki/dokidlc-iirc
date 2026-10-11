@@ -814,24 +814,26 @@ test('near the auto-compact threshold, hands the model the write nudge once per 
   await measure(100_000)
   expect(nudges()).toHaveLength(0)                     // far from the threshold: iirc is not asked
   expect(await prompt()).toEqual([])
-  await measure(130_000)                               // past 80% of the threshold
+  await measure(140_000)                               // 87.5% of the threshold: not yet
+  expect(nudges()).toHaveLength(0)
+  await measure(145_000)                               // past 90% of the threshold
   expect(nudges()).toHaveLength(1)
   expect(nudges()[0]?.argv.slice(1)).toEqual(['remind-to-write', '--at', 'compaction'])
   expect(JSON.parse(nudges()[0]?.stdin ?? '{}')).toEqual({ session_id: 's1' })
-  await measure(135_000)
+  await measure(150_000)
   expect(nudges()).toHaveLength(1)                     // asked once per compaction window
   const tool = await $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'c1' })
   expect('context' in tool ? tool.context : undefined).toEqual([NUDGE])   // the first tool result after it carries the line
   expect(toast.some(t => t.includes('compaction'))).toBe(true)
   expect(await prompt()).toEqual([])                   // and only that one
 
-  await measure(150_000)
+  await measure(155_000)
   await $.session.compact({ trigger: 'auto', instructions: 'keep the plan', messages: summary })
   expect(instructions.at(-1)).toBe(`keep the plan\n\n${SUMMARY}`)
   await $.session.compact({ trigger: 'precompute', messages: summary })
   expect(instructions.at(-1)).toBe(SUMMARY)
 
-  await measure(140_000)                               // a new window after the compaction
+  await measure(146_000)                               // a new window after the compaction
   expect(nudges()).toHaveLength(2)
   expect(await prompt()).toEqual([NUDGE])              // a prompt carries it when it comes first
 })

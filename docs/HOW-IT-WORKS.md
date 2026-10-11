@@ -240,7 +240,7 @@ default `SessionEnd` budget is 1.5 seconds
 ([hooks](https://code.claude.com/docs/en/hooks.md)).
 
 Before a compaction, the hooks module asks the agent to write. After
-each main-thread turn it reads the context's fill. At 80% of the
+each main-thread turn it reads the context's fill. At 90% of the
 auto-compact threshold (of the window when auto-compaction is off), it
 runs `iirc remind-to-write --at compaction` once per compaction window. The line rides
 on the next tool result or prompt, whichever comes first, and a toast

@@ -44,8 +44,9 @@ const TAB_TITLE_MAX = 32
 const isStatusShown = atom({ plugin: 'iirc', key: 'isStatusShown' } as const, true)
 // Before compaction: past this share of the auto-compact threshold (of the window when auto-compaction
 // is off), ask `iirc remind-to-write --at compaction` once for its line, and hand it to the model with the next tool
-// result or prompt, whichever comes first. A fifth of the way short leaves room for the turns that write.
-const COMPACT_NEAR = 0.8
+// result or prompt, whichever comes first. A tenth short leaves the writing turn about 17k tokens on a
+// 200k window and about 97k on a 1M one; a turn that grows more than that compacts first.
+const COMPACT_NEAR = 0.9
 const compactAsked = atom({ plugin: 'iirc', key: 'compactAsked' } as const, false)
 const compactNudge = atom({ plugin: 'iirc', key: 'compactNudge' } as const, null)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
