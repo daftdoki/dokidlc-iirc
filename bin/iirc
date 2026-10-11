@@ -4506,7 +4506,7 @@ def hub_counts(js: list[dict]) -> tuple[int, int] | None:
 
 def last_write(store: Store, name: str) -> float | None:
     """When `iirc write` last committed this page in its store; None for a store outside git or a page never written there."""
-    out = git("log", "-1", "--format=%cI", "--fixed-strings", "--grep", f"iirc: write {name}", cwd=store.repo)
+    out = git("log", "-1", "--format=%aI", "--fixed-strings", "--grep", f"iirc: write {name}", cwd=store.repo)
     return parse_ts(out) if out else None
 
 
