@@ -81,7 +81,9 @@ function parts(node: unknown): [string, Record<string, unknown>][] {
   const walk = (n: unknown) => {
     if (!n || typeof n !== 'object') return
     const { type, props, children } = n as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
-    if (type === 'Text') out.push([(children ?? []).filter(c => typeof c === 'string').join(''), JSON.parse(JSON.stringify(props ?? {}))])
+    // a Text of spans is one wrapped run: its spans are the parts
+    const isSpans = type === 'Text' && (children ?? []).some(c => c && typeof c === 'object')
+    if (type === 'Text' && !isSpans) out.push([(children ?? []).filter(c => typeof c === 'string').join(''), JSON.parse(JSON.stringify(props ?? {}))])
     else for (const c of children ?? []) walk(c)
   }
   walk(node)
@@ -1206,6 +1208,27 @@ test('the drawn line under the prompt: the mark and the reason in the level\'s c
   on('ui.toast', () => ({ value: undefined }))
   await hookRow($, 'SessionStart', 'iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.', 'ha1')
   expect(parts(await (await hintRow($)).find({ key: 'iirc-todo' }))).toEqual([
-    ['✖ ', { color: 'error' }], ['Run ', { color: 'error' }], ['iirc init', { bold: true, color: 'error' }], [': this repository has no .iirc/', { color: 'error' }],
+    ['✖ ', { bold: true, color: 'error' }], ['Run ', { color: 'error' }], ['iirc init', { bold: true, color: 'error' }], [': this repository has no .iirc/', { color: 'error' }],
   ])
+})
+
+// A row Box lays each sibling out as a column of its own, and a long reason wrapped beside the command
+// (Claude Code, 200 columns): the line is one Text of inline spans, so it wraps as one run of prose
+test('the line under the prompt and the summary line are each one Text of spans, so each wraps as a whole', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  await hookRow($, 'SessionStart', 'iirc: 9 pages, semantic via h:1. Maintenance is due (2 suggestion lookups timed out in the last 7 days and since the last run); run /iirc run-maintenance. Persistence: .claude/settings.json does not exist.', 'hw1')
+  // the keyed Box holds one Text, and that Text holds only Text spans
+  const isSpans = (box: unknown) => {
+    const kids = ((box ?? {}) as { children?: unknown[] }).children ?? []
+    const { type, children } = (kids[0] ?? {}) as { type?: string; children?: unknown[] }
+    return kids.length === 1 && type === 'Text' && !!children?.length && children.every(c => !!c && typeof c === 'object' && (c as { type?: string }).type === 'Text')
+  }
+  const todo = await (await hintRow($)).find({ key: 'iirc-todo' })
+  expect(isSpans(todo)).toBe(true)
+  expect(parts(todo)).toEqual([
+    ['▲ ', { bold: true, color: 'warning' }], ['Run ', { color: 'warning' }], ['iirc doctor --fix', { bold: true, color: 'warning' }],
+    [': persistence: .claude/settings.json does not exist', { color: 'warning' }], [', and 1 more', { color: 'subtle' }],
+  ])
+  expect(isSpans(await (await bandRow($)).find({ key: 'iirc-line' }))).toBe(true)
 })

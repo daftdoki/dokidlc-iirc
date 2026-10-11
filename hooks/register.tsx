@@ -344,14 +344,14 @@ export function actionParts(s: IircStatus | null, c: SessionCounts): LinePart[] 
   const color = first.level === 'error' ? 'error' : 'warning'
   // a fix that is a command reads "Run it"; one that is not, such as updating the plugin, is the instruction itself
   const isCommand = !!first.fix && /^\/?iirc /.test(first.fix)
-  const out: LinePart[] = [{ text: first.level === 'error' ? '✖ ' : '▲ ', color }]
+  const out: LinePart[] = [{ text: first.level === 'error' ? '✖ ' : '▲ ', bold: true, color }]
   if (first.fix) {
     if (isCommand) out.push({ text: 'Run ', color })
     out.push({ text: isCommand ? first.fix : first.fix[0].toUpperCase() + first.fix.slice(1), bold: true, color }, { text: `: ${first.why}`, color })
   } else {
     out.push({ text: first.why[0].toUpperCase() + first.why.slice(1), color })
   }
-  if (all.length > 1) out.push({ text: `, and ${all.length - 1} more`, color })
+  if (all.length > 1) out.push({ text: `, and ${all.length - 1} more`, color: 'subtle' })
   return out
 }
 
@@ -1468,13 +1468,16 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
   )
 }
 
-/** What the engine drew, with one row of iirc's under it. */
-function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, row: RenderChildren[]) {
-  const { Box } = $.ui.resolve(e)
+/**
+ * What the engine drew, with one line of iirc's under it, in a keyed Box. The line is one Text of inline spans,
+ * so it wraps as one run of prose: in a row Box each span would take a column of its own and wrap inside it.
+ */
+function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[]) {
+  const { Box, Text } = $.ui.resolve(e)
   return (
     <Box flexDirection="column">
       {original}
-      <Box key={key} flexDirection="row">{row}</Box>
+      <Box key={key}><Text>{spans}</Text></Box>
     </Box>
   )
 }
