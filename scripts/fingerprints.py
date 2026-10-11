@@ -40,7 +40,8 @@ def entry_for(model, host: str):
             sys.exit(f"bin/iirc-cpu could not run {model.id}: {out[-500:]}")
         name = model.names["onnx"][0]
         return iirc.Entry(model.id, iirc.CPU, "onnx", name), f"{name} through onnxruntime, fp32"
-    name = next((n for n in model.names["ollama"] if iirc.model_present(host, n)), None)
+    tags = iirc.ollama_tags(host)
+    name = iirc.first_build(model, tags) if tags is not None else None
     if name is None:
         return None
     build = iirc.ollama_build(host, name)

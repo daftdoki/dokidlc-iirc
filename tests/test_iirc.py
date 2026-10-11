@@ -3270,9 +3270,10 @@ def test_empty_old_flat_table_names_itself(tmp_path, monkeypatch):
 # p5 step 25
 
 @contextlib.contextmanager
-def _fake_openai(monkeypatch, model, dims=None, listed=True):
+def _fake_openai(monkeypatch, model, dims=None, listed=True, version=False):
     """An OpenAI-compatible host: 404 on GET, and /v1/embeddings with _fake_ollama's vectors, listed in reverse order, `dims` wide, for the
-    model's openai name; 404 for any other name. With `listed`, the machine's list names it. Yields the inputs, with the host's URL as .url."""
+    model's openai name; 404 for any other name. With `version`, GET /api/version answers as a front end such as Open WebUI does. With
+    `listed`, the machine's list names it. Yields the inputs, with the host's URL as .url."""
     import http.server
     seen = _Seen()
     name = iirc.iirc_embed.MODELS[model].names["openai"][0]
@@ -3280,6 +3281,8 @@ def _fake_openai(monkeypatch, model, dims=None, listed=True):
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            if version and self.path == "/api/version":
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"version": "0.6.5"}'); return
             self.send_response(404); self.end_headers()
 
         def do_POST(self):
@@ -4775,6 +4778,16 @@ def test_add_embedding_model_finds_the_protocol(tmp_path, monkeypatch, capsys):
     assert entries[1:] == [_entry(QWEN, host.url, "openai"), _entry("all-minilm-l6-v2", "cpu", "onnx")]
     assert [(e.model, e.protocol) for e in iirc.machine_models()] == [(QWEN, "ollama"), (QWEN, "openai"), ("all-minilm-l6-v2", "onnx")]
     assert not (tmp_path / ".claude" / "iirc.toml").exists()
+
+
+def test_add_embedding_model_takes_a_front_end_for_openai(tmp_path, monkeypatch, capsys):
+    """A host is ollama only when /api/tags lists models: a front end that answers /api/version at its root, and no /api/tags, is tried
+    as OpenAI-compatible."""
+    _project(tmp_path, monkeypatch)
+    with _fake_openai(monkeypatch, QWEN, listed=False, version=True) as host:
+        iirc.main(["add-embedding-model", QWEN, host.url])
+        assert "OpenAI-compatible" in capsys.readouterr().out
+    assert iirc.read_config()["embedding_models"] == [_entry(QWEN, host.url, "openai")]
 
 
 def test_add_embedding_model_refuses_a_host_without_the_model(tmp_path, monkeypatch, capsys):

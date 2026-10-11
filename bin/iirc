@@ -983,15 +983,38 @@ def _probe(base_url: str, timeout: float, no_route: bool = False) -> tuple[bool,
         return False, None
 
 
-def model_present(base_url: str, model: str, timeout: float = HOST_TIMEOUT) -> bool:
+def http_json(url: str, body: dict | None = None):
+    """What URL answers as JSON to a GET, or to a POST of BODY; None when it gives no JSON within HOST_TIMEOUT."""
     try:
-        with urllib.request.urlopen(base_url + "/api/tags", timeout=timeout) as resp:
-            tags = json.load(resp)
+        if body is not None:
+            return iirc_embed._post(url, body, HOST_TIMEOUT)
+        with urllib.request.urlopen(url, timeout=HOST_TIMEOUT) as resp:
+            return json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
-        return False
-    names = {m.get("name", "") for m in tags.get("models", [])}
-    # a tagged model must match its tag; an untagged one matches any tag of that name
-    return model in names if ":" in model else model in {n.split(":")[0] for n in names}
+        return None
+
+
+def ollama_tags(base_url: str) -> list[str] | None:
+    """The builds BASE_URL lists at /api/tags, or None when it gives no models list there and so is not an ollama host. A front end
+    such as Open WebUI answers /api/version at its root without being ollama there."""
+    got = http_json(base_url + "/api/tags")
+    models = got.get("models") if isinstance(got, dict) else None
+    return [str(m.get("name", "")) for m in models if isinstance(m, dict)] if isinstance(models, list) else None
+
+
+def has_build(tags: list[str], name: str) -> bool:
+    # a tagged name must match its tag; an untagged one matches any tag of that name
+    return name in tags if ":" in name else name in {t.split(":")[0] for t in tags}
+
+
+def first_build(model: iirc_embed.Model, tags: list[str]) -> str | None:
+    """The first of MODEL's ollama names that a host listing TAGS has."""
+    return next((n for n in model.names.get("ollama", []) if has_build(tags, n)), None)
+
+
+def model_present(base_url: str, name: str) -> bool:
+    tags = ollama_tags(base_url)
+    return tags is not None and has_build(tags, name)
 
 
 # --- pin --------------------------------------------------------------------
@@ -3118,16 +3141,6 @@ def cmd_show_embedding_models(args: argparse.Namespace) -> None:
         print(f"this machine cannot serve {MODEL.id}; `iirc doctor` names the ways out")
 
 
-def ollama_answers(url: str) -> bool:
-    """True when GET URL/api/version answers as ollama does."""
-    try:
-        with urllib.request.urlopen(url + "/api/version", timeout=HOST_TIMEOUT) as resp:
-            body = json.load(resp)
-    except (urllib.error.URLError, OSError, ValueError):
-        return False
-    return isinstance(body, dict) and "version" in body
-
-
 def pull_command(url: str, name: str) -> str:
     return f"ollama pull {name}" if url == LOCAL_OLLAMA else f"OLLAMA_HOST={url} ollama pull {name}"
 
@@ -3157,11 +3170,9 @@ def probe_vector(e: Entry):
 
 def ollama_build(host: str, name: str) -> str | None:
     """The quantization ollama reports for a build, such as F16 or Q8_0; None when it reports none."""
-    try:
-        got = iirc_embed._post(host + "/api/show", {"model": name}, HOST_TIMEOUT)
-        level = got.get("details", {}).get("quantization_level")
-    except (urllib.error.URLError, OSError, ValueError, AttributeError):
-        return None
+    got = http_json(host + "/api/show", {"model": name})
+    details = got.get("details") if isinstance(got, dict) else None
+    level = details.get("quantization_level") if isinstance(details, dict) else None
     return str(level) if level else None
 
 
@@ -3201,10 +3212,11 @@ def found_entry(model: iirc_embed.Model, host: str) -> Entry:
             die(f"bin/iirc-cpu could not run the model, so nothing was added: {out[-500:]}\n"
                 "onnxruntime may have no wheel for this machine; `iirc search-mode string` is the fallback.")
         return Entry(model.id, CPU, "onnx", model.names["onnx"][0])
-    if ollama_answers(host):
+    tags = ollama_tags(host)
+    if tags is not None:
         if "ollama" not in model.names:
             die(f"{host} is an ollama host, and {model.id} does not run on ollama. Nothing was added.")
-        name = next((n for n in model.names["ollama"] if model_present(host, n)), None)
+        name = first_build(model, tags)
         if name is None:
             die(f"{host} is an ollama host without {model.id}, so nothing was added. Pull it there, then run this again: "
                 f"{pull_command(host, model.names['ollama'][0])}")
