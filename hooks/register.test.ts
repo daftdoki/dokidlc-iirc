@@ -16,7 +16,7 @@ const STOP =
 
 // Stand-ins for the engine beneath the plugin: it stores rows, runs tools, reads
 // files, and draws each row as plain text.
-function engine(on: On, toml = '') {
+function engine(on: On, toml = '', isBandEmpty = false) {
   // Needs the test kit of 2.1.290 or later, which keeps rows beneath this hook.
   on('session.append', ($, e, next) => next(e))
   on('tool.call', () => ({ result: 'ok' }))
@@ -29,7 +29,9 @@ function engine(on: On, toml = '') {
   on('store.get', ($, e) => ({ value: kept.get(e.key) }))
   on('store.set', ($, e) => (kept.set(e.key, e.value), { value: undefined }))
   on('ui.render', ($, e) => {
-    const { Text } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
+    // with no survey, the engine's band may hold nothing
+    if (isBandEmpty && e.component === 'AbovePrompt') return h(Box, null)
     return h(Text, null, 'engine row')
   })
 }
@@ -1206,6 +1208,16 @@ test('the summary line hides zero counters and the suggested pages read with no 
   expect(statusText(ok, counts(), 'qwen3-embedding-0.6b')).toBe('iirc status  qwen3-embedding-0.6b · 110 pages')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status
   expect(statusText(down, counts({ reads: 1 }), 'qwen3-embedding-0.6b')).toBe('iirc status  1 read  string search · 5 pages')
+})
+
+test('over an empty engine band, the band is our one row and nothing else', async ($: Engine, on: On) => {
+  engine(on, '', true)
+  on('ui.toast', () => ({ value: undefined }))
+  await hookRow($, 'SessionStart', OK_BRIEF, 'he1')
+  const root = (await (await bandRow($)).find({ text: 'iirc status' })) as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  expect(root.type).toBe('Box')
+  expect(root.props?.flexDirection).toBe('row')                // the keyed row itself, no column holding an empty element above it
+  expect(parts(root).map(([t]) => t).join('')).toBe('● ▍iirc status  110 pages')
 })
 
 test('the band\'s right end: the model or string search, then the page count, dropped first at a narrow width', async ($: Engine, on: On) => {

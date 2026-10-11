@@ -1589,12 +1589,24 @@ function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, 
       {right && <Box flexShrink={0}><Text>{right}</Text></Box>}
     </Box>
   )
+  // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt
+  if (isEmpty(original)) return row
   return (
     <Box flexDirection="column">
       {original}
       {row}
     </Box>
   )
+}
+
+/** Whether a drawn tree holds nothing to see: no text, no Button. */
+function isEmpty(node: unknown): boolean {
+  if (node === null || node === undefined || node === false || node === '') return true
+  if (typeof node === 'string' || typeof node === 'number') return false
+  if (Array.isArray(node)) return node.every(isEmpty)
+  const { type, children, props } = node as { type?: string; children?: unknown; props?: { children?: unknown } }
+  if (type === 'Button') return false
+  return isEmpty(children ?? props?.children)
 }
 
 /** The accent bar that opens a section title and the summary line. */
