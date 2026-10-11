@@ -49,6 +49,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import functools
 import hashlib
 import io
 import json
@@ -3150,8 +3151,11 @@ def pull_command(url: str, name: str) -> str:
 # measured 0.99917 to 0.99987 against each other. A build under it is another model, size, or version under the same name.
 FINGERPRINTS_FILE = PLUGIN_ROOT / "bin" / "fingerprints.json"
 FINGERPRINT_CUT = 0.995
+# what scripts/fingerprints.py embeds; the checks embed the probe the shipped vectors were made from, which the file names
+PROBE = "A page records what a past session learned, such as the fix for a command that failed twice before it worked."
 
 
+@functools.cache
 def fingerprints() -> dict:
     """bin/fingerprints.json: {"probe": sentence, "models": {model: {"build": what made it, "vector": [...]}}}."""
     try:
@@ -3161,10 +3165,12 @@ def fingerprints() -> dict:
     return data if isinstance(data, dict) and isinstance(data.get("models"), dict) else {"probe": "", "models": {}}
 
 
-def probe_vector(e: Entry):
-    """The probe sentence embedded as a document through the entry, at whatever width the host answers; None when it gives none."""
+def probe_vector(e: Entry, probe: str | None = None):
+    """PROBE, by default the reference file's probe sentence, embedded as a document through the entry, at whatever width the host
+    answers; None when it gives none."""
     model = iirc_embed.MODELS[e.model]
-    got = iirc_embed.embed(backend_for(e), [iirc_embed.doc_text(fingerprints()["probe"].encode(), model)], "doc", any_width=True)
+    probe = probe or fingerprints()["probe"]
+    got = iirc_embed.embed(backend_for(e), [iirc_embed.doc_text(probe.encode(), model)], "doc", any_width=True)
     return got[0][0] if got else None
 
 

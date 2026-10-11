@@ -28,9 +28,6 @@ _spec = importlib.util.spec_from_loader("iirc", _loader)
 iirc = importlib.util.module_from_spec(_spec)
 _loader.exec_module(iirc)
 
-PROBE = "A page records what a past session learned, such as the fix for a command that failed twice before it worked."
-
-
 def entry_for(model, host: str):
     """(entry, build) for the model's build on this machine, or None when the host lacks every ollama name of it."""
     if "onnx" in model.names:
@@ -53,8 +50,7 @@ def main() -> None:
     parser.add_argument("--host", default=iirc.LOCAL_OLLAMA, help="the ollama host; default %(default)s")
     args = parser.parse_args()
     host = iirc.host_url(args.host)
-    out = {"probe": PROBE, "models": {}}
-    iirc.fingerprints = lambda: {"probe": PROBE, "models": {}}   # probe_vector reads the probe from here
+    out = {"probe": iirc.PROBE, "models": {}}
     with tempfile.TemporaryDirectory(prefix="iirc-fingerprints-") as tmp:
         for var in ("XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
             os.environ[var] = str(Path(tmp) / var.lower())
@@ -64,7 +60,7 @@ def main() -> None:
                 print(f"{model.id}: {host} has none of {', '.join(model.names['ollama'])}; left out", file=sys.stderr)
                 continue
             entry, build = found
-            vec = iirc.probe_vector(entry)
+            vec = iirc.probe_vector(entry, iirc.PROBE)
             if vec is None or len(vec) != model.dims:
                 sys.exit(f"{model.id}: {build} gave " + ("no vector" if vec is None else f"a {len(vec)}-wide vector, not {model.dims}"))
             out["models"][model.id] = {"build": build, "vector": [round(float(x), 5) for x in vec]}

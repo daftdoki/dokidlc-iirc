@@ -4993,7 +4993,7 @@ def test_fingerprint_warns_and_refuses(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
     monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
     refs = json.loads((ROOT / "bin" / "fingerprints.json").read_text())
-    assert refs["probe"] and set(refs["models"]) <= set(iirc.iirc_embed.MODELS)
+    assert refs["probe"] == iirc.PROBE and set(refs["models"]) <= set(iirc.iirc_embed.MODELS)
     assert {"nomic-embed-text", QWEN, "all-minilm-l6-v2"} <= set(refs["models"])
     for model, ref in refs["models"].items():
         assert len(ref["vector"]) == iirc.iirc_embed.MODELS[model].dims and ref["build"]
