@@ -104,7 +104,7 @@ def project_root() -> Path:
 
 def set_root(root: Path) -> None:
     """Set the project root and load its stores. A bad store config is kept as CONFIG_ERROR; commands die on it, hooks stay quiet."""
-    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL, MODEL, MODEL_SOURCE, HOST_ENTRY
+    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL, MODEL, MODEL_SOURCE
     ROOT = Path(root).resolve()
     try:
         STORES, WRITE_DEFAULT = load_stores(ROOT)
@@ -117,7 +117,6 @@ def set_root(root: Path) -> None:
         STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
         MODEL, MODEL_SOURCE = model_and_source({})
         RECALL = {k: v[0] for k, v in knob_spec().items()}
-    HOST_ENTRY = serving_entry(MODEL.id)
 
 
 def plugin_commit() -> str:
@@ -144,10 +143,11 @@ _CONFIG: tuple[Path, dict] | None = None
 
 
 def read_config() -> dict:
-    """The setup file, parsed once per process per path. write_config_file resets the cache."""
+    """The setup file, parsed once per process per path. write_config_file resets the cache, and with it host_entry's."""
     global _CONFIG
     path = config_file()
     if _CONFIG is None or _CONFIG[0] != path:
+        _ENTRY.clear()
         try:
             data = tomllib.loads(path.read_text()) if path.is_file() else {}
         except (tomllib.TOMLDecodeError, OSError):
@@ -212,18 +212,22 @@ def model_entries(model: str) -> list[Entry]:
     return [e for e in machine_models() if e.model == model]
 
 
-def serving_entry(model: str) -> Entry | None:
-    """The entry that serves MODEL on this machine: the preferred one when it is listed, else the only one, else the first. None when no
-    listed host serves it."""
-    entries = model_entries(model)
-    want = preferred_hosts().get(model)
-    return next((e for e in entries if e.host == want), entries[0] if entries else None)
+# model id -> host_entry's answer, for the setup file read_config holds; read_config clears it when it reads the file again
+_ENTRY: dict[str, tuple[Entry | None, bool]] = {}
 
 
-def unpreferred(model: str) -> bool:
-    """True when two or more listed hosts serve MODEL and none is preferred, so a hook uses the first and says so."""
-    entries = model_entries(model)
-    return len(entries) > 1 and preferred_hosts().get(model) not in {e.host for e in entries}
+def host_entry(model: str | None = None) -> tuple[Entry | None, bool]:
+    """(the entry that serves MODEL on this machine, ambiguous), MODEL by default the repository's. The entry is the preferred one when
+    it is listed, else the only one, else the first, and None when no listed host serves the model. ambiguous is True when two or more
+    listed hosts serve it and none is preferred, so a hook uses the first and says so."""
+    read_config()   # a setup file read again clears the cache
+    model = model or MODEL.id
+    if model not in _ENTRY:
+        entries = model_entries(model)
+        want = preferred_hosts().get(model)
+        hosts = {e.host for e in entries}
+        _ENTRY[model] = (next((e for e in entries if e.host == want), entries[0] if entries else None), len(entries) > 1 and want not in hosts)
+    return _ENTRY[model]
 
 
 def semantic_enabled() -> bool:
@@ -232,10 +236,8 @@ def semantic_enabled() -> bool:
 
 
 def set_machine(**values) -> Path:
-    """Write these keys to the setup file, keep the others, and resolve the model and its host again."""
-    path = write_config_file({**read_config(), **values})
-    set_root(ROOT)
-    return path
+    """Write these keys to the setup file and keep the others. host_entry reads the new list on its next call."""
+    return write_config_file({**read_config(), **values})
 
 
 # A closed port: the tool's client fails at once and falls back to string search.
@@ -263,14 +265,18 @@ def cpu_ready() -> bool:
     return all((minilm_dir() / name).is_file() for name in iirc_embed.MINILM_FILES)
 
 
+_UP: dict[Entry, bool] = {}   # host_up's answer per entry, once per process
+
+
 def host_up() -> bool:
-    """True when the serving entry can embed now: the model files are here, or its host answers a GET (cached, see host_answers)."""
-    e = HOST_ENTRY
+    """True when the serving entry can embed now: the model files are here, or its host answers a GET (see host_answers). Asked once
+    per process for each entry."""
+    e, _ = host_entry()
     if e is None:
         return False
-    if e.protocol == "onnx":
-        return cpu_ready()
-    return host_answers(e.host, no_route=e.protocol == "openai")
+    if e not in _UP:
+        _UP[e] = cpu_ready() if e.protocol == "onnx" else host_answers(e.host, no_route=e.protocol == "openai")
+    return _UP[e]
 
 
 def backend_for(e: Entry) -> iirc_embed.Backend:
@@ -281,15 +287,18 @@ def backend_for(e: Entry) -> iirc_embed.Backend:
 
 
 def embedding_backend() -> iirc_embed.Backend:
-    """The serving entry as a Backend. Callers check HOST_ENTRY first, through require_host."""
-    return backend_for(HOST_ENTRY)
+    """The serving entry as a Backend. Callers check that one serves the model first, through require_host."""
+    e, _ = host_entry()
+    if e is None:
+        raise RuntimeError(f"no listed host serves {MODEL.id}; call require_host first")
+    return backend_for(e)
 
 
 def search_status() -> str:
     """How search runs here, for the brief: semantic and where, or string only and why, with the command that helps in backticks."""
     if not semantic_enabled():
         return "string search"
-    model, e = active_model(), HOST_ENTRY
+    model, (e, _) = active_model(), host_entry()
     # a model id may hold a dot, so it goes inside the parentheses, which hooks/register.tsx reads whole
     if e is None:
         return f"string only (this machine cannot serve {model.id}; `iirc doctor` names the ways out)"
@@ -388,10 +397,9 @@ def model_and_source(cfg: dict) -> tuple[iirc_embed.Model, str]:
     return iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL], "the built-in default"
 
 
-# set_root resolves the model and the entry that serves it once per root; a command that writes either resolves them again
+# set_root resolves the model once per root, and a command that writes it resolves it again; host_entry() finds what serves it
 MODEL: iirc_embed.Model = iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL]
 MODEL_SOURCE = "the built-in default"
-HOST_ENTRY: Entry | None = None
 
 
 def active_model() -> iirc_embed.Model:
@@ -1066,7 +1074,7 @@ def require_host() -> bool:
     """True when embeddings will work. Prints one line and returns False otherwise."""
     if not semantic_enabled():
         return False
-    model, e = active_model(), HOST_ENTRY
+    model, (e, _) = active_model(), host_entry()
     if e is None:
         print(f"iirc: this machine cannot serve {model.id}; results are string matches only. `iirc doctor` names the ways out.", file=sys.stderr)
         return False
@@ -3033,7 +3041,7 @@ def ways_out(model: iirc_embed.Model) -> str:
 
 def ask_host(model: str) -> None:
     """Two listed hosts serve MODEL and none is preferred: on a terminal, ask once which this machine uses, and record it."""
-    if not unpreferred(model) or not sys.stdin.isatty():
+    if not host_entry(model)[1] or not sys.stdin.isatty():
         return
     entries = model_entries(model)
     print(f"{len(entries)} hosts on this machine's list serve {model}. Which should this machine use?")
@@ -3072,7 +3080,7 @@ def cmd_set_embedding_model(args: argparse.Namespace) -> None:
     if old != model.id:
         print(f"From {old} to {model.id}: " + SWITCH_COSTS.format(new=model.id, old=old) + ".")
     ask_host(model.id)
-    e = HOST_ENTRY
+    e, _ = host_entry()
     if e is None:
         print(f"this machine cannot serve {model.id}: no host on its list serves it. `iirc add-embedding-model {model.id} HOST` adds one.")
         return
@@ -3085,15 +3093,15 @@ def cmd_set_embedding_model(args: argparse.Namespace) -> None:
 
 def cmd_show_embedding_models(args: argparse.Namespace) -> None:
     """This machine's list: one row per entry, the entry that serves this repository's model marked, and the preferred hosts."""
-    entries, prefs = machine_models(), preferred_hosts()
+    entries, prefs, (serving, _) = machine_models(), preferred_hosts(), host_entry()
     print(f"search mode: {'semantic' if semantic_enabled() else 'string'}; this repository's model: {MODEL.id} (set in {MODEL_SOURCE})")
     if not entries:
         print(f"no embedding models on this machine's list in {config_file()}; `iirc add-embedding-model MODEL HOST` adds one")
         return
     for e in entries:
-        marks = (["serves this repository"] if e == HOST_ENTRY else []) + (["preferred"] if prefs.get(e.model) == e.host else [])
+        marks = (["serves this repository"] if e == serving else []) + (["preferred"] if prefs.get(e.model) == e.host else [])
         print(f"{e.model}  {e.host}  {e.protocol}  {e.name}" + (f"  ({', '.join(marks)})" if marks else ""))
-    if HOST_ENTRY is None:
+    if serving is None:
         print(f"this machine cannot serve {MODEL.id}; `iirc doctor` names the ways out")
 
 
@@ -3999,7 +4007,7 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
         pinned = install_tool(pin) and pin_matches(pin, installed_rev())
     report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
 
-    model, e = active_model(), HOST_ENTRY
+    model, (e, ambiguous) = active_model(), host_entry()
     report(f"embedding model {model.id}, set in {MODEL_SOURCE}", True)
     up = False   # embeddings work, so --fix can reindex
     if not config_file().is_file():
@@ -4010,7 +4018,7 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
     elif e is None:
         report(f"this machine cannot serve {model.id}", False, ways_out(model))
     else:
-        if unpreferred(model.id):
+        if ambiguous:
             print(f"note two hosts serve {model.id} on this machine and none is preferred, so it uses {e.host}; "
                   f"iirc prefer-embedding-host {model.id} HOST picks one")
         if e.protocol == "onnx":
@@ -4146,8 +4154,9 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             # a hook never writes the repository's model; the first command that needs one does
             parts.append(f"This repository names no embedding model, so it uses {MODEL.id}, the first on this machine's list; "
                          f"ask the creator whether to keep it, and `iirc set-embedding-model {MODEL.id}` writes it.")
-        if semantic_enabled() and unpreferred(MODEL.id):
-            parts.append(f"Two hosts serve {MODEL.id} on this machine and none is preferred, so it uses {where(HOST_ENTRY)}; "
+        serving, ambiguous = host_entry()
+        if semantic_enabled() and ambiguous:
+            parts.append(f"Two hosts serve {MODEL.id} on this machine and none is preferred, so it uses {where(serving)}; "
                          f"ask the creator which to use, and `iirc prefer-embedding-host {MODEL.id} HOST` records it.")
         if len(STORES) > 1:
             parts.append("Stores: " + ", ".join(f"{s.name} {len(ps)}" for s, ps in per_store) + ".")
@@ -4889,13 +4898,14 @@ def own_title_skip(vectors: dict) -> str | None:
         return "no vectors"
     if not semantic_enabled():
         return "string search"
-    if HOST_ENTRY is None:
+    e, _ = host_entry()
+    if e is None:
         return f"this machine cannot serve {active_model().id}"
     if host_up():
         return None
-    if HOST_ENTRY.protocol == "onnx":
+    if e.protocol == "onnx":
         return f"the {active_model().id} model files are missing"
-    return f"{where(HOST_ENTRY)} does not answer"
+    return f"{where(e)} does not answer"
 
 
 def candidate_row(judgment: dict, evals: dict[str, list[dict]]) -> dict | None:

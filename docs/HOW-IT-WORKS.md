@@ -602,7 +602,7 @@ Where the model runs is the machine's: `embedding_models` in
 `~/.config/dokidlc-iirc/config.toml` lists entries of a model, a host
 (a URL, or `cpu`), the protocol (`ollama`, `openai`, `onnx`), and the
 build's name, which `iirc add-embedding-model` finds by asking the host.
-`serving_entry()` picks the entry for the repository's model: the one
+`host_entry()` picks the entry for the repository's model: the one
 `embedding_preferred` names, else the only one, else the first, and the
 session-start line says when two serve it and none is preferred. No
 entry means "this machine cannot serve MODEL": search matches strings,

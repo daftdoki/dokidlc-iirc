@@ -43,7 +43,8 @@ def _machine_dirs(tmp_path_factory, monkeypatch):
         monkeypatch.setenv(var, str(base / var.lower()))
     # set_root resolves the model once; a test that never calls it must not get the last test's
     monkeypatch.setattr(iirc, "MODEL", iirc.iirc_embed.MODELS[iirc.iirc_embed.DEFAULT_MODEL])
-    monkeypatch.setattr(iirc, "HOST_ENTRY", None)
+    monkeypatch.setattr(iirc, "_CONFIG", None)
+    monkeypatch.setattr(iirc, "_UP", {})
 
 
 
@@ -4610,7 +4611,7 @@ def test_repository_model_wins_over_the_machine_lists_first(tmp_path):
     (named / ".claude").mkdir(parents=True); plain.mkdir()
     (named / ".claude" / "iirc.toml").write_text(f'embedding_model = "{QWEN}"\n')
     iirc.set_root(named)
-    assert iirc.CONFIG_ERROR is None and iirc.active_model().id == QWEN and iirc.HOST_ENTRY is None
+    assert iirc.CONFIG_ERROR is None and iirc.active_model().id == QWEN and iirc.host_entry()[0] is None
     assert iirc.RECALL == {k: v[0] for k, v in iirc.iirc_embed.MODELS[QWEN].knobs.items()}
     iirc.set_root(plain)
     assert iirc.active_model().id == "nomic-embed-text" and iirc.MODEL_SOURCE == iirc.FIRST_LISTED
@@ -4822,10 +4823,10 @@ def test_prefer_embedding_host(tmp_path, monkeypatch, capsys):
     a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
     _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
     _repo_model(tmp_path, QWEN)
-    assert iirc.serving_entry(QWEN).host == a["host"]
+    assert iirc.host_entry(QWEN)[0].host == a["host"]
     iirc.main(["prefer-embedding-host", QWEN, "https://llm.example.net"])
     assert iirc.read_config()["embedding_preferred"] == {QWEN: b["host"]}
-    assert iirc.serving_entry(QWEN).host == b["host"] and iirc.HOST_ENTRY.host == b["host"]
+    assert iirc.host_entry(QWEN)[0].host == b["host"] and iirc.host_entry()[0].host == b["host"]
     iirc.main(["prefer-embedding-host", QWEN, "local"])
     assert iirc.read_config()["embedding_preferred"] == {QWEN: a["host"]}
     with pytest.raises(SystemExit):
@@ -4843,7 +4844,7 @@ def test_two_hosts_ask_once_on_a_terminal(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(prompt) or "2")
     iirc.main(["set-embedding-model", QWEN])
     assert len(asked) == 1 and iirc.read_config()["embedding_preferred"] == {QWEN: b["host"]}
-    assert iirc.HOST_ENTRY.host == b["host"]
+    assert iirc.host_entry()[0].host == b["host"]
     iirc.main(["set-embedding-model", QWEN])
     assert len(asked) == 1
 
@@ -4855,7 +4856,7 @@ def test_two_hosts_without_a_preference_use_the_first_and_say_so(tmp_path, monke
     a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
     _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
     _repo_model(tmp_path, QWEN)
-    assert iirc.HOST_ENTRY.host == a["host"]
+    assert iirc.host_entry()[0].host == a["host"]
     out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
     assert "semantic via 127.0.0.1:11434" in out
     assert f"Two hosts serve {QWEN} on this machine" in out and f"`iirc prefer-embedding-host {QWEN} HOST`" in out
@@ -4926,7 +4927,7 @@ def test_machine_that_cannot_serve_the_model_falls_back_and_says_so(tmp_path, mo
     monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: pytest.fail("no host serves the model, so none is asked"))
     _machine_config({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", "http://127.0.0.1:11434")]})
     _repo_model(tmp_path, QWEN)
-    assert iirc.HOST_ENTRY is None and iirc.semantic_search("alpha") == []
+    assert iirc.host_entry()[0] is None and iirc.semantic_search("alpha") == []
     assert iirc.search_status().startswith(f"string only (this machine cannot serve {QWEN};")
     out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
     assert f"string only (this machine cannot serve {QWEN};" in out
@@ -5070,7 +5071,7 @@ def test_no_reader_of_the_old_shape(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:11434")
     monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: pytest.fail("the old keys named a host"))
     _machine_config({"semantic": True, "embedding_host": "http://127.0.0.1:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
-    assert iirc.machine_models() == [] and iirc.HOST_ENTRY is None and iirc.semantic_search("alpha") == []
+    assert iirc.machine_models() == [] and iirc.host_entry()[0] is None and iirc.semantic_search("alpha") == []
     capsys.readouterr()
     assert "`iirc doctor --fix` converts" in _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
     assert "FAIL" in _doctor(["doctor"], capsys) and "embedding_host" in iirc.config_file().read_text()
