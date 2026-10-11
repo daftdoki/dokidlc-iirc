@@ -153,8 +153,9 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 - The vectors live in the machine's cache directory, one store per model,
   not the repository. A fresh clone or a new model rebuilds them on first use.
 - Nothing from a page runs or goes out without you. A check command that
-  came with a clone runs only after you approve it, and a page's URLs are
-  contacted only by `iirc find-suspect-pages --network`, which asks first.
+  came with a clone runs only after you approve it, and a page's URLs, and a
+  check that contacts the network, run only under
+  `iirc find-suspect-pages --network`, which asks first.
 - The guard refuses a raw read of a page by pattern, which is a
   convention, not a boundary.
 - Two near-duplicate pages make search name the wrong one;

@@ -266,7 +266,7 @@ Both commands print nothing in a repository with no store.
 ### The guard
 
 `PreToolUse` on Bash and Read runs `scripts/guard.sh`. Claude Code asks
-you before `iirc find-suspect-pages --network` and `iirc approve-page-check`. A raw read of a
+you before `iirc find-suspect-pages --network`, `iirc verify --network`, and `iirc approve-page-check`. A raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, `more`, or the Read
 tool, is denied, and the reason tells the agent to use `iirc read`, which
 prints the trust markers, or `iirc doctor --fix` if that fails.
@@ -361,7 +361,7 @@ The tool hangs about 75 seconds on a host that goes silent.
 | `topics` | One or two tags. `iirc show-page-topics` counts them. |
 | `kind` | `environment`, `procedure`, `finding`, or `decision`. |
 | `refs` | Files the page cites, each at a commit, or URLs. See [Sources](#sources). |
-| `check` | A read-only command that reads local state and contacts no host. If it fails, the page becomes suspect. |
+| `check` | A read-only command that reads local state. If it fails, the page becomes suspect. |
 | `verified` | When the agent last confirmed the page. |
 
 The kind sets an age: 30 days for `environment`, 90 for `procedure`, 180
@@ -374,13 +374,17 @@ A check written on this machine is approved when it is written. A check
 that arrived with a clone runs only after the agent asks you and runs
 `iirc approve-page-check`.
 
-A check may not contact the network. `iirc write` refuses a check that
-calls curl, wget, gh, `git fetch`, `pull`, `push`, `clone`, or
-`ls-remote`, ssh, scp, rsync to a host, nc, ncat, or http as a command.
-`find-suspect-pages` lists an existing page with such a check as suspect
-and does not run the check; `verify` refuses the page. The match is on
-the check's own command line. iirc does not read a script the check
-calls, so a script that reaches a host is the author's call to avoid.
+A check should read local state. A check that must contact the outside
+world runs only with your consent, as URL refs do. iirc knows one by its
+own command line: curl, wget, gh, `git fetch`, `pull`, `push`, `clone`,
+or `ls-remote`, ssh, scp, rsync to a host, nc, ncat, or http as a
+command. `iirc write` accepts such a check without running it.
+`find-suspect-pages` gives the page a glance note and does not run the
+check; `find-suspect-pages --network` runs it, and a failure makes the
+page suspect. `iirc verify PAGE --network` and `iirc approve-page-check`
+run it behind the same consent: a terminal yes or `IIRC_ALLOW_NETWORK=1`,
+and the guard asks first. iirc does not read a script the check calls,
+so a script that reaches a host is the author's call to avoid.
 
 The guard refuses a raw read of a remote store's pages by
 path pattern, which is a convention, not a boundary.

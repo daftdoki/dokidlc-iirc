@@ -18,7 +18,7 @@ iirc search "what am I looking for"               ranked pages with summary and 
 iirc search term1 term2 term3                     several terms, searched separately, merged
 iirc read-matching-pages "what am I looking for"  full text of the matching pages
 iirc read PAGE.md                                 one page; STORE/PAGE.md when two stores hold the name
-iirc find-suspect-pages [--network]               pages with evidence they may be wrong; --network checks URL refs, with permission
+iirc find-suspect-pages [--network]               pages with evidence they may be wrong; --network checks URL refs and network checks, with permission
 iirc audit-page-findability [PAGE]                pages search shows badly, each with its fix
 iirc verify PAGE.md                               you re-confirmed it; re-run its check, refresh its refs
 iirc approve-page-check PAGE.md                   run a page's check once and approve it here (ask first)
@@ -220,16 +220,18 @@ age. `find-suspect-pages` also runs each page's `--check` command and marks fail
   `git pull` or `iirc sync`, and before you close a quest stage. A page
   another project wrote is not checked here; `find-suspect-pages` counts them.
 - A `--check` reads local state: files, git history, installed commands.
-  It must be read-only, must stay off the network, and must pass when you
-  write it; the wrapper refuses one that does not. Off the network means
-  no curl, wget, gh, `git fetch|pull|push|clone|ls-remote`, ssh, scp,
-  rsync to a host, nc, ncat, or http. The wrapper cannot see inside a
-  script the check calls, so call only a script that stays local.
-  Checks run only from `find-suspect-pages`, `verify`, `approve-page-check`,
-  and `write`, never from hooks.
-- A page whose check contacts the network: `find-suspect-pages` lists it
-  as suspect without running the check, and `verify` refuses it. Rewrite
-  the page with a local check.
+  It must be read-only and must pass when you write it; the wrapper
+  refuses one that does not. Checks run only from `find-suspect-pages`,
+  `verify`, `approve-page-check`, and `write`, never from hooks.
+- A check that must contact the outside world runs only with the
+  creator's consent, like URL refs. The wrapper knows one by its command:
+  curl, wget, gh, `git fetch|pull|push|clone|ls-remote`, ssh, scp, rsync
+  to a host, nc, ncat, or http. `write` accepts it without running it.
+  `find-suspect-pages` marks the page `glance` and leaves the check for
+  `find-suspect-pages --network`. `verify` on that page needs
+  `iirc verify PAGE --network`; ask the creator first, as for URLs. The
+  wrapper cannot see inside a script the check calls, so a script that
+  contacts a host is yours to keep out of a check.
 - A check that came with a clone is not approved on this machine.
   `find-suspect-pages` lists it instead of running it, and `verify` refuses the page
   until it is approved. Show the creator the command and ask; on yes, run

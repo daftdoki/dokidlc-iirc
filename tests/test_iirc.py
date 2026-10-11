@@ -4259,52 +4259,107 @@ def test_network_check_re_matches_commands_not_names():
         assert not iirc.NETWORK_CHECK_RE.search(good), good
 
 
-def test_validate_check_refuses_a_check_that_contacts_the_network(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st")); iirc.set_root(tmp_path)
-    marker = tmp_path / "ran"
-    with pytest.raises(SystemExit):
-        iirc.validate_check(f"gh api x; touch {marker}")
-    err = capsys.readouterr().err
-    assert "contact the network" in err and "local state" in err and not marker.exists()
-    assert iirc.approved_checks() == {}
+
+def _stub_checks(monkeypatch, fails=False):
+    """Records each check run_check would run, and runs none. No test contacts the network."""
+    ran = []
+    monkeypatch.setattr(iirc, "run_check", lambda cmd: ran.append(cmd) or (f"check failed (exit 1): {cmd}" if fails else None))
+    return ran
 
 
-def _network_page(tmp_path, monkeypatch):
+def _network_page(tmp_path, monkeypatch, approved=True):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.delenv("IIRC_ALLOW_NETWORK", raising=False)
     field = tmp_path / ".iirc"; field.mkdir(); iirc.set_root(tmp_path)
-    marker = tmp_path / "ran"
-    cmd = f"curl -sfIL https://example.com; touch {marker}"
+    cmd = "curl -sfIL https://example.com"
     (field / "net.md").write_text(f"---\ntitle: N\nsummary: n\nkind: finding\ncheck: {cmd}\n---\nx\n")
-    iirc.approve_check(cmd, "net.md")            # approved before this rule existed
-    return field, marker
+    if approved:
+        iirc.approve_check(cmd, "net.md")
+    monkeypatch.setattr(iirc, "tool", _fake_tool(field)); monkeypatch.setattr(iirc, "reindex", lambda **k: None)
+    monkeypatch.setattr(iirc, "save", lambda *a, **k: None)
+    return field, cmd
 
 
-def test_find_suspect_pages_lists_a_network_check_without_running_it(tmp_path, monkeypatch, capsys):
-    field, marker = _network_page(tmp_path, monkeypatch)
+def test_write_accepts_a_network_check_without_running_it(tmp_path, monkeypatch, capsys):
+    import io
+    field, _ = _network_page(tmp_path, monkeypatch, approved=False)
+    ran = _stub_checks(monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    iirc.main(["write", "up.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding",
+               "--check", "scripts/upstream check && gh api repos/a/b"])
+    assert ran == [] and (field / "up.md").is_file()
+    assert "runs only under `iirc find-suspect-pages --network`" in capsys.readouterr().err
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    iirc.main(["write", "local.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding", "--check", "test -d ."])
+    assert ran == ["test -d ."]                  # a local check still runs at write
+
+
+def test_find_suspect_pages_leaves_a_network_check_for_network(tmp_path, monkeypatch, capsys):
+    field, cmd = _network_page(tmp_path, monkeypatch)
+    ran = _stub_checks(monkeypatch, fails=True)
     iirc.main(["find-suspect-pages"])
     out = capsys.readouterr().out
-    assert "net.md" in out and "suspect: its check contacts the network; rewrite it with a local check" in out
-    assert not marker.exists()
+    assert "glance: its check contacts the network; runs with --network" in out and ran == []
+    monkeypatch.setenv("IIRC_ALLOW_NETWORK", "1")
+    iirc.main(["find-suspect-pages", "--network"])
+    cap = capsys.readouterr()
+    assert ran == [cmd] and "suspect: check failed" in cap.out
+    assert f"net.md: `{cmd}`" in cap.err            # named beside the URLs before the run
 
 
-def test_verify_refuses_a_network_check(tmp_path, monkeypatch, capsys):
-    field, marker = _network_page(tmp_path, monkeypatch)
-    monkeypatch.setattr(iirc, "tool", lambda *a, **k: type("P", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+def test_find_suspect_pages_network_needs_consent_for_a_network_check(tmp_path, monkeypatch, capsys):
+    import io
+    field, cmd = _network_page(tmp_path, monkeypatch)
+    ran = _stub_checks(monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit):
+        iirc.main(["find-suspect-pages", "--network"])
+    assert ran == [] and f"net.md: `{cmd}`" in capsys.readouterr().err
+
+
+def test_run_maintenance_never_runs_a_network_check(tmp_path, monkeypatch, capsys):
+    field, cmd = _network_page(tmp_path, monkeypatch)
+    ran = _stub_checks(monkeypatch)
+    rows, _, _ = iirc.suspect_rows()
+    assert ran == [] and [s for s, _ in rows[0][2]] == ["network"]
+    assert iirc.maintenance_suspects(rows) == []          # a glance note, offered with the URL refs, not a suspect
+
+
+def test_verify_runs_a_network_check_only_with_network(tmp_path, monkeypatch, capsys):
+    import io
+    field, cmd = _network_page(tmp_path, monkeypatch)
+    ran = _stub_checks(monkeypatch)
     with pytest.raises(SystemExit):
         iirc.main(["verify", "net.md"])
-    assert "its check contacts the network; rewrite it with a local check" in capsys.readouterr().err
-    assert not marker.exists()
-
-
-def test_write_refuses_a_network_check(tmp_path, monkeypatch, capsys):
-    import io
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg")); monkeypatch.delenv("OLLAMA_HOST", raising=False)
-    field = tmp_path / ".iirc"; field.mkdir(); iirc.set_root(tmp_path)
-    monkeypatch.setattr(iirc, "tool", _fake_tool(field)); monkeypatch.setattr(iirc, "reindex", lambda **k: None)
-    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    assert "iirc verify net.md --network" in capsys.readouterr().err and ran == []
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
     with pytest.raises(SystemExit):
-        iirc.main(["write", "up.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding",
-                   "--check", "scripts/upstream check && gh api repos/a/b"])
-    assert "contact the network" in capsys.readouterr().err and not (field / "up.md").exists()
+        iirc.main(["verify", "net.md", "--network"])           # no terminal, no IIRC_ALLOW_NETWORK
+    assert ran == []
+    monkeypatch.setenv("IIRC_ALLOW_NETWORK", "1")
+    iirc.main(["verify", "net.md", "--network"])
+    assert ran == [cmd] and "verified net.md" in capsys.readouterr().out
+
+
+def test_approve_page_check_needs_consent_for_a_network_check(tmp_path, monkeypatch, capsys):
+    import io
+    field, cmd = _network_page(tmp_path, monkeypatch, approved=False)
+    ran = _stub_checks(monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    with pytest.raises(SystemExit):
+        iirc.main(["approve-page-check", "net.md"])
+    assert ran == [] and not iirc.check_approved(cmd)
+    monkeypatch.setenv("IIRC_ALLOW_NETWORK", "1")
+    iirc.main(["approve-page-check", "net.md"])
+    assert ran == [cmd] and iirc.check_approved(cmd)
+
+
+def test_guard_asks_before_verify_network():
+    import subprocess
+    def decide(cmd):
+        out = subprocess.run(["sh", str(ROOT / "scripts" / "guard.sh")], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}),
+                             capture_output=True, text=True).stdout
+        return json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out.strip() else None
+    assert decide("iirc verify net.md --network") == "ask"
+    assert decide("iirc verify net.md") is None

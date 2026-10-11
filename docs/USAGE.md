@@ -127,8 +127,8 @@ Ask: "What in iirc might be out of date?" The agent runs `iirc find-suspect-page
 It lists the pages with evidence against them, strongest first. A page
 is suspect when a file it cites changed since it cited it, or when its
 check command now fails. A check that contacts the network, such as
-`curl` or `gh api`, makes the page suspect without running; rewrite it
-with a check that reads local state. For each one, the agent reads the page and
+`curl` or `gh api`, does not run here; the page gets a glance note that
+says it runs with `--network`. For each one, the agent reads the page and
 the diff, then verifies, rewrites, or deletes the page in the same turn.
 `/iirc find-suspect-pages` prints the same list, and `/iirc find-suspect-pages --all` adds the
 clean pages. Ask for a doubt pass after a `git pull`. `/iirc run-maintenance`
@@ -138,8 +138,10 @@ Two cases need your yes. A check command that arrived with a clone is
 not approved on this machine, so `find-suspect-pages` lists it and does not run it.
 The agent shows you the command and asks; on yes it runs
 `iirc approve-page-check PAGE`, and Claude Code asks you to approve the command too.
-`find-suspect-pages` never contacts the URLs in a page's refs. To check them, the
-agent names the URLs `iirc find-suspect-pages --network` will contact and asks. The
+`find-suspect-pages` never contacts the URLs in a page's refs or runs a check that
+contacts the network. To run them, the agent names the URLs and checks
+`iirc find-suspect-pages --network` will contact and asks. `iirc verify PAGE --network`
+runs one such check under the same rule. Each
 command refuses unless a terminal answers yes or `IIRC_ALLOW_NETWORK=1`
 is set, and only you set it.
 
@@ -259,7 +261,7 @@ The direct commands print what the `iirc` command prints. `doctor --fix`,
 one minute. Anything else after `/iirc` goes to the skill as a request in
 words. That includes the commands that need a question first:
 `add-remote-store`, `set-search-backend`, `init`, `write`, `delete`, `approve-page-check`,
-`set-suggestion-threshold`, and `find-suspect-pages --network`.
+`set-suggestion-threshold`, `find-suspect-pages --network`, and `verify --network`.
 
 ### The agent's commands
 
@@ -295,7 +297,7 @@ describes each one.
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
 | the line under the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc summary-line-visibility on` or `off`. |
-| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc find-suspect-pages --network` run with no terminal to answer yes. | Only when you want URL refs checked from a session. |
+| `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc find-suspect-pages --network`, `iirc verify --network`, and `iirc approve-page-check` on a network check run with no terminal to answer yes. | Only when you want URL refs or network checks run from a session. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | the environment | `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` | paths | Where the machine config, the index, the remote clones, and the records live. | When your machine moves them. |
 
 Store tables, in `.claude/iirc.toml`, replace the implicit project store.

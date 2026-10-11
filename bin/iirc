@@ -2209,7 +2209,8 @@ UNSAFE_CHECK_RE = re.compile(
     r"|(?:^|[;&|(]\s*|\$\(\s*)(sudo\s+)?(rm|mv|dd|chmod|chown|kill|install|cp)\s"   # as a command, not inside a name
     r"|\bsystemctl\s+(start|stop|restart|enable|disable)\b|\bcurl\b[^|]*\|")
 
-# a check reads local state; these commands contact a host. Anchored as a command, as above; a script the check calls is not inspected
+# a check should read local state; these commands contact a host, so such a check runs only with the creator's consent,
+# as URL refs do. Anchored as a command, as above; a script the check calls is not inspected
 NETWORK_CHECK_RE = re.compile(
     r"(?:^|[;&|(`]\s*|\$\(\s*)"                                     # where a command starts
     r"(?:(?:if|then|else|do|while|until|!|sudo|env|command|exec|nohup|time|timeout\s+\S+|\w+=\S*)\s+)*"   # what may precede it
@@ -2217,7 +2218,21 @@ NETWORK_CHECK_RE = re.compile(
     r"(?:(?:curl|wget|gh|ssh|scp|nc|ncat|http|https)(?=\s|$)"
     r"|git\s+(?:-[Cc]\s+\S+\s+|--?[\w-]+(?:=\S+)?\s+)*(?:fetch|pull|push|clone|ls-remote)\b"
     r"|rsync\b[^;&|\n]*\s(?:[\w.@-]+::?|rsync://))")                 # rsync only to a host
-NETWORK_REFUSAL = "its check contacts the network; rewrite it with a local check"
+NETWORK_NOTE = "its check contacts the network; runs with --network"
+
+
+def network_check(command: str) -> bool:
+    return bool(NETWORK_CHECK_RE.search(command))
+
+
+def network_consent(what: str) -> None:
+    """The creator's yes before iirc contacts a host: IIRC_ALLOW_NETWORK=1, or a terminal that answers y."""
+    if os.environ.get("IIRC_ALLOW_NETWORK") == "1":
+        return
+    if not sys.stdin.isatty():
+        die(f"{what}. Ask the creator; they can run it themselves, or set IIRC_ALLOW_NETWORK=1 for this command.", 2)
+    if not input(f"{what}. Go ahead? [y/N]: ").strip().lower().startswith("y"):
+        die("not contacting the network", 2)
 
 
 def check_hash(command: str) -> str:
@@ -2239,12 +2254,16 @@ def check_approved(command: str) -> bool:
     return check_hash(command) in approved_checks()
 
 
-def validate_check(command: str, page: str = "") -> None:
-    """A check must be read-only in form and must pass now, or it is refused. Passing approves it on this machine."""
+def validate_check(command: str, page: str = "", network: bool = False) -> None:
+    """A check must be read-only in form and must pass now, or it is refused. Passing approves it on this machine.
+    A check that contacts the network is not run unless `network` says the creator consented; it is approved unrun."""
     if UNSAFE_CHECK_RE.search(command):
         die("check must be read-only: no redirects (except to /dev/null), sed -i, tee, pipes into a shell, eval, or rm, mv, cp, dd, chmod, chown, kill, install, or systemctl state changes")
-    if NETWORK_CHECK_RE.search(command):
-        die("check must read local state and may not contact the network: no curl, wget, gh, git fetch, pull, push, clone, or ls-remote, ssh, scp, rsync to a host, nc, ncat, or http. iirc cannot inspect a script the check calls, so keep that script local too")
+    if network_check(command) and not network:
+        print("iirc: this check contacts the network, so it runs only under `iirc find-suspect-pages --network`, "
+              "with the creator's consent. A check should read local state where it can.", file=sys.stderr)
+        approve_check(command, page)
+        return
     reason = run_check(command)
     if reason:
         die(f"check does not pass now, so it cannot guard this page: {reason}")
@@ -2263,7 +2282,7 @@ def run_check(command: str) -> str | None:
 
 
 # Signal kinds: rank, strongest first, and whether the signal means suspect or only a glance.
-SIGNALS = {"ref": (0, "suspect"), "check": (1, "suspect"), "url": (2, "glance"), "unapproved": (3, "glance"), "age": (4, "glance")}
+SIGNALS = {"ref": (0, "suspect"), "check": (1, "suspect"), "url": (2, "glance"), "network": (3, "glance"), "unapproved": (4, "glance"), "age": (5, "glance")}
 RANK = {k: v[0] for k, v in SIGNALS.items()}
 
 
@@ -2287,8 +2306,8 @@ def suspicion(fm: dict, root: Path | None = None, run_checks: bool = False, now:
         reason = ref_changed(str(ref), root)
         if reason:
             found.append(("ref", reason))
-    if run_checks and fm.get("check") and NETWORK_CHECK_RE.search(str(fm["check"])):
-        found.append(("check", NETWORK_REFUSAL))
+    if run_checks and fm.get("check") and network_check(str(fm["check"])) and not check_urls:
+        found.append(("network", NETWORK_NOTE))     # nothing is known wrong; it waits for consent
     elif run_checks and fm.get("check"):
         if check_hash(str(fm["check"])) in (approved if approved is not None else approved_checks()):
             reason = run_check(str(fm["check"]))
@@ -2366,15 +2385,27 @@ def suspect_rows(check_urls: bool = False, clean_too: bool = False) -> tuple[lis
     return rows, unchecked_urls, elsewhere
 
 
+def network_checks() -> list[tuple[str, str]]:
+    """(page label, check) for each page of this project whose check contacts the network."""
+    found = []
+    for store in live_stores():
+        for page in list_pages(store.dir):
+            fm, _ = parse_page(page.read_text())
+            if same_project(fm) and fm.get("check") and network_check(str(fm["check"])):
+                found.append((page_label(store.name, page.name), str(fm["check"])))
+    return found
+
+
 def cmd_find_suspect_pages(args: argparse.Namespace) -> None:
     """Pages with evidence they may be wrong, strongest signal first."""
     require_stores()
     if args.network:
-        if os.environ.get("IIRC_ALLOW_NETWORK") != "1":
-            if not sys.stdin.isatty():
-                die("--network contacts every URL cited in the pages. Ask the creator; they can run it themselves, or set IIRC_ALLOW_NETWORK=1 for this command.", 2)
-            if not input("Contact every URL cited in the pages? [y/N]: ").strip().lower().startswith("y"):
-                die("not contacting URLs", 2)
+        checks = network_checks()
+        if checks:
+            print("iirc: --network also runs these checks, which contact the network:", file=sys.stderr)
+            for name, cmd in checks:
+                print(f"  {name}: `{cmd}`", file=sys.stderr)
+        network_consent("--network contacts every URL cited in the pages" + (" and runs the checks above" if checks else ""))
     rows, unchecked_urls, elsewhere = suspect_rows(args.network, args.all)
     log_event("doubt", suspects=sum(1 for r in rows if r[2]), network=bool(args.network))
     if unchecked_urls:
@@ -2475,7 +2506,9 @@ def cmd_approve_page_check(args: argparse.Namespace) -> None:
     cmd = str(fm.get("check") or "")
     if not cmd:
         die(f"{args.page} has no check")
-    validate_check(cmd, args.page)
+    if network_check(cmd):
+        network_consent(f"this check contacts the network: `{cmd}`")
+    validate_check(cmd, args.page, network=True)
     log_event("approve", page=args.page)
     print(f"approved on this machine: `{cmd}`")
 
@@ -2493,10 +2526,12 @@ def cmd_verify(args: argparse.Namespace) -> None:
         cmd = str(fm["check"])
         if UNSAFE_CHECK_RE.search(cmd):
             die("refused: this page's check is not read-only in form; rewrite the page")
-        if NETWORK_CHECK_RE.search(cmd):
-            die(f"refused: {NETWORK_REFUSAL}")
         if not check_approved(cmd):
             die(f"this page's check is not approved on this machine. Show it to the creator and, on yes, run `iirc approve-page-check {args.page}`; then verify.")
+        if network_check(cmd):
+            if not args.network:
+                die(f"this page's check contacts the network. With the creator's consent, run `iirc verify {args.page} --network`.")
+            network_consent(f"this page's check contacts the network: `{cmd}`")
         reason = run_check(cmd)
         if reason:
             die(f"cannot verify: {reason}. Fix the page or its check first.")
@@ -4519,9 +4554,10 @@ def upkeep_items(c: dict) -> list[Upkeep]:
     if c.get("findings"):
         items.append(Upkeep("findings", plural(len(c["findings"]), "audit finding"), "propose each fix", False))
     checked = c.get("last_network")
-    if c.get("urls") and (checked is None or now - checked >= NETWORK_CHECK_DAYS * 86400):
+    if (c.get("urls") or c.get("network_checks")) and (checked is None or now - checked >= NETWORK_CHECK_DAYS * 86400):
         when = f"not checked in {NETWORK_CHECK_DAYS} days" if checked is None else f"last checked {int((now - checked) // 86400)} days ago"
-        items.append(Upkeep("network", f"{plural(c['urls'], 'URL ref')}, {when}", "offer iirc find-suspect-pages --network, naming the URLs it contacts", False))
+        what = ", ".join(x for x in (c.get("urls") and plural(c["urls"], "URL ref"), c.get("network_checks") and plural(c["network_checks"], "network check")) if x)
+        items.append(Upkeep("network", f"{what}, {when}", "offer iirc find-suspect-pages --network, naming the URLs and checks it contacts", False))
     if c.get("waiting", 0) >= WAITING_SESSIONS:
         items.append(Upkeep("waiting", f"{WAITING_SESSIONS} or more sessions waiting to be judged for tuning", "offer /iirc tune-suggestions, which is long", True))
     return items
@@ -4578,6 +4614,12 @@ def undo_command(start: dict) -> str:
 
 
 
+def maintenance_suspects(rows: list) -> list:
+    """The rows run-maintenance lists as suspect pages: unapproved checks and network checks have lines of their own."""
+    rows = [(name, summary, [x for x in signals if x[0] not in ("unapproved", "network")]) for name, summary, signals in rows]
+    return [r for r in rows if r[2]]
+
+
 def cmd_run_maintenance(args: argparse.Namespace) -> None:
     """The one upkeep command: the safe automatic part, then what is left to decide. Changes no page's text."""
     require_stores()
@@ -4614,9 +4656,9 @@ def cmd_run_maintenance(args: argparse.Namespace) -> None:
     print("index: string search, nothing to embed" if not semantic_enabled()
           else f"index: {plural(missing, 'page')} without vectors" if missing else "index: every page has vectors")
     rows, counts["urls"], _ = suspect_rows()
+    counts["network_checks"] = sum(1 for _, _, signals in rows for sig, _ in signals if sig == "network")
     counts["unapproved"] = [(name, reason) for name, _, signals in rows for sig, reason in signals if sig == "unapproved"]
-    suspects = [(name, summary, [x for x in signals if x[0] != "unapproved"]) for name, summary, signals in rows]
-    suspects = [r for r in suspects if r[2]]
+    suspects = maintenance_suspects(rows)
     counts["suspects"] = [name for name, _, _ in suspects]
     print("suspect pages: none" if not suspects else f"suspect pages: {len(suspects)}")
     for name, summary, signals in suspects:
@@ -4704,6 +4746,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("verify", help="record that a page was re-confirmed just now")
     p.add_argument("page")
+    p.add_argument("--network", action="store_true", help="run a check that contacts the network; needs the creator's permission")
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("delete", help="remove a page")

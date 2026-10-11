@@ -96,9 +96,10 @@ line and apply it on the creator's yes. Then run
 
 When the report offers a URL check, tell the creator which URLs
 `iirc find-suspect-pages --network` will contact, from the pages'
-`refs`, and ask. On yes, ask them to run it or to allow it with
+`refs`, and which network checks it runs, from the pages marked
+`runs with --network`, and ask. On yes, ask them to run it or to allow it with
 `IIRC_ALLOW_NETWORK=1`. Treat each failing URL as a suspect page, by
-step 5. Unattended: contact nothing, and keep the URLs for the summary.
+step 5. Unattended: contact nothing, and keep the URLs and checks for the summary.
 
 When the report offers tuning, offer `/iirc tune-suggestions` and say
 it is long. Start it only on the creator's word. Unattended: run the
@@ -116,8 +117,8 @@ to run it later:
 
 - approvals: `/iirc run-maintenance`, or `iirc approve-page-check PAGE`
   for each page, with its command
-- URL refs: `iirc find-suspect-pages --network`, with the URLs it
-  contacts
+- URL refs and network checks: `iirc find-suspect-pages --network`,
+  with the URLs and checks it contacts
 
 The summary is plain text, the last thing the run prints; the creator
 reads it whenever they return.

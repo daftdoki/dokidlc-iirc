@@ -1,7 +1,8 @@
 #!/bin/sh
 # iirc guard. POSIX sh so it always parses. Reads PreToolUse JSON on stdin,
 # for Bash and for Read.
-# Asks before `iirc find-suspect-pages --network` (contacts every URL cited in pages) and
+# Asks before `iirc find-suspect-pages --network` (contacts every URL cited in pages and runs
+# the checks that contact the network), `iirc verify --network` (runs such a check), and
 # `iirc approve-page-check` (accepts a page's check command for this machine).
 # Denies a raw read of a page file, by cat, head, sed, tail, less, or more in a
 # Bash command, or by the Read tool: `iirc read` prints the page with its
@@ -16,7 +17,9 @@ file=$(printf '%s' "$input" | sed -n 's/.*"file_path":[[:space:]]*"\([^"]*\)".*/
 # mentions both words (a grep, a test run, a path) passes
 runs() { printf '%s' "$cmd" | grep -Eq "(^|[;&|(]|\\\\n|[[:space:]])([^[:space:];&|(]*/)?iirc[\\\"]*[[:space:]]+$1"; }
 if runs 'find-suspect-pages[^;&|]*--n'; then
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc find-suspect-pages --network contacts every URL cited in the pages. Approve only if you agreed to that."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc find-suspect-pages --network contacts every URL cited in the pages and runs the checks that contact the network. Approve only if you agreed to that."}}'
+elif runs 'verify[^;&|]*--n'; then
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc verify --network runs a page'"'"'s check, which contacts the network. Approve only if you agreed to that."}}'
 elif runs 'approve-page-check([[:space:]]|$)'; then
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"iirc approve-page-check runs a page'"'"'s check command and approves it on this machine. Approve only if the agent showed you the command and you agreed."}}'
 fi

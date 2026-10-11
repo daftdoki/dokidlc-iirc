@@ -134,8 +134,11 @@ checks and lists the rest; `verify` refuses a page whose check is not
 approved or not read-only in form. Only `approve-page-check` and `write` grant
 approval, because those are the two places the creator was asked or the
 command came from this machine's own agent. The PreToolUse guard asks for
-`iirc approve-page-check` and `iirc find-suspect-pages --network`, and the wrapper refuses
-`--network` off a terminal unless `IIRC_ALLOW_NETWORK=1` is set. The
+`iirc approve-page-check`, `iirc find-suspect-pages --network`, and `iirc verify --network`,
+and the wrapper refuses `--network` off a terminal unless `IIRC_ALLOW_NETWORK=1` is set.
+A check whose command contacts a host (`NETWORK_CHECK_RE`) runs only behind that
+same consent: `write` approves it unrun, and routine `find-suspect-pages` and
+`run-maintenance` give it a glance note instead of running it. The
 same guard, registered for Bash and for Read, denies a raw read of a
 page file, by `cat`, `head`, `sed`, `tail`, `less`, or `more` in a command
 or by the Read tool, and names `iirc read` in the reason, because a page
