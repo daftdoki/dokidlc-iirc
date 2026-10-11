@@ -88,6 +88,7 @@ const DEMO_COUNTS: SessionCounts = {
 }
 const DEMO_HEALTH: IircHealth = {
   suspect: [],
+  due: [],
   stores: [{ name: 'project', kind: 'project', pages: 97, uncommitted: 0, unpushed: 0 }, { name: 'shared', kind: 'remote', pages: 45, uncommitted: 0, unpushed: 0 }],
 }
 // pages the card names under SUGGESTED, NOT READ, and under TRUST
@@ -907,9 +908,8 @@ function mix(a: string, b: string, t: number): string {
 function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircStatus | null, c: SessionCounts, isShown: boolean, max: number | null, checkup: IircHealth | null) {
   const { Box, Text } = $.ui.resolve(e)
   if (s) s = liveStatus(s, c)
-  const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
-  // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
-  const isHealthWarn = !!checkup && (checkup.suspect.length > 0 || isUnpushed)
+  // the brief is as old as the session start; maintenance the CLI finds due since then turns the chip yellow
+  const isHealthWarn = !!checkup && (checkup.due ?? []).length > 0
   if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: MAINTAIN }
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]

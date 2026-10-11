@@ -14,8 +14,8 @@ export type MatchAverages = { all: number | null; read: number | null; unread: n
 /** One store's state for the card, from `iirc doctor --health`. */
 export type StoreHealth = { name: string; kind: string; pages: number; uncommitted: number; unpushed: number }
 
-/** Trust and store state for the card: pages whose cited file changed, and each store. */
-export type IircHealth = { suspect: string[]; stores: StoreHealth[] }
+/** Trust and store state for the card: pages whose cited file changed, each store, and why run-maintenance is due. */
+export type IircHealth = { suspect: string[]; stores: StoreHealth[]; due?: string[] }
 
 /** One page as `iirc show` returns it, for the pane's reader. */
 export type ShownPage = {

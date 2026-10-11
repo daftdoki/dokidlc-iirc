@@ -3457,9 +3457,16 @@ def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     return up
 
 
-def setup_checks(fix_it: bool, report) -> bool:
-    """Doctor's checks, each through report(label, good, fix); with fix_it, repair what it can. False when a failure stops the rest."""
+TIMEOUT_FIX = "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend"
+
+
+def setup_checks(fix_it: bool, report, counts: dict) -> bool:
+    """Doctor's checks, each through report(label, good, fix, kind); with fix_it, repair what it can. False when a failure stops the rest.
+    It reads timeouts from counts (logged_counts) and adds what it measures: ahead, the unpushed commits, and pairs, the near-duplicates.
+    kind names a check whose count maintenance reports itself."""
     pin = read_pin()
+    counts.setdefault("ahead", 0)
+    counts.setdefault("pairs", [])
     if CONFIG_ERROR and fix_it and knob_error_only():
         for note in fix_knobs():
             print(f"iirc: {STORE_CONFIG}: {note}")
@@ -3470,9 +3477,9 @@ def setup_checks(fix_it: bool, report) -> bool:
                "iirc doctor --fix moves old [recall] tables to [suggestions.MODEL-ID] and comments out a bad threshold" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
         return False
     report(f"{STORE_CONFIG} loads, so the hooks run", True)
-    timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
-    report(f"suggest-pages finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
-           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend")
+    timeouts = counts.get("timeouts", 0)
+    report(f"suggest-pages finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last {TIMEOUT_DAYS} days" + (f" ({timeouts} timed out)" if timeouts else ""),
+           timeouts == 0, TIMEOUT_FIX, kind="timeouts")
 
     if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
         return False
@@ -3513,7 +3520,8 @@ def setup_checks(fix_it: bool, report) -> bool:
             origin = run_git(store.repo, "remote", "get-url", "origin").stdout.strip()
             report(f"store {store.name} tracks {store.url}", origin == store.url, f"the clone at {store.dir} tracks {origin or 'nothing'}; move it aside and run iirc doctor --fix")
             ahead = unpushed(store)
-            report(f"store {store.name} has nothing unpushed" if not ahead else f"store {store.name} has {ahead} commit{'s' if ahead != 1 else ''} not pushed", ahead == 0, "iirc sync")
+            counts["ahead"] += ahead
+            report(f"store {store.name} has nothing unpushed" if not ahead else f"store {store.name} has {ahead} commit{'s' if ahead != 1 else ''} not pushed", ahead == 0, "iirc sync", kind="unpushed")
             extra = non_pages(store)
             report(f"store {store.name} holds only pages and index.md" if not extra else f"store {store.name} holds non-page markdown: {', '.join(extra)}", not extra, "remove them; the tool indexes every .md file in a store")
         if store.kind == "project" and store.dir.name != ".iirc":
@@ -3523,8 +3531,10 @@ def setup_checks(fix_it: bool, report) -> bool:
 
     if semantic_enabled():
         for d, first, second in flagged_pairs():
-            what = "near-duplicate pages" if d <= active_model().near[1] else "similar pages, below the warning"
-            print(f"note {what} (distance {d:.3f}): {first} | {second}")
+            close = d <= active_model().near[1]
+            if close:
+                counts["pairs"].append((d, first, second))
+            print(f"note {'near-duplicate pages' if close else 'similar pages, below the warning'} (distance {d:.3f}): {first} | {second}")
         if live_stores() and not index_rows():
             print("note no index to compare pages with (iirc rebuild-search-index builds it)")
 
@@ -3544,10 +3554,13 @@ def setup_checks(fix_it: bool, report) -> bool:
 def cmd_doctor(args: argparse.Namespace) -> None:
     if args.health:
         # for the /iirc card: trust and store state as JSON, no host probe and no pull
-        stores = [(s, list_pages(s.dir)) for s in live_stores()]
+        stores = [(s, list_pages(s.dir), unpushed(s)) for s in live_stores()]
+        suspects = suspect_pages([p for _, ps, _ in stores for p in ps])
+        counts = {**logged_counts(), "suspects": suspects, "ahead": sum(a for _, _, a in stores), "pairs": close_pairs(PAIR_BUDGET)}
         print(json.dumps({
-            "suspect": suspect_pages([p for _, ps in stores for p in ps]),
-            "stores": [{"name": s.name, "kind": s.kind, "pages": len(ps), "uncommitted": uncommitted(s), "unpushed": unpushed(s)} for s, ps in stores],
+            "suspect": suspects,
+            "stores": [{"name": s.name, "kind": s.kind, "pages": len(ps), "uncommitted": uncommitted(s), "unpushed": a} for s, ps, a in stores],
+            "due": maintenance_due(counts),
         }))
         return
     if args.brief:
@@ -3615,7 +3628,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if scan > SCAN_BUDGET:
             parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
         try:   # a hook must never fail the session start
-            due = maintenance_due(suspects, ahead, len(close_pairs(PAIR_BUDGET)))
+            due = maintenance_due({**logged_counts(), "suspects": suspects, "ahead": ahead, "pairs": close_pairs(PAIR_BUDGET)})
         except Exception:
             due = []
         if due:
@@ -3631,22 +3644,25 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         return
     ok = True
 
-    def report(label: str, good: bool, fix: str = "") -> bool:
+    def report(label: str, good: bool, fix: str = "", kind: str = "") -> bool:
         nonlocal ok
         print(f"{'ok ' if good else 'FAIL'} {label}" + ("" if good else f"  ({fix})" if fix else ""))
         ok = ok and good
         return good
 
-    if not setup_checks(args.fix, report):
+    counts = logged_counts()
+    if not setup_checks(args.fix, report, counts):
         sys.exit(1)
     idx = cache_dir() / "dokidlc-iirc" / "vectors"
     print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc rebuild-search-index`)")
     if not ok and not args.fix:
         print(FIX_HINT)
-    pages = [p for st in live_stores() for p in list_pages(st.dir)]
-    due = maintenance_due(suspect_pages(pages), sum(unpushed(st) for st in live_stores()), len(close_pairs()))
+    counts["suspects"] = suspect_pages([p for st in live_stores() for p in list_pages(st.dir)])
+    due = [i for i in upkeep_items(counts) if i.due]
     if due:
-        print(f"run-maintenance is due: {'; '.join(due)}")
+        # the checks and notes above already name unpushed commits, timeouts, and near-duplicates
+        shown = [i.detail for i in due if i.kind not in ("unpushed", "timeouts", "pairs")]
+        print(f"run-maintenance is due: {'; '.join(shown) or 'it settles the failures and notes above'}")
 
     sys.exit(0 if ok else 1)
 
@@ -4419,32 +4435,70 @@ def plural(n: int, word: str, many: str | None = None) -> str:
     return f"{n} {word if n == 1 else many or word + 's'}"
 
 
-def maintenance_due(suspects: list[str] = (), ahead: int = 0, close: int = 0) -> list[str]:
-    """Why run-maintenance is due, or []. The caller passes the counts it has already made; the rest
-    comes from one read of the log. No network, no host probe: the session-start brief calls it."""
+def logged_counts(waiting_limit: int | None = WAITING_SESSIONS) -> dict:
+    """What maintenance counts from the log, in one read of its last DUE_WINDOW_DAYS: the last run and the sessions
+    since, timed-out lookups, the last URL check, and sessions waiting to be judged, up to waiting_limit."""
     now = time.time()
     rows = [r for r in read_log(days=DUE_WINDOW_DAYS) if r.get("repo") == str(ROOT)]
     at = lambda r: parse_ts(r.get("ts")) or 0
-    reasons = []
     last = max((at(r) for r in rows if r["cmd"] == "maintenance"), default=None)
-    since = {r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}
-    if len(since) >= MAINTENANCE_SESSIONS:
-        if last is None:
-            reasons.append(f"no run in the last {DUE_WINDOW_DAYS} days, {plural(len(since), 'session')}")
-        elif now - last >= MAINTENANCE_DAYS * 86400:
-            reasons.append(f"{plural(int((now - last) // 86400), 'day')} and {plural(len(since), 'session')} since the last run")
-    if suspects:
-        reasons.append(f"{plural(len(suspects), 'suspect page')} ({', '.join(suspects[:3])}{', ...' if len(suspects) > 3 else ''})")
-    if ahead:
-        reasons.append(f"{plural(ahead, 'store commit')} not pushed")
-    timeouts = sum(1 for r in rows if r["cmd"] == "timeout" and at(r) >= now - TIMEOUT_DAYS * 86400)
-    if timeouts:
-        reasons.append(f"{plural(timeouts, 'suggestion lookup')} timed out in the last {TIMEOUT_DAYS} days")
-    if close:
-        reasons.append(f"{plural(close, 'near-duplicate pair')}")
-    if len(untuned_sessions(repo_sessions(rows), limit=WAITING_SESSIONS)) >= WAITING_SESSIONS:
-        reasons.append(f"{WAITING_SESSIONS} or more sessions waiting to be judged for tuning")
-    return reasons
+    return {
+        "last_run": last,
+        "sessions": len({r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}),
+        "timeouts": sum(1 for r in rows if r["cmd"] == "timeout" and at(r) >= now - TIMEOUT_DAYS * 86400),
+        "last_network": max((at(r) for r in rows if r["cmd"] == "doubt" and r.get("network")), default=None),
+        "waiting": len(untuned_sessions(repo_sessions(rows), limit=waiting_limit)),
+    }
+
+
+class Upkeep(NamedTuple):
+    kind: str
+    detail: str     # what the brief and doctor name
+    action: str     # what run-maintenance leaves to decide; empty when nothing is left to do
+    due: bool       # makes run-maintenance due
+
+
+def upkeep_items(c: dict) -> list[Upkeep]:
+    """Each kind of upkeep these counts hold, in the order the skill walks through them. Every threshold lives here.
+    A key the caller did not measure is left out."""
+    now = time.time()
+    items = []
+    for line in c.get("loose") or []:
+        items.append(Upkeep("loose", line, "its loose files are outside the undo; clear the cause, then run again", False))
+    last = c.get("last_run")
+    if c.get("sessions", 0) >= MAINTENANCE_SESSIONS and (last is None or now - last >= MAINTENANCE_DAYS * 86400):
+        sessions = plural(c["sessions"], "session")
+        detail = (f"no run in the last {DUE_WINDOW_DAYS} days, {sessions}" if last is None
+                  else f"{plural(int((now - last) // 86400), 'day')} and {sessions} since the last run")
+        items.append(Upkeep("time", detail, "", True))
+    if c.get("failed"):
+        items.append(Upkeep("setup", f"{plural(len(c['failed']), 'setup check')} failed", "offer iirc doctor --fix", False))
+    if c.get("ahead"):
+        items.append(Upkeep("unpushed", f"{plural(c['ahead'], 'store commit')} not pushed", "the sync line above says why", True))
+    if c.get("unapproved"):
+        items.append(Upkeep("unapproved", f"{plural(len(c['unapproved']), 'check')} not approved on this machine",
+                            "show the creator each command; on yes, iirc approve-page-check PAGE", False))
+    if suspects := c.get("suspects"):
+        items.append(Upkeep("suspect", f"{plural(len(suspects), 'suspect page')} ({', '.join(suspects[:3])}{', ...' if len(suspects) > 3 else ''})",
+                            "verify, fix, or delete each", True))
+    if c.get("timeouts"):
+        items.append(Upkeep("timeouts", f"{plural(c['timeouts'], 'suggestion lookup')} timed out in the last {TIMEOUT_DAYS} days", TIMEOUT_FIX, True))
+    if c.get("pairs"):
+        items.append(Upkeep("pairs", plural(len(c["pairs"]), "near-duplicate pair"), "merge each, or link one page to the other, by the skill's rule 2", True))
+    if c.get("findings"):
+        items.append(Upkeep("findings", plural(len(c["findings"]), "audit finding"), "propose each fix", False))
+    checked = c.get("last_network")
+    if c.get("urls") and (checked is None or now - checked >= NETWORK_CHECK_DAYS * 86400):
+        when = f"not checked in {NETWORK_CHECK_DAYS} days" if checked is None else f"last checked {int((now - checked) // 86400)} days ago"
+        items.append(Upkeep("network", f"{plural(c['urls'], 'URL ref')}, {when}", "offer iirc find-suspect-pages --network, naming the URLs it contacts", False))
+    if c.get("waiting", 0) >= WAITING_SESSIONS:
+        items.append(Upkeep("waiting", f"{WAITING_SESSIONS} or more sessions waiting to be judged for tuning", "offer /iirc tune-suggestions, which is long", True))
+    return items
+
+
+def maintenance_due(counts: dict) -> list[str]:
+    """Why run-maintenance is due, or []. No network, no host probe: the session-start brief calls it."""
+    return [i.detail for i in upkeep_items(counts) if i.due]
 
 
 def close_pairs(budget: float | None = None) -> list[tuple[float, str, str]]:
@@ -4485,28 +4539,25 @@ def undo_command(start: dict) -> str:
     return f"git -C {repo} revert --no-edit $({commits})"
 
 
-def last_network_check(rows: list[dict]) -> float | None:
-    """When find-suspect-pages --network last ran here: its doubt row says network."""
-    return max((t for r in rows if r.get("repo") == str(ROOT) and r["cmd"] == "doubt" and r.get("network")
-                and (t := parse_ts(r.get("ts"))) is not None), default=None)
-
-
 def cmd_run_maintenance(args: argparse.Namespace) -> None:
     """The one upkeep command: the safe automatic part, then what is left to decide. Changes no page's text."""
     require_stores()
-    loose = commit_before_maintenance()
-    # the sync runs before the setup check, so the check does not report commits the sync then pushes
+    counts = logged_counts(waiting_limit=None)
+    counts["loose"] = commit_before_maintenance()
+    # the sync runs before the setup check, so the check does not report commits the sync then pushes;
+    # sync commits again what is loose in a remote store, and after the commit above that is nothing
     synced = io.StringIO()
     with contextlib.redirect_stdout(synced):
         cmd_sync(args)
     failed: list[str] = []
 
-    def report(label: str, good: bool, fix: str = "") -> bool:
-        if not good:
+    def report(label: str, good: bool, fix: str = "", kind: str = "") -> bool:
+        if not good and not kind:   # a check with a kind is an upkeep item of its own below
             failed.append(f"{label} ({fix})" if fix else label)
         return good
     with contextlib.redirect_stdout(io.StringIO()):   # doctor's notes; the near-duplicate pairs are listed below
-        setup_checks(False, report)
+        setup_checks(False, report, counts)
+    counts["failed"] = failed
     # after the sync: its pull rebases a remote store onto other machines' commits, which an undo must not revert
     starts = starting_commits()
     print("Starting commits: " + (", ".join(f"{s['store']} at {s['sha'][:7]}" for s in starts) or "none, no store is in a git repository")
@@ -4523,56 +4574,35 @@ def cmd_run_maintenance(args: argparse.Namespace) -> None:
     missing = unembedded() if semantic_enabled() else 0
     print("index: string search, nothing to embed" if not semantic_enabled()
           else f"index: {plural(missing, 'page')} without vectors" if missing else "index: every page has vectors")
-    rows, unchecked_urls, _ = suspect_rows()
-    unapproved = [(name, reason) for name, _, signals in rows for sig, reason in signals if sig == "unapproved"]
+    rows, counts["urls"], _ = suspect_rows()
+    counts["unapproved"] = [(name, reason) for name, _, signals in rows for sig, reason in signals if sig == "unapproved"]
     suspects = [(name, summary, [x for x in signals if x[0] != "unapproved"]) for name, summary, signals in rows]
     suspects = [r for r in suspects if r[2]]
+    counts["suspects"] = [name for name, _, _ in suspects]
     print("suspect pages: none" if not suspects else f"suspect pages: {len(suspects)}")
     for name, summary, signals in suspects:
         print(f"  {name}: {summary}")
         for sig, reason in signals:
             print(f"      {label(sig)}: {reason}")
-    if unapproved:
-        print(f"checks not approved on this machine: {len(unapproved)}")
-        for name, reason in unapproved:
+    if counts["unapproved"]:
+        print(f"checks not approved on this machine: {len(counts['unapproved'])}")
+        for name, reason in counts["unapproved"]:
             print(f"  {name}: {reason}")
-    pairs = close_pairs()
+    pairs = counts.get("pairs", [])
     print("near-duplicate pairs: none" if not pairs else f"near-duplicate pairs: {len(pairs)}")
     for d, first, second in pairs:
         print(f"  near-duplicate pair (distance {d:.3f}): {first} | {second}")
     pages = audit_pages()
-    findings, skip = audit_findings(pages)
+    counts["findings"], skip = audit_findings(pages)
     print("audit:")
     with contextlib.redirect_stdout(io.StringIO()) as audit_out:
-        print_audit(findings, len(pages), skip)
+        print_audit(counts["findings"], len(pages), skip)
     for line in audit_out.getvalue().splitlines():
         print(f"  {line}")
-    log = read_log()
-    waiting = len(untuned_sessions(repo_sessions(log)))
-    print(f"tuning: {plural(waiting, 'session')} waiting to be judged")
-    checked = last_network_check(log)
-    network_due = unchecked_urls > 0 and (checked is None or time.time() - checked >= NETWORK_CHECK_DAYS * 86400)
-    ahead = sum(unpushed(s) for s in live_stores())
-    left = [f"{line}: its loose files are outside the undo; clear the cause, then run again" for line in loose]
-    if failed:
-        left.append(f"{plural(len(failed), 'setup check')} failed: offer iirc doctor --fix")
-    if ahead:
-        left.append(f"{plural(ahead, 'store commit')} still not pushed: the sync line above says why")
-    if unapproved:
-        left.append(f"{plural(len(unapproved), 'check')} not approved on this machine: show the creator each command; on yes, iirc approve-page-check PAGE")
-    if suspects:
-        left.append(f"{plural(len(suspects), 'suspect page')}: verify, fix, or delete each")
-    if pairs:
-        left.append(f"{plural(len(pairs), 'near-duplicate pair')}: merge each, or link one page to the other with [[name]] if their kinds differ")
-    if findings:
-        left.append(f"{plural(len(findings), 'audit finding')}: propose each fix")
-    if network_due:
-        when = "never checked" if checked is None else f"last checked {int((time.time() - checked) // 86400)} days ago"
-        left.append(f"{plural(unchecked_urls, 'URL ref')}, {when}: offer iirc find-suspect-pages --network, naming the URLs it contacts")
-    if waiting >= WAITING_SESSIONS:
-        left.append(f"{waiting} sessions wait to be judged: offer /iirc tune-suggestions, which is long")
-    log_event("maintenance", start=starts, failed=len(failed), suspects=len(suspects), unapproved=len(unapproved),
-              pairs=len(pairs), findings=len(findings), waiting=waiting)
+    print(f"tuning: {plural(counts['waiting'], 'session')} waiting to be judged")
+    left = [f"{i.detail}: {i.action}" for i in upkeep_items(counts) if i.action]
+    log_event("maintenance", start=starts, failed=len(failed), suspects=len(suspects), unapproved=len(counts["unapproved"]),
+              pairs=len(pairs), findings=len(counts["findings"]), waiting=counts["waiting"])
     if not left:
         print("Nothing is left to decide.")
         return

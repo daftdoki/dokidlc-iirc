@@ -445,7 +445,7 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   on('ui.toast', () => ({ value: undefined }))
   on('process.run', ($, e) => {
     if (e.argv.includes('--health')) {
-      return ran(JSON.stringify({ suspect: ['old-fact.md'], stores: [{ name: 'shared', kind: 'remote', pages: 5, uncommitted: 0, unpushed: 2 }] }))
+      return ran(JSON.stringify({ suspect: ['old-fact.md'], stores: [{ name: 'shared', kind: 'remote', pages: 5, uncommitted: 0, unpushed: 2 }], due: ['1 suspect page (old-fact.md)', '2 store commits not pushed'] }))
     }
     if (e.argv.includes('summarize-session-usage')) {
       return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'noisy.md'], used: ['a.md'], missed: [['noisy.md', 4]], match: { all: 62, read: 75, unread: 49 } }))
@@ -833,4 +833,26 @@ test('near the auto-compact threshold, hands the model the write nudge once per 
   await measure(140_000)                               // a new window after the compaction
   expect(nudges()).toHaveLength(2)
   expect(await prompt()).toEqual([NUDGE])              // a prompt carries it when it comes first
+})
+
+
+test('the status chip turns yellow when the CLI says maintenance is due, and only then', async ($: Engine, on: On) => {
+  engine(on)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const OK = 'iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.'
+  let due: string[] = ['no run in the last 30 days, 6 sessions']
+  on('ui.toast', () => ({ value: undefined }))
+  on('process.run', ($, e) => e.argv.includes('--health')
+    ? ran(JSON.stringify({ suspect: [], stores: [{ name: 'project', kind: 'project', pages: 9, uncommitted: 0, unpushed: 0 }], due }))
+    : ran(OK))
+  await hookRow($, 'SessionStart', OK, 'hd1')
+  const chip = async (requestId: string) => {
+    const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+    return $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId, props: { command: 'iirc', args: 'status', text, isErrored: false } })
+  }
+  const due1 = await chip('due-1')
+  expect(await due1.find({ text: ' ▲ needs a look ' })).toBeDefined()
+  expect(await due1.find({ text: '/iirc run-maintenance' })).toBeDefined()
+  due = []
+  expect(await (await chip('due-0')).find({ text: ' ✔ all good ' })).toBeDefined()
 })

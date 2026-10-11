@@ -345,6 +345,7 @@ def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, cap
     out = json.loads(capsys.readouterr().out)
     assert "old.md" in out["suspect"]
     assert [(s["name"], s["kind"], s["unpushed"]) for s in out["stores"]] == [("project", "project", 0)]
+    assert out["due"] == ["1 suspect page (old.md)"]                    # the hooks module reads this, and decides nothing
 
 
 def test_git_checks_and_init_staging(tmp_path, monkeypatch):
@@ -3137,7 +3138,7 @@ def test_old_recall_tables_move_on_doctor_fix(tmp_path, monkeypatch, capsys):
     assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[suggestions.nomic-embed-text]" in iirc.CONFIG_ERROR
     assert iirc.knob_error_only()
     iirc.main(["doctor", "--health"])   # the /iirc card still gets its JSON
-    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores"}
+    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores", "due"}
     iirc.main(["doctor", "--brief"])
     assert "hooks off" in (out := capsys.readouterr().out) and "`iirc doctor --fix`" in out
     monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks
@@ -3894,38 +3895,43 @@ def _waiting(n):
         (iirc.state_dir() / "prompts" / f"w{i}.jsonl").write_text("{}\n")
 
 
+def _due(**counts):
+    """The due reasons for the log's counts plus what a caller measured."""
+    return iirc.maintenance_due({**iirc.logged_counts(), **counts})
+
+
 def test_maintenance_due_after_a_week_and_five_sessions(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
-    assert iirc.maintenance_due() == []                                 # never run, no sessions yet
+    assert _due() == []                                 # never run, no sessions yet
     _log([("start", f"s{i}", 1) for i in range(5)])
-    assert iirc.maintenance_due() == ["no run in the last 30 days, 5 sessions"]
+    assert _due() == ["no run in the last 30 days, 5 sessions"]
     _log([("maintenance", "m", 8)])                                     # a week ago: the five sessions came after
-    assert iirc.maintenance_due() == ["8 days and 5 sessions since the last run"]
+    assert _due() == ["8 days and 5 sessions since the last run"]
     _log([("maintenance", "m", 2)])
-    assert iirc.maintenance_due() == []                                 # run two days ago
+    assert _due() == []                                 # run two days ago
 
 
 def test_maintenance_due_waits_for_five_sessions_after_a_week(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     _log([("maintenance", "m", 10)] + [("start", f"s{i}", 1) for i in range(4)])
-    assert iirc.maintenance_due() == []
+    assert _due() == []
 
 
 def test_maintenance_due_sooner_for_each_reason(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     _log([("maintenance", "m", 0)])
-    assert iirc.maintenance_due() == []
-    assert iirc.maintenance_due(suspects=["a.md", "b.md"]) == ["2 suspect pages (a.md, b.md)"]
-    assert iirc.maintenance_due(ahead=1) == ["1 store commit not pushed"]
-    assert iirc.maintenance_due(close=2) == ["2 near-duplicate pairs"]
+    assert _due() == []
+    assert _due(suspects=["a.md", "b.md"]) == ["2 suspect pages (a.md, b.md)"]
+    assert _due(ahead=1) == ["1 store commit not pushed"]
+    assert _due(pairs=[(0.01, "a.md", "b.md"), (0.02, "c.md", "d.md")]) == ["2 near-duplicate pairs"]
     _waiting(9)
-    assert iirc.maintenance_due() == []
+    assert _due() == []
     _waiting(10)
-    assert iirc.maintenance_due() == ["10 or more sessions waiting to be judged for tuning"]
+    assert _due() == ["10 or more sessions waiting to be judged for tuning"]
     _log([("tuned", f"w{i}", 0, {"tuned": f"w{i}"}) for i in range(10)])
-    assert iirc.maintenance_due() == []
+    assert _due() == []
     _log([("timeout", "s1", 3), ("timeout", "s2", 9)])                  # the second is past the 7 days
-    assert iirc.maintenance_due() == ["1 suggestion lookup timed out in the last 7 days"]
+    assert _due() == ["1 suggestion lookup timed out in the last 7 days"]
 
 
 def _no_host(monkeypatch):
@@ -3938,11 +3944,11 @@ def test_run_maintenance_changes_no_page_logs_its_row_and_is_not_due_after(tmp_p
     iirc.write_config_file({"semantic": False})
     (field / "widgets.md").write_text("---\ntitle: Widgets need a restart after setup\nsummary: Widgets need a restart after setup, or they keep the old config.\n"
                                       "topics: [widgets]\nkind: finding\n---\nRestart them.\n\n## Sources\n\n- x\n")
-    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report: True)
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     iirc.stamp_index(field)                                             # what any command does to an unstamped store
     _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "page")
     _log([("start", f"s{i}", 1) for i in range(5)])
-    assert iirc.maintenance_due() != []
+    assert _due() != []
     before = {p.name: p.read_bytes() for p in field.iterdir()}
     iirc.main(["run-maintenance"])
     out = capsys.readouterr().out
@@ -3950,7 +3956,7 @@ def test_run_maintenance_changes_no_page_logs_its_row_and_is_not_due_after(tmp_p
     assert _git(tmp_path, "status", "--porcelain", "--", ".iirc") == ""
     assert [r["cmd"] for r in iirc.read_log()].count("maintenance") == 1
     assert out.rstrip().splitlines()[-1] == "Nothing is left to decide."
-    assert iirc.maintenance_due() == []
+    assert _due() == []
 
 
 def test_run_maintenance_syncs_remote_stores_before_the_page_checks(tmp_path, monkeypatch, capsys):
@@ -3988,7 +3994,7 @@ def test_run_maintenance_lists_what_is_left(tmp_path, monkeypatch, capsys):
     assert "checked.md" in out and "`test -d docs`" in out
     assert "loose.md" not in _git(tmp_path, "status", "--porcelain")      # committed before the checks
     left = out[out.index("Left to decide:"):]
-    for want in ("suspect", "check not approved", "near-duplicate", "audit finding", "10 sessions wait",
+    for want in ("suspect", "not approved", "near-duplicate", "audit finding", "10 or more sessions waiting",
                  "find-suspect-pages --network"):
         assert want in left, want
     # a network check this month: no offer
@@ -4059,13 +4065,19 @@ def test_doctor_ends_with_run_maintenance_when_due(tmp_path, monkeypatch, capsys
     _index(tmp_path, monkeypatch, _CLOSE)
     with pytest.raises(SystemExit):
         iirc.main(["doctor"])
-    assert capsys.readouterr().out.rstrip().splitlines()[-1] == "run-maintenance is due: 1 near-duplicate pair"
+    out = capsys.readouterr().out
+    assert out.rstrip().splitlines()[-1] == "run-maintenance is due: it settles the failures and notes above"
+    assert out.count("near-duplicate pages") == 1                       # the pair is named once, as a note
+    _log([("start", f"s{i}", 1) for i in range(5)])
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    assert capsys.readouterr().out.rstrip().splitlines()[-1] == "run-maintenance is due: no run in the last 30 days, 5 sessions"
 
 
 def test_run_maintenance_leaves_a_store_it_could_not_commit_first(tmp_path, monkeypatch, capsys):
     field = _project(tmp_path, monkeypatch)
     iirc.write_config_file({"semantic": False})
-    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report: True)
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
     _page(field, "loose.md")
     monkeypatch.setattr(iirc, "commit_store", lambda store, message: "a merge or rebase is in progress")
     iirc.main(["run-maintenance"])
@@ -4080,7 +4092,7 @@ def test_maintenance_due_reads_only_its_window_of_the_log(tmp_path, monkeypatch)
     _log([("start", f"s{i}", 1) for i in range(5)])
     old = iirc.state_dir() / "log-2020-01.jsonl"
     (iirc.state_dir() / "log.jsonl").rename(old)                         # rows dated today, in a file of an old month
-    assert iirc.maintenance_due() == []
+    assert _due() == []
     assert len(iirc.read_log()) == 5                                     # the unbounded read still sees them
 
 
@@ -4094,3 +4106,16 @@ def test_untuned_sessions_stops_at_its_limit(tmp_path, monkeypatch):
     assert len(iirc.untuned_sessions(sessions)) == 15 and len(calls) == 15   # once per session, not per row
     calls.clear()
     assert len(iirc.untuned_sessions(sessions, limit=10)) == 10 and len(calls) == 10
+
+
+def test_doctor_names_an_unpushed_store_and_timeouts_once(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    _page(agent.dir, "local-only.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "local")
+    _log([("timeout", "s1", 1)])
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    lines = capsys.readouterr().out.splitlines()
+    assert sum("not pushed" in line for line in lines) == 1
+    assert sum("timed out" in line for line in lines) == 1
+    assert lines[-1] == "run-maintenance is due: it settles the failures and notes above"
