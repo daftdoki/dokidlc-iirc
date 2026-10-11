@@ -75,8 +75,8 @@ const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted|P
 // commands that change the page count or the setup the brief reports, and commands that read, write, or search pages (read also matches read-matching-pages)
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-embedding-model|add-embedding-model|remove-embedding-model|prefer-embedding-host|search-mode|init|doctor|run-maintenance)\b/
 const COUNTS_RE = /\biirc\s+(read|write|search)\b/
-// fixed red, yellow, green rather than the theme's, whose success color may be blue
-const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
+// each level's theme color, for the circles, the chips, and the marks, so they match the prompt around them
+const LEVEL_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 const SUMMARY_LINE_ARGS_RE = /^\s*summary-line-visibility(?:\s+(on|off))?\s*$/
 // iirc commands a person may run straight from /iirc; the rest go to the skill, which asks first
 const DIRECT_RE = /^(doctor(?:\s+--fix)?|find-suspect-pages(?:\s+--all)?|show-page-stores|sync|summarize-page-usage(?:\s+--days\s+\d+)?|rebuild-search-index|estimate-context-tokens|show-page-topics|show-suggestion-thresholds|show-embedding-models|search-mode|search\s+\S.*|read(?:\s+\S+)+)$/s
@@ -291,8 +291,6 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
 type LinePart = { text: string; color?: string; bold?: boolean }
 
 const LINE_CELLS = 5
-// theme colors for the circle, so the band matches the prompt around it
-const CIRCLE_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
 
 /**
  * The summary line above the prompt, after its circle and accent bar: the name, then what this session did.
@@ -971,8 +969,8 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {original}
         <Box key="iirc-line" flexDirection="row">
-          <Text color={CIRCLE_COLOR[liveStatus(s, c).level]}>● </Text>
-          <Text color={TAGLINE_FROM}>▍</Text>
+          <Text color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>
+          {accentBar($, e)}
           {statusParts(s, c).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>)}
         </Box>
       </Box>
@@ -1091,7 +1089,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   // or the text wraps under the bar
   const heading = (text: string) => (
     <Box flexDirection="row" flexShrink={0}>
-      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0}>{accentBar($, e)}</Box>
       <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
     </Box>
   )
@@ -1375,7 +1373,7 @@ function drawDoctor($: EngineInterface, e: ResolveInput, r: DoctorReport, isFix:
   // or the text wraps under the bar
   const heading = (text: string) => (
     <Box flexDirection="row" flexShrink={0}>
-      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0}>{accentBar($, e)}</Box>
       <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
     </Box>
   )
@@ -1437,7 +1435,7 @@ function sectionTitle($: EngineInterface, e: ResolveInput, text: string) {
   const { Box, Text } = $.ui.resolve(e)
   return (
     <Box key={`title-${text}`} flexDirection="row" flexShrink={0}>
-      <Box flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+      <Box flexShrink={0}>{accentBar($, e)}</Box>
       <Box flexShrink={0} marginLeft={1}><Text bold color={HEADING}>{text}</Text></Box>
     </Box>
   )
@@ -1470,6 +1468,12 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
       {Array.from({ length: n }, (_, k) => <Text key={`r${k}`} color={mix(TAGLINE_FROM, TAGLINE_TO, n > 1 ? k / (n - 1) : 0)}>━</Text>)}
     </Box>
   )
+}
+
+/** The accent bar that opens a section title and the summary line. */
+function accentBar($: EngineInterface, e: ResolveInput) {
+  const { Text } = $.ui.resolve(e)
+  return <Text color={TAGLINE_FROM}>▍</Text>
 }
 
 /** A filled chip, as the card's STATUS: dark text on a color. */
@@ -1690,7 +1694,7 @@ function pageItems($: EngineInterface, e: ResolveInput, r: Reader, at: number, c
       ))}
       {/* the summary set off as a quote, the cards' orange bar beside it */}
       <Box flexDirection="row" marginTop={1}>
-        <Box width={2} flexShrink={0}><Text color={TAGLINE_FROM}>▍</Text></Box>
+        <Box width={2} flexShrink={0}>{accentBar($, e)}</Box>
         <Text italic color="suggestion">{str(fm.summary)}</Text>
       </Box>
       {topics && (
