@@ -1069,7 +1069,11 @@ test('a demo reader that Claude Code did not place leaves no demo behind', async
 
 // the summary line above the prompt: a circle in the level's color, the accent bar, "iirc status", then what this session did
 const OK_BRIEF = 'iirc: 110 pages, semantic via 127.0.0.1:11434. Topics: x 110.'
-const head = (level: string): [string, Record<string, unknown>][] => [['● ', { color: level }], ['▍', { color: '#e8875f' }], ['iirc status', { bold: true, color: 'claude' }]]
+// "iirc status" a letter at a time along the card's gradient, from the accent orange to violet
+const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+const step = (t: number) => '#' + hex('#e8875f').map((v, i) => Math.round(v + (hex('#a78bfa')[i] - v) * t).toString(16).padStart(2, '0')).join('')
+const WORDMARK: [string, Record<string, unknown>][] = [...'iirc status'].map((ch, k) => [ch, { bold: true, color: step(k / 10) }])
+const head = (level: string): [string, Record<string, unknown>][] => [['● ', { color: level }], ['▍', { color: '#e8875f' }], ...WORDMARK]
 const num = (n: string): [string, Record<string, unknown>] => [n, { bold: true, color: 'claude' }]
 const word = (w: string): [string, Record<string, unknown>] => [w, { color: 'subtle' }]
 const SP: [string, Record<string, unknown>] = ['  ', {}]
@@ -1122,6 +1126,11 @@ for (const ex of LINE_EXAMPLES) {
     expect(await hint.find({ text: 'engine row' })).toBeDefined()
   })
 }
+
+test('the band\'s wordmark runs from the accent orange to violet, letter by letter', () => {
+  expect(WORDMARK[0][1].color).toBe('#e8875f')
+  expect(WORDMARK[10][1].color).toBe('#a78bfa')
+})
 
 test('the summary line hides zero counters, the suggested pages read with no suggestion, and the page count once anything happened', () => {
   const ok = parseBrief(OK_BRIEF)!.status

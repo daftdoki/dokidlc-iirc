@@ -288,6 +288,8 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
 // The band above the prompt, one switch each, so a part the creator does not like goes with one edit:
 // the thin rule between its counters
 const BAND_DIVIDER = ' │ '
+// "iirc status" along the card's gradient, letter by letter; false draws it in the claude color
+const BAND_GRADIENT = true
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
@@ -298,7 +300,9 @@ type LinePart = { text: string; color?: string; bold?: boolean }
  * suggested, searched, read, or wrote anything. Problems go to the line under the prompt, not here.
  */
 export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
-  const out: LinePart[] = [{ text: 'iirc status', bold: true, color: 'claude' }]
+  const out: LinePart[] = BAND_GRADIENT
+    ? gradient('iirc status').map(p => ({ ...p, bold: true }))
+    : [{ text: 'iirc status', bold: true, color: 'claude' }]
   const num = (text: string): LinePart => ({ text, bold: true, color: 'claude' })
   const word = (text: string): LinePart => ({ text, color: 'subtle' })
   const items: LinePart[][] = []
@@ -1047,6 +1051,11 @@ function gaugeCells(used: number, total: number, width: number): LinePart[] {
   return Array.from({ length: width }, (_, k) => (k < filled ? { text: '█', color: gaugeColor(k / (width - 1)) } : { text: '░', color: 'inactive' }))
 }
 
+/** Text a character at a time, each a step from the accent orange to violet over `steps` characters, so a cut text keeps the whole one's colors. */
+function gradient(text: string, steps = text.length): LinePart[] {
+  return [...text].map((ch, k) => ({ text: ch, color: mix(TAGLINE_FROM, TAGLINE_TO, steps > 1 ? k / (steps - 1) : 0) }))
+}
+
 /** The gauge color at position t, 0 to 1: red to amber to green. */
 function gaugeColor(t: number): string {
   return t < 0.5 ? mix(GAUGE[0], GAUGE[1], t * 2) : mix(GAUGE[1], GAUGE[2], (t - 0.5) * 2)
@@ -1324,8 +1333,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       <Box flexDirection="row">{head}</Box>
       <Box flexDirection="row" paddingLeft={9}>
         {/* one Text per character, each a step along the gradient; cut to the card, or the row drops letters to fit */}
-        {[...fitTo(TAGLINE, inner - 9)].map((ch, k) => (
-          <Text key={k} italic color={mix(TAGLINE_FROM, TAGLINE_TO, k / (TAGLINE.length - 1))}>{ch}</Text>
+        {gradient(fitTo(TAGLINE, inner - 9), TAGLINE.length).map((p, k) => (
+          <Text key={k} italic color={p.color}>{p.text}</Text>
         ))}
       </Box>
       {/* a rule under the title, orange to violet, as long as the tagline line */}
