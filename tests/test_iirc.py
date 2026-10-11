@@ -358,6 +358,7 @@ def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, cap
     assert "old.md" in out["suspect"]
     assert [(s["name"], s["kind"], s["unpushed"]) for s in out["stores"]] == [("project", "project", 0)]
     assert out["due"] == ["1 suspect page (old.md)"]                    # the hooks module reads this, and decides nothing
+    assert out["model"] == iirc.active_model().id                       # the band names it beside the page count
 
 
 def test_git_checks_and_init_staging(tmp_path, monkeypatch):
@@ -3211,7 +3212,7 @@ def test_old_recall_tables_move_on_doctor_fix(tmp_path, monkeypatch, capsys):
     assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[suggestions.nomic-embed-text]" in iirc.CONFIG_ERROR
     assert iirc.knob_error_only()
     iirc.main(["doctor", "--health"])   # the /iirc card still gets its JSON
-    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores", "due"}
+    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores", "due", "model"}
     iirc.main(["doctor", "--brief"])
     assert "hooks off" in (out := capsys.readouterr().out) and "`iirc doctor --fix`" in out
     monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks

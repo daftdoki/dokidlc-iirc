@@ -104,6 +104,7 @@ const DEMO_COUNTS: SessionCounts = {
 const DEMO_HEALTH: IircHealth = {
   suspect: [],
   due: [],
+  model: 'qwen3-embedding-0.6b',
   stores: [{ name: 'project', kind: 'project', pages: 97, uncommitted: 0, unpushed: 0 }, { name: 'shared', kind: 'remote', pages: 45, uncommitted: 0, unpushed: 0 }],
 }
 // `/iirc demo doctor`: doctor's own lines for a sample machine, 13 checks with one failure and one note,
@@ -303,16 +304,22 @@ const BAND_FLASH_MS = 4000
 // the circle's frames while the suggestion hook searches, one every BAND_PULSE_MS; 0 keeps the circle still
 const BAND_PULSE_MS = 150
 const PULSE = ['◐', '◓', '◑', '◒'] as const
+// the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
+// both in the line itself, as before
+const BAND_CONTEXT = true
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
 
+const isStringSearch = (s: IircStatus) => !!s.mode && s.mode !== 'semantic+keyword'
+
 /**
  * The summary line above the prompt, after its circle and accent bar: "iirc status", then what this session did.
- * A counter at zero is left out, the suggested pages read with nothing suggested, and the page count once the session
- * suggested, searched, read, or wrote anything. Problems go to the line under the prompt, not here.
+ * A counter at zero is left out, and the suggested pages read with nothing suggested. Problems go to the line
+ * under the prompt, not here. Without the context at the right end, the line itself carries the page count until
+ * the session suggested, searched, read, or wrote anything, and string search when search runs on terms alone.
  */
-export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}): LinePart[] {
+export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, hasContext = false): LinePart[] {
   const out: LinePart[] = BAND_GRADIENT
     ? gradient('iirc status').map(p => ({ ...p, bold: true }))
     : [{ text: 'iirc status', bold: true, color: 'claude' }]
@@ -325,15 +332,45 @@ export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}): L
   const word = (text: string): LinePart => ({ text, color: 'subtle' })
   const items: LinePart[][] = []
   const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
-  if (s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
+  if (!hasContext && s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
   if (c.suggested > 0) items.push([...count('used'), num('/'), ...count('suggested'), word(' suggested read')])
   for (const [key, label] of [['searches', 'searched'], ['reads', 'read'], ['writes', 'written']] as const) {
     if (c[key] > 0) items.push([...count(key), word(` ${label}`)])
   }
   // the mode shows only when it is not the default, so a weaker search stands out
-  if (s.mode && s.mode !== 'semantic+keyword') items.push([{ text: 'string search', color: 'warning' }])
+  if (!hasContext && isStringSearch(s)) items.push([{ text: 'string search', color: 'warning' }])
   items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(BAND_DIVIDER), ...item))
   return out
+}
+
+/**
+ * The band's right end: the embedding model, or string search when search runs on terms alone (the line under
+ * the prompt says why), then the page count, which stays all session.
+ */
+export function contextParts(s: IircStatus, model: string | null): LinePart[] {
+  const out: LinePart[] = []
+  if (isStringSearch(s)) out.push({ text: 'string search', color: 'warning' })
+  else if (model) out.push({ text: model, color: 'subtle' })
+  if (s.pages !== null) {
+    if (out.length > 0) out.push({ text: ' · ', color: 'subtle' })
+    out.push({ text: `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}`, color: 'subtle' })
+  }
+  return out
+}
+
+/** The band's parts, the line and its right end, as wide as `columns` allows: the right end goes first when they do not fit. */
+export function bandParts(s: IircStatus, c: SessionCounts, model: string | null, lit: Flash = {}, columns = Infinity): { line: LinePart[]; context: LinePart[] } {
+  const context = BAND_CONTEXT ? contextParts(s, model) : []
+  const line = statusParts(s, c, lit, context.length > 0)
+  // the circle and the bar take three columns, the gap before the right end two
+  if (context.length > 0 && 3 + plain(line).length + 2 + plain(context).length <= columns) return { line, context }
+  return { line: statusParts(s, c, lit), context: [] }
+}
+
+/** The circle's level: the brief's, and yellow while search runs on terms alone. */
+function bandLevel(s: IircStatus, c: SessionCounts): IircStatus['level'] {
+  const level = liveStatus(s, c).level
+  return level === 'ok' && isStringSearch(s) ? 'warn' : level
 }
 
 /** A line's parts as plain text. */
@@ -341,9 +378,10 @@ function plain(parts: LinePart[]): string {
   return parts.map(p => p.text).join('')
 }
 
-/** The summary line as plain text, for the text help; the band draws the same parts after its circle and accent bar. */
-export function statusText(s: IircStatus, c: SessionCounts): string {
-  return plain(statusParts(s, c))
+/** The summary line as plain text, for the text help: the band's line and its right end, two spaces apart, as a wide band draws them after the circle and bar. */
+export function statusText(s: IircStatus, c: SessionCounts, model: string | null = null): string {
+  const { line, context } = bandParts(s, c, model)
+  return plain(line) + (context.length > 0 ? `  ${plain(context)}` : '')
 }
 
 /**
@@ -445,7 +483,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   // the engine puts the plugin's name in front of a command's text
   const c = await read($, counts)
   const todo = actionText(s, c)
-  const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
+  const head = [s === null ? 'no session brief yet' : statusText(s, c, (await read($, health))?.model ?? null).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
   if (view === 'status') {
@@ -1029,12 +1067,14 @@ export const register: Register = on => {
     if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
     const frame = await read($, pulse)
+    const { line, context } = bandParts(s, c, (await read($, health))?.model ?? null, await read($, flash), e.props.bodyColumns)
     const { Text } = $.ui.resolve(e)
+    const span = (p: LinePart, k: number) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>
     return withRow($, e, await next(e), 'iirc-line', [
-      <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>{`${frame === null ? '●' : PULSE[frame]} `}</Text>,
+      <Text key="circle" color={LEVEL_COLOR[bandLevel(s, c)]}>{`${frame === null ? '●' : PULSE[frame]} `}</Text>,
       accentBar($, e, 'bar'),
-      ...statusParts(s, c, await read($, flash)).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>),
-    ])
+      ...line.map(span),
+    ], context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined)
   })
 
   // Under the prompt, beside the engine's hint: a line only when the person needs to act.
@@ -1533,12 +1573,19 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
  * What the engine drew, with one line of iirc's under it, in a keyed Box. The line is one Text of inline spans,
  * so it wraps as one run of prose: in a row Box each span would take a column of its own and wrap inside it.
  */
-function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[]) {
+function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[], right?: RenderChildren[]) {
   const { Box, Text } = $.ui.resolve(e)
+  // the right end, when there is one, sits at the row's end: the line takes the room left of it
+  const row = (
+    <Box key={key} flexDirection="row">
+      <Box flexGrow={1} flexShrink={1}><Text>{spans}</Text></Box>
+      {right && <Box flexShrink={0}><Text>{right}</Text></Box>}
+    </Box>
+  )
   return (
     <Box flexDirection="column">
       {original}
-      <Box key={key}><Text>{spans}</Text></Box>
+      {row}
     </Box>
   )
 }
