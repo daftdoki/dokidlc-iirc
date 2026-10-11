@@ -4874,3 +4874,19 @@ def test_doctor_names_the_model_and_its_source(tmp_path, monkeypatch, capsys):
             iirc.main(["doctor"])
         assert f"ok  {says}" in capsys.readouterr().out
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
+
+
+def test_doctor_names_the_model_with_no_setup_file(tmp_path, monkeypatch, capsys):
+    """No backend chosen on this machine yet: doctor still names the model and where it is set."""
+    _project(tmp_path, monkeypatch)
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding:0.6b"\n')
+    assert not iirc.config_file().exists()
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "ok  embedding model qwen3-embedding:0.6b, set in this repository's .claude/iirc.toml" in out and "FAIL search backend chosen" in out
+    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
