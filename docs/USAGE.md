@@ -311,7 +311,7 @@ describes each one.
 | `iirc audit-page-findability [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |
 | `iirc init`, `iirc migrate`, `iirc max-suggested-pages N` | The repository's `.iirc/`, the move from the memory plugin, and the pages per line. |
 | `iirc set-embedding-model MODEL` | Writes `embedding_model` to this repository's `.claude/iirc.toml`, for every machine. It says what a switch costs: every page is embedded again, the thresholds start at the new model's defaults, and tuning judgments made under the old model stop counting. |
-| `iirc show-embedding-models` | This machine's list of embedding models and where each runs, with the entry that serves this repository marked. |
+| `iirc show-embedding-models` | This machine's list of embedding models and where each runs, each with the build ollama reports and its fingerprint cosine against the reference, and the entry that serves this repository marked. |
 | `iirc add-embedding-model MODEL HOST` | Adds a model and where it runs to this machine's list. HOST is a URL, `local` for ollama here, or `cpu` for `all-minilm-l6-v2` on this CPU. It asks the host whether it speaks ollama or the OpenAI-compatible API and which build it has, and refuses a host without the model. It never pulls a model. |
 | `iirc remove-embedding-model MODEL [HOST]` | Removes the model from this machine's list, on one host or on all. |
 | `iirc prefer-embedding-host MODEL HOST` | When two listed hosts serve a model, records which one this machine uses. |

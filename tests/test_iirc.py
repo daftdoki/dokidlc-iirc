@@ -5052,6 +5052,23 @@ def test_fingerprint_warns_and_refuses(tmp_path, monkeypatch, capsys):
         assert "1024 wide" in capsys.readouterr().err and iirc.machine_models() == []
 
 
+def test_show_embedding_models_shows_build_and_fingerprint(tmp_path, monkeypatch, capsys):
+    """show-embedding-models gives each entry's build where the protocol reports one and its fingerprint cosine, a dash where no
+    reference vector ships or the protocol reports no build."""
+    import numpy as np
+    _project(tmp_path, monkeypatch)
+    ref = np.asarray(json.loads((ROOT / "bin" / "fingerprints.json").read_text())["models"]["nomic-embed-text"]["vector"])
+    with _probe_ollama(monkeypatch, "nomic-embed-text", [ref], quantization="Q4_K_M") as url:
+        _machine_config({"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", url)]})
+        iirc.main(["show-embedding-models"])
+        row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("nomic-embed-text"))
+        assert "build Q4_K_M" in row and "fingerprint 1.00000" in row
+        monkeypatch.setattr(iirc, "fingerprints", lambda: {"probe": iirc.PROBE, "models": {}})
+        iirc.main(["show-embedding-models"])
+        row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("nomic-embed-text"))
+        assert "build Q4_K_M" in row and "fingerprint -" in row
+
+
 def _doctor(argv, capsys):
     with pytest.raises(SystemExit):
         iirc.main(argv)

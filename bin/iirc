@@ -3145,9 +3145,19 @@ def cmd_show_embedding_models(args: argparse.Namespace) -> None:
         return
     for e in entries:
         marks = (["serves this repository"] if e == serving else []) + (["preferred"] if prefs.get(e.model) == e.host else [])
-        print(f"{e.model}  {e.host}  {e.protocol}  {e.name}" + (f"  ({', '.join(marks)})" if marks else ""))
+        print(f"{e.model}  {e.host}  {e.protocol}  {e.name}  {entry_check(e)}" + (f"  ({', '.join(marks)})" if marks else ""))
     if serving is None:
         print(f"this machine cannot serve {MODEL.id}; `iirc doctor` names the ways out")
+
+
+def entry_check(e: Entry) -> str:
+    """The build and the fingerprint cosine for show-embedding-models, a dash for what the protocol or the plugin does not give."""
+    up = cpu_ready() if e.protocol == "onnx" else host_answers(e.host, no_route=e.protocol == "openai")
+    if not up:
+        return "host does not answer"
+    ref, width, cos, build = measure(e)
+    shown = f"{cos:.5f}" if cos is not None else "-" if not ref else "no vector" if width is None else f"{width} wide"
+    return f"build {build or '-'}  fingerprint {shown}"
 
 
 def pull_command(url: str, name: str) -> str:
@@ -3190,24 +3200,38 @@ def ollama_build(host: str, name: str) -> str | None:
     return str(level) if level else None
 
 
+class Measure(NamedTuple):
+    """One entry's build against the plugin's reference vector."""
+    ref: dict | None       # the reference, None when none ships for the model
+    width: int | None      # the probe vector's width, None when the host gave none (or with no reference, when it was not asked)
+    cosine: float | None   # against the reference, None without one or at another width
+    build: str | None      # the quantization ollama reports, None for another protocol or when it reports none
+
+
+def measure(e: Entry) -> Measure:
+    """Embed the probe through the entry and compare it with the reference; with no reference, only the build is asked for."""
+    import numpy as np
+    ref = fingerprints()["models"].get(e.model)
+    build = ollama_build(e.host, e.name) if e.protocol == "ollama" else None
+    got = probe_vector(e) if ref else None
+    if got is None or len(got) != len(ref["vector"]):
+        return Measure(ref, len(got) if got is not None else None, None, build)
+    want, got = np.asarray(ref["vector"], dtype=np.float64), np.asarray(got, dtype=np.float64)
+    return Measure(ref, len(got), float(got @ want / (np.linalg.norm(got) * np.linalg.norm(want))), build)
+
+
 def fingerprint(e: Entry) -> tuple[str, str]:
     """(verdict, line) for the entry's build against the plugin's reference: "ok", "warn" under FINGERPRINT_CUT, "error" at another
     width, or "skip" when there is no reference or no probe vector. The line names the build ollama reports."""
-    import numpy as np
     model = iirc_embed.MODELS[e.model]
-    ref = fingerprints()["models"].get(model.id)
+    ref, width, cos, build = measure(e)
     if not ref:
         return "skip", f"no reference vector for {model.id} ships with this plugin, so its build is not checked"
-    got = probe_vector(e)
-    if got is None:
+    if width is None:
         return "skip", f"{e.host} gave no probe vector for {e.name}, so its build is not checked"
-    build = ollama_build(e.host, e.name) if e.protocol == "ollama" else None
     on = f"{e.name} on {e.host}" + (f", build {build}" if build else "")
-    if len(got) != len(ref["vector"]):
-        return "error", f"fingerprint of {on}: {len(got)} wide, and {model.id} is {len(ref['vector'])}; another model answers under this name"
-    want = np.asarray(ref["vector"], dtype=np.float64)
-    got = np.asarray(got, dtype=np.float64)
-    cos = float(got @ want / (np.linalg.norm(got) * np.linalg.norm(want)))
+    if cos is None:
+        return "error", f"fingerprint of {on}: {width} wide, and {model.id} is {len(ref['vector'])}; another model answers under this name"
     if cos < FINGERPRINT_CUT:
         return "warn", (f"this host's {model.id} gives different vectors from the reference build (cosine {cos:.5f}, under {FINGERPRINT_CUT}; "
                         f"{on}; the reference is {ref['build']})")
