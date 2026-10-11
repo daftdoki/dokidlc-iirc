@@ -45,11 +45,13 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import math
 import os
 import platform
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -2325,15 +2327,8 @@ def page_frontmatter(name: str, store: Store | None = None) -> dict:
     return fm
 
 
-def cmd_find_suspect_pages(args: argparse.Namespace) -> None:
-    """Pages with evidence they may be wrong, strongest signal first."""
-    require_stores()
-    if args.network:
-        if os.environ.get("IIRC_ALLOW_NETWORK") != "1":
-            if not sys.stdin.isatty():
-                die("--network contacts every URL cited in the pages. Ask the creator; they can run it themselves, or set IIRC_ALLOW_NETWORK=1 for this command.", 2)
-            if not input("Contact every URL cited in the pages? [y/N]: ").strip().lower().startswith("y"):
-                die("not contacting URLs", 2)
+def suspect_rows(check_urls: bool = False, clean_too: bool = False) -> tuple[list[tuple[str, str, list]], int, list[str]]:
+    """(rows of page label, summary, signals, strongest first; URL refs not contacted; pages of other projects). Runs approved check commands."""
     approved = approved_checks()
     rows = []
     unchecked_urls = 0
@@ -2344,15 +2339,28 @@ def cmd_find_suspect_pages(args: argparse.Namespace) -> None:
             if not same_project(fm):
                 elsewhere.append(page_label(store.name, page.name))
                 continue
-            signals = suspicion(fm, run_checks=True, check_urls=args.network, approved=approved)
-            if not args.network:
+            signals = suspicion(fm, run_checks=True, check_urls=check_urls, approved=approved)
+            if not check_urls:
                 unchecked_urls += sum(1 for r in fm.get("refs") or [] if is_url(str(r)))
-            if signals or args.all:
+            if signals or clean_too:
                 rows.append((page_label(store.name, page.name), fm.get("summary", ""), signals))
+    rows.sort(key=lambda r: (RANK[r[2][0][0]] if r[2] else 99, r[0]))
+    return rows, unchecked_urls, elsewhere
+
+
+def cmd_find_suspect_pages(args: argparse.Namespace) -> None:
+    """Pages with evidence they may be wrong, strongest signal first."""
+    require_stores()
+    if args.network:
+        if os.environ.get("IIRC_ALLOW_NETWORK") != "1":
+            if not sys.stdin.isatty():
+                die("--network contacts every URL cited in the pages. Ask the creator; they can run it themselves, or set IIRC_ALLOW_NETWORK=1 for this command.", 2)
+            if not input("Contact every URL cited in the pages? [y/N]: ").strip().lower().startswith("y"):
+                die("not contacting URLs", 2)
+    rows, unchecked_urls, elsewhere = suspect_rows(args.network, args.all)
     log_event("doubt", suspects=sum(1 for r in rows if r[2]), network=bool(args.network))
     if unchecked_urls:
         print(f"iirc: {unchecked_urls} URL ref{'s' if unchecked_urls != 1 else ''} not checked. `iirc find-suspect-pages --network` contacts them; ask the creator first.", file=sys.stderr)
-    rows.sort(key=lambda r: (RANK[r[2][0][0]] if r[2] else 99, r[0]))
     if elsewhere:
         print(f"iirc: {len(elsewhere)} page{'s' if len(elsewhere) != 1 else ''} of other projects not checked here" + (": " + ", ".join(elsewhere) if args.all else ""), file=sys.stderr)
     if not rows:
@@ -3444,6 +3452,90 @@ def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     return up
 
 
+def setup_checks(fix_it: bool, report) -> bool:
+    """Doctor's checks, each through report(label, good, fix); with fix_it, repair what it can. False when a failure stops the rest."""
+    pin = read_pin()
+    if CONFIG_ERROR and fix_it and knob_error_only():
+        for note in fix_knobs():
+            print(f"iirc: {STORE_CONFIG}: {note}")
+        set_root(ROOT)
+    if CONFIG_ERROR:
+        # nothing else can be checked: the stores are unknown, and every hook is quiet
+        report(f"{STORE_CONFIG} loads, so the hooks run", False,
+               "iirc doctor --fix moves old [recall] tables to [suggestions.MODEL-ID] and comments out a bad threshold" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
+        return False
+    report(f"{STORE_CONFIG} loads, so the hooks run", True)
+    timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
+    report(f"suggest-pages finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
+           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend")
+
+    if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
+        return False
+
+    have_tool = shutil.which("memoryfield-tool") is not None
+    rev = installed_rev() if have_tool else None
+    pinned = have_tool and pin_matches(pin, rev)
+    if not pinned and fix_it:
+        pinned = install_tool(pin) and pin_matches(pin, installed_rev())
+    report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
+
+    model = active_model()
+    up = False   # embeddings work, so --fix can reindex
+    if not semantic_enabled():
+        report("search mode: string, the fallback (iirc set-search-backend --local or --host URL switches to semantic)", True)
+    elif model.backend == "onnx":
+        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
+    elif model.backend == "openai":
+        base, source, up = resolve_host()
+        status = host_status(base)
+        why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
+        # the host's width, not the table's: it may serve another size of the model under this name
+        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
+                    up and why is None,
+                    (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
+    else:
+        up = doctor_ollama(model, fix_it, report)
+
+    for store in STORES:
+        if store.kind == "remote" and not store.dir.is_dir() and fix_it:
+            reason = clone_store(store)
+            if reason:
+                print(f"iirc: cloning {store.name}: {reason}")
+        elif store.kind == "remote" and store.dir.is_dir() and fix_it:
+            create_index(store)
+        report(f"store {store.name} at {store.dir}", store.dir.is_dir(), "iirc init" if store.kind == "project" else "iirc doctor --fix")
+        if store.kind == "remote" and store.dir.is_dir():
+            origin = run_git(store.repo, "remote", "get-url", "origin").stdout.strip()
+            report(f"store {store.name} tracks {store.url}", origin == store.url, f"the clone at {store.dir} tracks {origin or 'nothing'}; move it aside and run iirc doctor --fix")
+            ahead = unpushed(store)
+            report(f"store {store.name} has nothing unpushed" if not ahead else f"store {store.name} has {ahead} commit{'s' if ahead != 1 else ''} not pushed", ahead == 0, "iirc sync")
+            extra = non_pages(store)
+            report(f"store {store.name} holds only pages and index.md" if not extra else f"store {store.name} holds non-page markdown: {', '.join(extra)}", not extra, "remove them; the tool indexes every .md file in a store")
+        if store.kind == "project" and store.dir.name != ".iirc":
+            print(f"note store {store.name} at {store.dir.relative_to(ROOT)} is outside the guard, which covers .iirc/ and remote stores")
+        n = uncommitted(store)
+        report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "iirc rebuild-search-index commits them")
+
+    if semantic_enabled():
+        for d, first, second in flagged_pairs():
+            what = "near-duplicate pages" if d <= active_model().near[1] else "similar pages, below the warning"
+            print(f"note {what} (distance {d:.3f}): {first} | {second}")
+        if live_stores() and not index_rows():
+            print("note no index to compare pages with (iirc rebuild-search-index builds it)")
+
+    claude_md = ROOT / "CLAUDE.md"
+    report("CLAUDE.md has the iirc paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "iirc init")
+    for good, label, fix in git_checks():
+        report(label, good, fix)
+    if live_stores() and pinned:
+        write_config()
+        proc = tool("validate", check=False)
+        report("field validates", proc.returncode == 0, (proc.stdout + proc.stderr).strip().replace("\n", " "))
+        if fix_it and up:
+            reindex()
+    return True
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     if args.health:
         # for the /iirc card: trust and store state as JSON, no host probe and no pull
@@ -3539,7 +3631,6 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append("Context was just compacted and this session wrote no iirc. If the summary above names a fix that took more than one attempt, write it now.")
         emit(" ".join(parts))
         return
-    pin = read_pin()
     ok = True
 
     def report(label: str, good: bool, fix: str = "") -> bool:
@@ -3548,84 +3639,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         ok = ok and good
         return good
 
-    if CONFIG_ERROR and args.fix and knob_error_only():
-        for note in fix_knobs():
-            print(f"iirc: {STORE_CONFIG}: {note}")
-        set_root(ROOT)
-    if CONFIG_ERROR:
-        # nothing else can be checked: the stores are unknown, and every hook is quiet
-        report(f"{STORE_CONFIG} loads, so the hooks run", False,
-               "iirc doctor --fix moves old [recall] tables to [suggestions.MODEL-ID] and comments out a bad threshold" if knob_error_only() else f"change that line in {STORE_CONFIG}: {CONFIG_ERROR}")
+    if not setup_checks(args.fix, report):
         sys.exit(1)
-    report(f"{STORE_CONFIG} loads, so the hooks run", True)
-    timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
-    report(f"suggest-pages finished inside the hook's {RECALL_HOOK_TIMEOUT} s limit in the last 7 days" + (f" ({timeouts} timed out)" if timeouts else ""),
-           timeouts == 0, "a cold embedding model is the usual cause; keep it loaded with OLLAMA_KEEP_ALIVE=24h for ollama, and check the host with iirc set-search-backend")
-
-    if not report("uv on PATH", shutil.which("uv") is not None, "install uv: https://docs.astral.sh/uv/"):
-        sys.exit(1)
-
-    have_tool = shutil.which("memoryfield-tool") is not None
-    rev = installed_rev() if have_tool else None
-    pinned = have_tool and pin_matches(pin, rev)
-    if not pinned and args.fix:
-        pinned = install_tool(pin) and pin_matches(pin, installed_rev())
-    report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
-
-    model = active_model()
-    up = False   # embeddings work, so --fix can reindex
-    if not semantic_enabled():
-        report("search mode: string, the fallback (iirc set-search-backend --local or --host URL switches to semantic)", True)
-    elif model.backend == "onnx":
-        up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
-    elif model.backend == "openai":
-        base, source, up = resolve_host()
-        status = host_status(base)
-        why, width = embed_refusal(base, model) if up else (f"it answered HTTP {status}" if status else None, 0)
-        # the host's width, not the table's: it may serve another size of the model under this name
-        up = report(f"embedding endpoint {base} answers within {HOST_TIMEOUT:g} s (serving {model.id}" + (f", {width} wide)" if width else ")"),
-                    up and why is None,
-                    (f"{why}; " if why else "") + "check the endpoint, run `iirc set-search-backend` to choose another, or `iirc set-search-backend --substring`")
-    else:
-        up = doctor_ollama(model, args.fix, report)
-
-    for store in STORES:
-        if store.kind == "remote" and not store.dir.is_dir() and args.fix:
-            reason = clone_store(store)
-            if reason:
-                print(f"iirc: cloning {store.name}: {reason}")
-        elif store.kind == "remote" and store.dir.is_dir() and args.fix:
-            create_index(store)
-        report(f"store {store.name} at {store.dir}", store.dir.is_dir(), "iirc init" if store.kind == "project" else "iirc doctor --fix")
-        if store.kind == "remote" and store.dir.is_dir():
-            origin = run_git(store.repo, "remote", "get-url", "origin").stdout.strip()
-            report(f"store {store.name} tracks {store.url}", origin == store.url, f"the clone at {store.dir} tracks {origin or 'nothing'}; move it aside and run iirc doctor --fix")
-            ahead = unpushed(store)
-            report(f"store {store.name} has nothing unpushed" if not ahead else f"store {store.name} has {ahead} commit{'s' if ahead != 1 else ''} not pushed", ahead == 0, "iirc sync")
-            extra = non_pages(store)
-            report(f"store {store.name} holds only pages and index.md" if not extra else f"store {store.name} holds non-page markdown: {', '.join(extra)}", not extra, "remove them; the tool indexes every .md file in a store")
-        if store.kind == "project" and store.dir.name != ".iirc":
-            print(f"note store {store.name} at {store.dir.relative_to(ROOT)} is outside the guard, which covers .iirc/ and remote stores")
-        n = uncommitted(store)
-        report(f"store {store.name} has no uncommitted changes" if not n else f"store {store.name} has {n} uncommitted change{'s' if n != 1 else ''}", n == 0, "iirc rebuild-search-index commits them")
-
-    if semantic_enabled():
-        for d, first, second in flagged_pairs():
-            what = "near-duplicate pages" if d <= active_model().near[1] else "similar pages, below the warning"
-            print(f"note {what} (distance {d:.3f}): {first} | {second}")
-        if live_stores() and not index_rows():
-            print("note no index to compare pages with (iirc rebuild-search-index builds it)")
-
-    claude_md = ROOT / "CLAUDE.md"
-    report("CLAUDE.md has the iirc paragraph", claude_md.is_file() and CLAUDE_MD_MARK in claude_md.read_text(), "iirc init")
-    for good, label, fix in git_checks():
-        report(label, good, fix)
-    if live_stores() and pinned:
-        write_config()
-        proc = tool("validate", check=False)
-        report("field validates", proc.returncode == 0, (proc.stdout + proc.stderr).strip().replace("\n", " "))
-        if args.fix and up:
-            reindex()
     idx = cache_dir() / "dokidlc-iirc" / "vectors"
     print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc rebuild-search-index`)")
     if not ok and not args.fix:
@@ -4004,13 +4019,24 @@ def gather_session(session: str, rows: list[dict], evals: dict[str, list[dict]])
             "prompts_file": bool(pf), "conditions": conds, "recalls": recalls}
 
 
-def repo_sessions() -> dict[str, list[dict]]:
-    """This repository's log rows, by session, in the order they were written."""
+def repo_sessions(rows: list[dict] | None = None) -> dict[str, list[dict]]:
+    """This repository's log rows (of these rows, default the whole log), by session, in the order they were written."""
     out: dict[str, list[dict]] = {}
-    for r in read_log():
+    for r in read_log() if rows is None else rows:
         if r.get("repo") == str(ROOT):
             out.setdefault(r.get("session", "?"), []).append(r)
     return out
+
+
+def untuned_sessions(sessions: dict[str, list[dict]], days: int | None = None) -> list[str]:
+    """Sessions gather-suggestion-data would gather: suggestion lines, not tuned, not a recording, a transcript or prompts file left."""
+    skip = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
+    # a recording's prompts are a script, not work
+    skip |= {s for s, rows in sessions.items() if any(r["cmd"] in ("start", "session") and r.get("recording") for r in rows)}
+    cutoff = time.time() - days * 86400 if days is not None else -math.inf
+    return [s for s, rows in sessions.items() if s not in skip
+            and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
+            and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
 
 
 def cmd_tune_gather(args: argparse.Namespace) -> None:
@@ -4021,13 +4047,7 @@ def cmd_tune_gather(args: argparse.Namespace) -> None:
             die(f"no log rows for session {args.session} in {ROOT}")
         chosen = [args.session]
     else:
-        skip = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
-        # a recording's prompts are a script, not work
-        skip |= {s for s, rows in sessions.items() if any(r["cmd"] in ("start", "session") and r.get("recording") for r in rows)}
-        cutoff = time.time() - args.days * 86400 if args.days is not None else -math.inf
-        chosen = [s for s, rows in sessions.items() if s not in skip
-                  and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
-                  and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
+        chosen = untuned_sessions(sessions, args.days)
     if not chosen:
         print("iirc tune-suggestions gather-suggestion-data: no session to gather; each one with suggestion lines is tuned already, or its transcript and prompts are gone")
         return
@@ -4374,6 +4394,180 @@ def cmd_audit_page_findability(args: argparse.Namespace) -> None:
     print_audit(findings, len(pages), skip)
 
 
+# --- maintenance --------------------------------------------------------------
+
+MAINTENANCE_DAYS = 7        # about weekly: suspect pages and findings stay few enough to settle in one sitting
+MAINTENANCE_SESSIONS = 5    # a week with fewer sessions than this changed too little to be worth a run
+WAITING_SESSIONS = 10       # sessions waiting to be judged before a tuning pass, which is long, is worth offering
+NETWORK_CHECK_DAYS = 30     # URL refs change slowly, and the check contacts every one: offer it about once a month
+TIMEOUT_DAYS = 7            # the window doctor counts suggestion lookups that timed out in
+
+
+def plural(n: int, word: str, many: str | None = None) -> str:
+    return f"{n} {word if n == 1 else many or word + 's'}"
+
+
+def maintenance_due(suspects: list[str] = (), ahead: int = 0, close: int = 0) -> list[str]:
+    """Why run-maintenance is due, or []. The caller passes the counts it has already made; the rest
+    comes from one read of the log. No network, no host probe: the session-start brief calls it."""
+    now = time.time()
+    rows = [r for r in read_log() if r.get("repo") == str(ROOT)]
+    at = lambda r: parse_ts(r.get("ts")) or 0
+    reasons = []
+    last = max((at(r) for r in rows if r["cmd"] == "maintenance"), default=None)
+    since = {r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}
+    if len(since) >= MAINTENANCE_SESSIONS:
+        if last is None:
+            reasons.append(f"never run in this repository, {plural(len(since), 'session')}")
+        elif now - last >= MAINTENANCE_DAYS * 86400:
+            reasons.append(f"{plural(int((now - last) // 86400), 'day')} and {plural(len(since), 'session')} since the last run")
+    if suspects:
+        reasons.append(f"{plural(len(suspects), 'suspect page')} ({', '.join(suspects[:3])}{', ...' if len(suspects) > 3 else ''})")
+    if ahead:
+        reasons.append(f"{plural(ahead, 'store commit')} not pushed")
+    timeouts = sum(1 for r in rows if r["cmd"] == "timeout" and at(r) >= now - TIMEOUT_DAYS * 86400)
+    if timeouts:
+        reasons.append(f"{plural(timeouts, 'suggestion lookup')} timed out in the last {TIMEOUT_DAYS} days")
+    if close:
+        reasons.append(f"{plural(close, 'near-duplicate pair')}")
+    waiting = len(untuned_sessions(repo_sessions(rows)))
+    if waiting >= WAITING_SESSIONS:
+        reasons.append(f"{waiting} sessions waiting to be judged for tuning")
+    return reasons
+
+
+def close_pairs(budget: float | None = None) -> list[tuple[float, str, str]]:
+    """Pairs at the active model's duplicate distance or closer, the ones that turn the line yellow. None in string mode, whose index is stale."""
+    return [p for p in flagged_pairs(budget) if p[0] <= active_model().near[1]] if semantic_enabled() else []
+
+
+def commit_before_maintenance() -> None:
+    """Commit each store's loose files, under the store's path only, so the run starts from a commit."""
+    for store in live_stores():
+        if not uncommitted(store):
+            continue
+        try:
+            with store_lock(store.field):
+                reason = commit_store(store, "iirc: before maintenance")
+        except LockTimeout:
+            reason = "another iirc command holds the store"
+        if reason:
+            print(f"{store.name}: not committed before maintenance: {reason}")
+
+
+def starting_commits() -> list[dict]:
+    """Each store's repository and HEAD, where an undo of the run goes back to."""
+    starts = []
+    for store in live_stores():
+        sha = run_git(store.repo, "rev-parse", "HEAD").stdout.strip() if is_work_tree(store.repo) else ""
+        if sha:
+            starts.append({"store": store.name, "repo": str(store.repo), "path": store_pathspec(store), "sha": sha})
+    return starts
+
+
+def undo_command(start: dict) -> str:
+    """Revert the iirc commits after the start that touch the store, newest first; the person's own commits stay."""
+    repo = shlex.quote(start["repo"])
+    commits = f"git -C {repo} log --format=%H --grep='^iirc: ' {start['sha']}..HEAD -- {shlex.quote(start['path'])}"
+    return f"git -C {repo} revert --no-edit $({commits})"
+
+
+def last_network_check(rows: list[dict]) -> float | None:
+    """When find-suspect-pages --network last ran here: its doubt row says network."""
+    return max((t for r in rows if r.get("repo") == str(ROOT) and r["cmd"] == "doubt" and r.get("network")
+                and (t := parse_ts(r.get("ts"))) is not None), default=None)
+
+
+def cmd_run_maintenance(args: argparse.Namespace) -> None:
+    """The one upkeep command: the safe automatic part, then what is left to decide. Changes no page's text."""
+    require_stores()
+    commit_before_maintenance()
+    # the sync runs before the setup check, so the check does not report commits the sync then pushes
+    synced = io.StringIO()
+    with contextlib.redirect_stdout(synced):
+        cmd_sync(args)
+    failed: list[str] = []
+
+    def report(label: str, good: bool, fix: str = "") -> bool:
+        if not good:
+            failed.append(f"{label} ({fix})" if fix else label)
+        return good
+    with contextlib.redirect_stdout(io.StringIO()):   # doctor's notes; the near-duplicate pairs are listed below
+        setup_checks(False, report)
+    # after the sync: its pull rebases a remote store onto other machines' commits, which an undo must not revert
+    starts = starting_commits()
+    print("Starting commits: " + (", ".join(f"{s['store']} at {s['sha'][:7]}" for s in starts) or "none, no store is in a git repository")
+          + ("; to undo this run and any iirc change after it, run the line for each store:" if starts else ""))
+    for s in starts:
+        print(f"  undo {s['store']}: {undo_command(s)}")
+    print("setup: all checks pass" if not failed else f"setup: {plural(len(failed), 'check')} failed")
+    for f in failed:
+        print(f"  {f}")
+    print("sync:")
+    for line in synced.getvalue().splitlines():
+        print(f"  {line}")
+    reindex()
+    missing = unembedded() if semantic_enabled() else 0
+    print("index: string search, nothing to embed" if not semantic_enabled()
+          else f"index: {plural(missing, 'page')} without vectors" if missing else "index: every page has vectors")
+    rows, unchecked_urls, _ = suspect_rows()
+    unapproved = [(name, reason) for name, _, signals in rows for sig, reason in signals if sig == "unapproved"]
+    suspects = [(name, summary, [x for x in signals if x[0] != "unapproved"]) for name, summary, signals in rows]
+    suspects = [r for r in suspects if r[2]]
+    print("suspect pages: none" if not suspects else f"suspect pages: {len(suspects)}")
+    for name, summary, signals in suspects:
+        print(f"  {name}: {summary}")
+        for sig, reason in signals:
+            print(f"      {label(sig)}: {reason}")
+    if unapproved:
+        print(f"checks not approved on this machine: {len(unapproved)}")
+        for name, reason in unapproved:
+            print(f"  {name}: {reason}")
+    pairs = close_pairs()
+    print("near-duplicate pairs: none" if not pairs else f"near-duplicate pairs: {len(pairs)}")
+    for d, first, second in pairs:
+        print(f"  near-duplicate pair (distance {d:.3f}): {first} | {second}")
+    pages = audit_pages()
+    findings, skip = audit_findings(pages)
+    print("audit:")
+    with contextlib.redirect_stdout(io.StringIO()) as audit_out:
+        print_audit(findings, len(pages), skip)
+    for line in audit_out.getvalue().splitlines():
+        print(f"  {line}")
+    log = read_log()
+    waiting = len(untuned_sessions(repo_sessions(log)))
+    print(f"tuning: {plural(waiting, 'session')} waiting to be judged")
+    checked = last_network_check(log)
+    network_due = unchecked_urls > 0 and (checked is None or time.time() - checked >= NETWORK_CHECK_DAYS * 86400)
+    ahead = sum(unpushed(s) for s in live_stores())
+    left = []
+    if failed:
+        left.append(f"{plural(len(failed), 'setup check')} failed: offer iirc doctor --fix")
+    if ahead:
+        left.append(f"{plural(ahead, 'store commit')} still not pushed: the sync line above says why")
+    if unapproved:
+        left.append(f"{plural(len(unapproved), 'check')} not approved on this machine: show the creator each command; on yes, iirc approve-page-check PAGE")
+    if suspects:
+        left.append(f"{plural(len(suspects), 'suspect page')}: verify, fix, or delete each")
+    if pairs:
+        left.append(f"{plural(len(pairs), 'near-duplicate pair')}: merge each, or link one page to the other with [[name]] if their kinds differ")
+    if findings:
+        left.append(f"{plural(len(findings), 'audit finding')}: propose each fix")
+    if network_due:
+        when = "never checked" if checked is None else f"last checked {int((time.time() - checked) // 86400)} days ago"
+        left.append(f"{plural(unchecked_urls, 'URL ref')}, {when}: offer iirc find-suspect-pages --network, naming the URLs it contacts")
+    if waiting >= WAITING_SESSIONS:
+        left.append(f"{waiting} sessions wait to be judged: offer /iirc tune-suggestions, which is long")
+    log_event("maintenance", start=starts, failed=len(failed), suspects=len(suspects), unapproved=len(unapproved),
+              pairs=len(pairs), findings=len(findings), waiting=waiting)
+    if not left:
+        print("Nothing is left to decide.")
+        return
+    print("Left to decide:")
+    for line in left:
+        print(f"  {line}")
+
+
 # --- main -------------------------------------------------------------------
 
 
@@ -4383,6 +4577,9 @@ def main(argv: list[str] | None = None) -> None:
     # skips_format_check, a command that runs before or without a store in the current format
     parser.set_defaults(fail_open=False, runs_with_bad_config=False, skips_format_check=False)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("run-maintenance", help="the one upkeep command, about weekly: sync, check, and list what is left to decide; changes no page")
+    p.set_defaults(func=cmd_run_maintenance)
 
     p = sub.add_parser("search", help="ranked pages for one or more queries; several terms are searched separately and merged")
     p.add_argument("query", nargs="+")

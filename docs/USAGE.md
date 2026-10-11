@@ -230,6 +230,7 @@ describes each one.
 
 | Command | What it does |
 |---|---|
+| `iirc run-maintenance` | Commits each store's loose files, syncs the remote stores, embeds pages with no vectors, then lists setup failures, suspect pages, unapproved checks, near-duplicate pairs, audit findings, and sessions waiting to be judged. It changes no page's text, logs a `maintenance` row, and prints how to undo the run. |
 | `iirc read-matching-pages QUERY` | Searches, then prints the full text of each matching page, as `read` does. |
 | `iirc write`, `iirc verify`, `iirc delete`, `iirc approve-page-check` | Write, confirm, remove, or approve the check of a page. |
 | `iirc audit-page-findability [PAGE] [--json]` | Pages that search shows badly; see [Audit the pages](#audit-the-pages). |

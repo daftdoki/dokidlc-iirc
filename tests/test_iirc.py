@@ -1,6 +1,8 @@
 """Tests for scripts/iirc that need neither the tool nor ollama."""
 
 import contextlib
+import subprocess
+from datetime import UTC, datetime
 import json
 import os
 import time
@@ -3869,3 +3871,161 @@ def test_replay_files_join_a_redacted_excerpt():
     recall = {"via": "prompt", "ts": "2026-10-10T10:00:00Z", "prompt": {"text": rf.iirc.clean(rf.iirc.redact(text), 300)}}
     tx = [{"ts": rf.iirc.parse_ts("2026-10-10T09:59:59Z"), "hash": "other", "text": text}]
     assert rf.recall_prompt(recall, None, tx) == {"prompt": text, "via": "prompt"}
+
+
+# run-maintenance
+
+def _log(rows):
+    """Append log rows for this repository: (cmd, session, days ago, extra fields)."""
+    iirc.state_dir().mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    with (iirc.state_dir() / "log.jsonl").open("a") as f:
+        for cmd, session, days, *extra in rows:
+            ts = datetime.fromtimestamp(now - days * 86400, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            f.write(json.dumps({"ts": ts, "session": session, "repo": str(iirc.ROOT), "cmd": cmd, **(extra[0] if extra else {})}) + "\n")
+
+
+def _waiting(n):
+    """n sessions with a suggestion line and a prompts file, none tuned: what gather-suggestion-data would gather."""
+    _log([("recall", f"w{i}", 1) for i in range(n)])
+    (iirc.state_dir() / "prompts").mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        (iirc.state_dir() / "prompts" / f"w{i}.jsonl").write_text("{}\n")
+
+
+def test_maintenance_due_after_a_week_and_five_sessions(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    assert iirc.maintenance_due() == []                                 # never run, no sessions yet
+    _log([("start", f"s{i}", 1) for i in range(5)])
+    assert iirc.maintenance_due() == ["never run in this repository, 5 sessions"]
+    _log([("maintenance", "m", 8)])                                     # a week ago: the five sessions came after
+    assert iirc.maintenance_due() == ["8 days and 5 sessions since the last run"]
+    _log([("maintenance", "m", 2)])
+    assert iirc.maintenance_due() == []                                 # run two days ago
+
+
+def test_maintenance_due_waits_for_five_sessions_after_a_week(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _log([("maintenance", "m", 10)] + [("start", f"s{i}", 1) for i in range(4)])
+    assert iirc.maintenance_due() == []
+
+
+def test_maintenance_due_sooner_for_each_reason(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _log([("maintenance", "m", 0)])
+    assert iirc.maintenance_due() == []
+    assert iirc.maintenance_due(suspects=["a.md", "b.md"]) == ["2 suspect pages (a.md, b.md)"]
+    assert iirc.maintenance_due(ahead=1) == ["1 store commit not pushed"]
+    assert iirc.maintenance_due(close=2) == ["2 near-duplicate pairs"]
+    _waiting(9)
+    assert iirc.maintenance_due() == []
+    _waiting(10)
+    assert iirc.maintenance_due() == ["10 sessions waiting to be judged for tuning"]
+    _log([("tuned", f"w{i}", 0, {"tuned": f"w{i}"}) for i in range(10)])
+    assert iirc.maintenance_due() == []
+    _log([("timeout", "s1", 3), ("timeout", "s2", 9)])                  # the second is past the 7 days
+    assert iirc.maintenance_due() == ["1 suggestion lookup timed out in the last 7 days"]
+
+
+def _no_host(monkeypatch):
+    monkeypatch.setattr(iirc, "host_answers", lambda *a, **k: False)
+    monkeypatch.setattr(iirc, "_RESOLVED", None)
+
+
+def test_run_maintenance_changes_no_page_logs_its_row_and_is_not_due_after(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    (field / "widgets.md").write_text("---\ntitle: Widgets need a restart after setup\nsummary: Widgets need a restart after setup, or they keep the old config.\n"
+                                      "topics: [widgets]\nkind: finding\n---\nRestart them.\n\n## Sources\n\n- x\n")
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report: True)
+    iirc.stamp_index(field)                                             # what any command does to an unstamped store
+    _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "page")
+    _log([("start", f"s{i}", 1) for i in range(5)])
+    assert iirc.maintenance_due() != []
+    before = {p.name: p.read_bytes() for p in field.iterdir()}
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert {p.name: p.read_bytes() for p in field.iterdir()} == before
+    assert _git(tmp_path, "status", "--porcelain", "--", ".iirc") == ""
+    assert [r["cmd"] for r in iirc.read_log()].count("maintenance") == 1
+    assert out.rstrip().splitlines()[-1] == "Nothing is left to decide."
+    assert iirc.maintenance_due() == []
+
+
+def test_run_maintenance_syncs_remote_stores_before_the_page_checks(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    _page(agent.dir, "loose.md")
+    _push_page(_other_clone(tmp_path, bare), "theirs.md", text="from the other instance\n\n## Sources\n\n- x\n")
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert "agent: committed 0 files, pulled 1 file, pushed 1 commit" in out    # the loose page was committed first
+    assert out.index("agent: committed") < out.index("suspect")
+    tree = _git(bare, "ls-tree", "--name-only", "main").split()
+    assert "loose.md" in tree and (agent.dir / "theirs.md").is_file() and iirc.unpushed(agent) == 0
+
+
+def test_run_maintenance_lists_what_is_left(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": True})
+    _no_host(monkeypatch)
+    _index(tmp_path, monkeypatch, _CLOSE)
+    sha = _git(tmp_path, "log", "-1", "--format=%h").strip()
+    for name in ("a.md", "b.md", "far.md"):
+        _page(field, name, summary=f"page {name}")
+    _page(field, "cites.md", summary="cites a doc", extra=f"refs:\n- docs/a.md@{sha}\n- https://example.com/x\n")
+    _page(field, "checked.md", summary="has a check", extra="check: test -d docs\n")
+    _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "pages")
+    (tmp_path / "docs" / "a.md").write_text("two\n"); _git(tmp_path, "commit", "-qam", "change a")
+    _page(field, "loose.md", summary="not committed yet")
+    _waiting(10)
+    monkeypatch.setattr(iirc, "url_status", lambda *a, **k: pytest.fail("run-maintenance contacted a URL"))
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert "cites.md" in out
+    assert "near-duplicate pair (distance 0.050): a.md | b.md" in out
+    assert "checked.md" in out and "`test -d docs`" in out
+    assert "loose.md" not in _git(tmp_path, "status", "--porcelain")      # committed before the checks
+    left = out[out.index("Left to decide:"):]
+    for want in ("suspect", "check not approved", "near-duplicate", "audit finding", "10 sessions wait",
+                 "find-suspect-pages --network"):
+        assert want in left, want
+    # a network check this month: no offer
+    _log([("doubt", "n", 3, {"network": True})])
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert "--network" not in out[out.index("Left to decide:"):]
+
+
+def test_run_maintenance_starts_from_a_clean_commit_and_prints_its_undo(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    field = proj / ".iirc"
+    _page(field, "mine.md", summary="before"); _page(agent.dir, "shared.md", summary="before")
+    _git(proj, "add", ".iirc"); _git(proj, "commit", "-qm", "pages")
+    _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "pages"); _git(agent.repo, "push", "-q", "origin", "main")
+    _page(field, "mine.md", summary="edited, not committed")
+    (proj / "docs" / "a.md").write_text("an edit outside the store\n")
+    (proj / "stray.txt").write_text("untracked\n")
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert _git(proj, "log", "-1", "--format=%s", "--", ".iirc").strip() == "iirc: before maintenance"
+    status = _git(proj, "status", "--porcelain")
+    assert " M docs/a.md" in status and "?? stray.txt" in status            # nothing outside the store is staged
+    row = [r for r in iirc.read_log() if r["cmd"] == "maintenance"][-1]
+    starts = {s["store"]: s for s in row["start"]}
+    assert starts["project"]["sha"] == _git(proj, "rev-parse", "HEAD").strip()
+    assert starts["agent"]["sha"] == _git(agent.repo, "rev-parse", "HEAD").strip()
+    first = out.splitlines()[0]
+    assert first.startswith("Starting commits:") and "project" in first and "agent" in first
+    undo = [line.split(": ", 1)[1] for line in out.splitlines() if line.startswith("  undo ")]
+    assert len(undo) == 2
+    # what part 2 does after the report: one commit per change
+    mine, shared = (field / "mine.md").read_text(), (agent.dir / "shared.md").read_text()
+    _page(field, "mine.md", summary="fixed"); iirc.commit_store(iirc.store_named("project"), "iirc: write mine.md")
+    (agent.dir / "shared.md").unlink(); iirc.commit_store(agent, "iirc: delete shared.md")
+    _git(proj, "commit", "-qam", "unrelated work")                          # the person's own commit meanwhile
+    for cmd in undo:
+        subprocess.run(["bash", "-c", cmd], check=True, capture_output=True)
+    assert (field / "mine.md").read_text() == mine and (agent.dir / "shared.md").read_text() == shared
+    assert (proj / "docs" / "a.md").read_text() == "an edit outside the store\n"
