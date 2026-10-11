@@ -713,6 +713,18 @@ def test_stats_session_counts_suggested_pages_used(tmp_path, monkeypatch, capsys
     assert out["missed"] == [["a.md", 1], ["c.md", 1]]
 
 
+def test_stats_session_counts_the_sessions_own_searches(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s9"); iirc.set_root(tmp_path)
+    # iirc search writes a search row, read-matching-pages a pull row; a hook's suggestion is a recall row and does not count
+    iirc.log_event("search", query="a", hits=1, pages=["a.md"]); iirc.log_event("search", query="b", hits=0, pages=[])
+    iirc.log_event("pull", query="c", hits=1, pages=["c.md"])
+    iirc.log_event("recall", hits=1, pages=["d.md"], via="prompt")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("search", query="x", hits=0, pages=[])
+    iirc.main(["summarize-session-usage", "s9"])
+    assert json.loads(capsys.readouterr().out)["searched"] == 3
+
+
 def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s7"); iirc.set_root(tmp_path)
@@ -1020,7 +1032,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["summarize-session-usage", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "gone": ["f.md"]}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "searched": 2, "gone": ["f.md"]}
     iirc.main(["summarize-session-usage"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 

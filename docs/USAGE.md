@@ -14,7 +14,7 @@ while you use iirc; iirc tells you when it is due. It is the only upkeep
 command you need ([Run maintenance](#run-maintenance)).
 
 The suggestion hook names matching pages under your prompt,
-and a line under the prompt sums up the session; [UI.md](UI.md)
+and a line above the prompt sums up the session; [UI.md](UI.md)
 describes the row, the line, and the cards. The row shows you the list
 the agent got. When the circle on the line turns yellow or red, the line
 ends with the command that clears it, such as `· run /iirc run-maintenance`
@@ -38,7 +38,7 @@ suggestion lookup timed out in the last 7 days and since the last run,
 or two pages are near-duplicates. When 10 sessions wait to be judged,
 the run offers tuning, but they do not make it due. The
 session-start line then says `Maintenance is due (REASONS)`, the line
-under the prompt ends with `· run /iirc run-maintenance`, and
+under the prompt says `▲ Run /iirc run-maintenance: maintenance is due (REASONS)`, and
 `iirc doctor` ends with `run-maintenance is due: REASONS`.
 
 The agent runs `iirc run-maintenance`. It commits each store's loose
@@ -126,8 +126,8 @@ when `.iirc/` is committed.
 ### Migrate from the memory plugin
 
 When a repository or machine still has the memory plugin's layout, the
-session-start line says so, and the line under the prompt turns red
-with "needs migration". Say "yes, migrate". The agent runs
+session-start line says so, and the line under the prompt says, in red,
+`✖ Run iirc migrate`. Say "yes, migrate". The agent runs
 `iirc migrate`, which moves the store directory, the config, the
 `CLAUDE.md` section, the plugin setting, and this machine's directories
 to their iirc names. It stages the changes and prints a suggested
@@ -222,8 +222,8 @@ Say "use string search" when nothing else can run. The agent runs
 `iirc search-mode string`. Search then matches exact text only, and the
 agent searches for the words a page contains
 ([references/search.md](../skills/iirc/references/search.md)). The suggestion hook
-names a page only on a shared identifier, and the line under the prompt
-shows `[keyword] mode`. To go back, ask for `iirc search-mode semantic`. If ollama is only down for a while, change nothing: iirc skips a
+names a page only on a shared identifier, and the line above the prompt
+shows `string search`. To go back, ask for `iirc search-mode semantic`. If ollama is only down for a while, change nothing: iirc skips a
 host that does not answer a two-second probe and searches by string
 until it answers.
 
@@ -246,9 +246,9 @@ of `.claude/iirc.toml` and commits it. From the next hook on, each hook
 also shows its raw text to you as a system message. The file is
 committed, so ask for the line to be removed when you are done.
 
-### Turn the drawn UI or the line under the prompt off
+### Turn the drawn UI or the summary line off
 
-`/iirc summary-line-visibility off` hides the line under the prompt on this machine,
+`/iirc summary-line-visibility off` hides the summary line above the prompt on this machine,
 and `/iirc summary-line-visibility on` brings it back. To draw nothing at all, ask
 the agent to add `ui = false` to `.claude/iirc.toml`. That removes the
 rows, the line, and the toasts for everyone who clones the repository.
@@ -266,7 +266,7 @@ The `command.run` handler in
 | `/iirc help` | The three settings with their current values, then the maintenance and look-up commands. |
 | `/iirc demo`, `/iirc demo status` | The short card or the status card with sample numbers. |
 | `/iirc demo doctor` | The doctor card from sample checks; it does not run doctor. |
-| `/iirc summary-line-visibility` | Whether the line under the prompt is on or off. |
+| `/iirc summary-line-visibility` | Whether the summary line above the prompt is on or off. |
 | `/iirc summary-line-visibility on`, `/iirc summary-line-visibility off` | Shows or hides that line, on this machine. |
 | `/iirc max-suggested-pages` | How many pages a suggestion line names at most. |
 | `/iirc max-suggested-pages N` | Sets that number, 1 to 10, on this machine. |
@@ -317,7 +317,7 @@ describes each one.
 | `iirc search-mode [semantic\|string]` | This machine's search mode. Bare, it prints it; `string` is the fallback where no embedding model can run. |
 | `iirc tune-suggestions gather-suggestion-data`, `record-relevance-judgments`, `evaluate-suggestion-thresholds`, `mark-session-tuned` | The tune steps. `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` replays judged prompts through today's search and gate. |
 | `iirc suggest-pages`, `iirc record-command-success`, `iirc remind-to-write`, `iirc record-session-summary` | Hook entries: `suggest-pages` names pages for a prompt or a failed command; `record-command-success` logs a command that worked and asks for a page when it had failed twice before; `remind-to-write --at stop` asks for a page at the end of a turn; `record-session-summary --hook` logs the session's numbers before compaction and at its end. |
-| `iirc summarize-session-usage [ID]`, `iirc show-compaction-instructions` | Run by the hooks module: one session's pages as JSON for the line under the prompt, and the line compaction's summary keeps. The module also runs `remind-to-write --at compaction` near compaction. |
+| `iirc summarize-session-usage [ID]`, `iirc show-compaction-instructions` | Run by the hooks module: one session's pages and searches as JSON for the line above the prompt, and the line compaction's summary keeps. The module also runs `remind-to-write --at compaction` near compaction. |
 
 ## Every setting
 
@@ -330,13 +330,13 @@ describes each one.
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one suggestion line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested-pages N`, when the row brings too much or too little. |
 | `[suggestions.MODEL-ID] semantic_only` | `.claude/iirc.toml`, committed, so every clone | per model, below | per model, below | The largest cosine distance for a page with no strong term (rule `meaning`). | Only on evidence from the records; `/iirc tune-suggestions` proposes a value, and the agent sets it with `iirc set-suggestion-threshold` on your yes. |
 | `[suggestions.MODEL-ID] both` | `.claude/iirc.toml` | per model, below | per model, and at least `semantic_only` | The largest distance for a page backed by a strong term (rule `meaning+term`). | The same as `semantic_only`. |
-| `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no line under the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
+| `ui` | `.claude/iirc.toml` | `true` | `true`, `false` | `false` draws no rows, no lines at the prompt, and no toasts. | When nobody who clones the repository wants the drawn UI. |
 | `show_hooks` | `.claude/iirc.toml` | `false` | `true`, `false` | `true` shows each hook's raw text to the person as well. | While you debug what reached the agent. |
 | `write` | `.claude/iirc.toml` | the project store, else the only store | the name of a store | The store `iirc write` uses without `--store`. | `iirc add-remote-store NAME URL --default` sets it. |
 | `[stores.NAME] kind` | `.claude/iirc.toml` | required in each store table | `project` (at most one), `remote` | A directory in the repository, or a clone of a shared repository. | When you add a store. |
 | `[stores.NAME] path` | `.claude/iirc.toml`, project store only | `.iirc` | a directory inside the repository, not a symlink | Where the project store lives. Outside `.iirc/`, the read guard does not cover it. | Rarely. |
 | `[stores.NAME] url` | `.claude/iirc.toml`, remote store only | required | a git URL | The clone source. The clone is `~/.local/share/dokidlc-iirc/stores/NAME-HASH`. | When you add a store. |
-| the line under the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc summary-line-visibility on` or `off`. |
+| the summary line above the prompt | the hooks module's store, this machine | on | on, off | Shows or hides that line. | `/iirc summary-line-visibility on` or `off`. |
 | `IIRC_ALLOW_NETWORK` | the environment | unset | `1` | Lets `iirc find-suspect-pages --network`, `iirc verify --network`, and `iirc approve-page-check` on a network check run with no terminal to answer yes. | Only when you want URL refs or network checks run from a session. |
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | the environment | `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` | paths | Where the machine config, the index, the remote clones, and the records live. | When your machine moves them. |
 
@@ -384,7 +384,7 @@ A bad `.claude/iirc.toml`, such as a threshold out of range, a
 `[recall]` table under the thresholds' old name, or a store table with no
 `kind`, turns the hooks off. The session-start line
 reads "iirc: hooks off", then the error and the command that fixes it,
-and the line under the prompt turns red with "hooks off". Every other
+and the line under the prompt says, in red, `✖ Run iirc doctor --fix: hooks off, <the error>`. Every other
 hook stays quiet until the file is fixed. `iirc doctor` fails the check
 ".claude/iirc.toml loads, so the hooks run" and names the line to
 change. `iirc doctor --fix` renames each `[recall.MODEL-ID]` table to

@@ -68,33 +68,47 @@ error`. A command that failed twice and then worked gets a row saying the
 agent was asked to write the fix as a page. When the command sits in a
 folded group of tool calls, the rows appear under the group.
 
-## The line under the prompt
+## The summary line above the prompt
 
-Beside Claude Code's own hint, one line sums up iirc for the session:
+In the band above the prompt, one line sums up iirc for the session:
 
 ```
-● iirc: [76] pages · [2/5] used · [12] reads · [4] writes
+● ▍iirc ██░░░ 2/5 suggested read · 4 searched · 3 read · 1 written
 ```
 
 | Part | Means |
 |---|---|
-| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off (`iirc: hooks off`) |
-| `[76] pages` | the pages in every store |
-| `[2/5] used` | of the pages the suggestion hook suggested this session, how many were then read |
-| `[12] reads` | different pages this session read with `iirc read` or `iirc read-matching-pages` |
-| `[4] writes` | different pages this session wrote |
-| `· [2] timed out` | shown only when a suggestion line this session ran past the hook's 5-second limit and Claude Code killed it |
-| `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
-| `· run /iirc run-maintenance` | shown when the circle is yellow or red: the command that clears it; setup and config errors name `iirc doctor --fix` |
+| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off |
+| `76 pages` | the pages in every store; shown only until the session has a suggestion, a search, a read, or a write |
+| `██░░░ 2/5 suggested read` | of the pages the suggestion hook suggested this session, how many were then read; left out until a page is suggested |
+| `4 searched` | the session's own `iirc search` and `iirc read-matching-pages` runs; a hook's suggestion is not one |
+| `3 read` | different pages this session read with `iirc read` or `iirc read-matching-pages` |
+| `1 written` | different pages this session wrote |
+| `string search` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
 
-The line updates after each `iirc read`, `read-matching-pages`, `write`, `delete`, `sync`,
+A counter at zero is left out. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
 `migrate`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`,
-`prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line. A status
-line cannot carry color, so the line sits in the hint row.
+`prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line.
 
 `/iirc summary-line-visibility off` hides it and `/iirc summary-line-visibility on` brings it
 back; `/iirc summary-line-visibility` says which. `/iirc status` draws the full
 status card, described below.
+
+## The line under the prompt
+
+Beside Claude Code's own hint, a line shows only when you need to act: a
+mark, the command, and why, in the words of the session-start check.
+
+```
+▲ Run /iirc run-maintenance: maintenance is due (1 near-duplicate pair)
+✖ Run iirc init: this repository has no .iirc/
+```
+
+`▲` is a warning and `✖` an error, in yellow or red. A suggestion line that
+ran past the hook's 5-second limit this session also asks for
+`/iirc run-maintenance`. With more than one problem, the most severe shows
+first and `and N more` follows; `/iirc status` lists them. This line stays
+on when the summary line is off.
 
 ## A plain `/iirc`, `/iirc status`, and `/iirc help`
 
@@ -142,7 +156,7 @@ doctor card from sample checks.
 
 ![The /iirc help card: settings with their values, the maintenance commands, and the look-up commands](images/iirc-card-help.png)
 
-- SETTINGS: the line under the prompt, the number of suggested pages,
+- SETTINGS: the summary line above the prompt, the number of suggested pages,
   and the search mode, each with its command and current value. `set-embedding-model`
   goes to the skill, which asks which embedding model and where it runs
 - MAINTENANCE and LOOK UP: first `run-maintenance`, the only thing you

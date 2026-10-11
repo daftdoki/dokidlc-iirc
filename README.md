@@ -100,13 +100,13 @@ says what it moves.
 ## Usage
 
 Mostly you do nothing. Send a prompt and, when pages match, a row appears
-under it; click it to list the pages. A second line sits under the prompt
-for the whole session, green when all is well, and naming the fixing
-command when not:
+under it; click it to list the pages. A line above the prompt sums up the
+session, its circle green when all is well, and a line under the prompt
+names the fixing command only when something needs doing:
 
 ```
 [+] iirc: [3] pages suggested
-● iirc: [76] pages · [2/5] used · [12] reads · [4] writes
+● ▍iirc ██░░░ 2/5 suggested read · 4 searched · 3 read · 1 written
 ```
 
 Run `/iirc run-maintenance` about once a week while you use iirc; iirc
@@ -181,7 +181,7 @@ its default, its range, and when to turn it.
 
 - [docs/HOW-IT-WORKS.md](docs/HOW-IT-WORKS.md): why iirc works the way it does, how it compares with Claude Code's own memory, what each hook adds to the agent's context, where the code is, and what iirc records and why.
 - [docs/USAGE.md](docs/USAGE.md): every task, every `/iirc` command, every setting, and how to get good results over time.
-- [docs/UI.md](docs/UI.md): what the plugin draws under your prompt and commands, and every part of the line under the prompt and the cards.
+- [docs/UI.md](docs/UI.md): what the plugin draws around your prompt and commands, and every part of the lines at the prompt and the cards.
 - [INSTALL.md](INSTALL.md): every install step as a command, with the trap each one hides.
 - [skills/iirc/SKILL.md](skills/iirc/SKILL.md): the rules the agent follows for searching, writing, and doubt.
 - [skills/iirc/evals/](skills/iirc/evals/): the harness that measured the skill, and the numbers.

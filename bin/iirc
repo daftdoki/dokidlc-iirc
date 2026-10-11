@@ -4402,7 +4402,9 @@ def cmd_summarize_session_usage(args: argparse.Namespace) -> None:
     summary = session_summary(args.session or session_id())
     # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
     gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
-    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "gone": gone}))
+    # the session's own searches: an `iirc search` logs a search row, `iirc read-matching-pages` a pull row; recall's are hook rows
+    searched = sum(1 for r in read_log(session=summary["session"]) if r.get("repo") == str(ROOT) and r["cmd"] in ("search", "pull"))
+    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts")}, "searched": searched, "gone": gone}))
 
 
 def cmd_summarize_page_usage(args: argparse.Namespace) -> None:

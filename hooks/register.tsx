@@ -1,14 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren, ResolveInput } from 'claude-code'
 
-import type { Cursor, IircHealth, IircStatus, MatchAverages, Reader, RecalledPage, SessionCounts, SessionPages, SessionView, ShownPage, ToolNote } from '../types'
+import type { Cursor, IircHealth, IircStatus, MatchAverages, Problem, Reader, RecalledPage, SessionCounts, SessionPages, SessionView, ShownPage, ToolNote } from '../types'
 
 // The command hooks in hooks.json put lines into the model's context. This module
 // catches each line as its row is stored and draws it for the person: recalled
 // pages as a folding list under the prompt or the failed command, a pencil row
-// under a command that failed and then worked, the session brief and the count
-// of pages read this session in the hint row under the prompt, and warnings as
-// toasts.
+// under a command that failed and then worked, the session's counts in the band
+// above the prompt, what to fix in the hint row under it, and warnings as toasts.
 // `ui = false` in .claude/iirc.toml turns it off.
 
 const NO_MATCH: MatchAverages = { all: null, read: null, unread: null }
@@ -19,7 +18,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
 // pages `/iirc show` read, by name, for the transcript card that draws each
@@ -72,9 +71,9 @@ const WARNING_FIX: [RegExp, string][] = [
 ]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
-// commands that change the page count or the setup the brief reports, and commands that read pages (read also matches read-matching-pages)
+// commands that change the page count or the setup the brief reports, and commands that read, write, or search pages (read also matches read-matching-pages)
 const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-embedding-model|add-embedding-model|remove-embedding-model|prefer-embedding-host|search-mode|init|doctor|run-maintenance)\b/
-const COUNTS_RE = /\biirc\s+(read|write)\b/
+const COUNTS_RE = /\biirc\s+(read|write|search)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
 const SUMMARY_LINE_ARGS_RE = /^\s*summary-line-visibility(?:\s+(on|off))?\s*$/
@@ -88,7 +87,7 @@ const GAUGE = ['#e5534b', '#d4a72c', '#57ab5a'] as const
 // sample numbers for `/iirc demo`
 const DEMO_STATUS: IircStatus = { level: 'ok', pages: 142, mode: 'semantic+keyword', note: null }
 const DEMO_COUNTS: SessionCounts = {
-  reads: 58, writes: 9, suggested: 42, used: 31,
+  reads: 58, writes: 9, searches: 23, suggested: 42, used: 31,
   match: { all: 68, read: 74, unread: 55 },
   timeouts: 0,
   missed: [['ollama-keep-alive-for-the-embed-model.md', 4], ['plugin-cache-keeps-old-versions.md', 3], ['gh-auth-on-a-new-machine.md', 2]],
@@ -233,8 +232,10 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
             : /newer iirc plugin/.test(line)
               ? 'needs a plugin update'
               : 'needs setup'
-    const warnings = MIGRATE_RE.test(line) ? [] : [line.split('. ')[0].replace(/^iirc: /, '')]
-    return { status: { level: 'error', pages: null, mode: null, note, ...(fix ? { fix } : {}) }, warnings }
+    const why = line.split('. ')[0].replace(/^iirc: /, '')
+    const warnings = MIGRATE_RE.test(line) ? [] : [why]
+    const problems: Problem[] = [{ level: 'error', ...(fix ? { fix } : {}), why: reason(why) }]
+    return { status: { level: 'error', pages: null, mode: null, note, ...(fix ? { fix } : {}), problems }, warnings }
   }
   // semantic search also matches terms; without an embedding host it matches terms alone, and the parentheses name the command that helps
   const isHostDown = m[2].startsWith('string only')
@@ -245,23 +246,97 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     .filter(s => s && !BRIEF_QUIET.test(s))
   const fix = isHostDown ? (/`(iirc [^`]+)`/.exec(m[2])?.[1] ?? 'iirc doctor') : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
   const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
-  return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}) }, warnings }
+  // each warning with the command that clears it, setup errors first, as WARNING_FIX orders them; a warning no command clears comes last
+  const rank = (w: string) => { const k = WARNING_FIX.findIndex(([re]) => re.test(w)); return k < 0 ? WARNING_FIX.length : k }
+  const problems: Problem[] = [...warnings].sort((a, b) => rank(a) - rank(b)).map(w => {
+    const f = WARNING_FIX.find(([re]) => re.test(w))?.[1]
+    return { level: 'warn', ...(f ? { fix: f } : {}), why: reason(w) }
+  })
+  // the parentheses say why search fell back to terms: the part before the command
+  if (isHostDown) problems.unshift({ level: 'warn', fix: fix!, why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
+  return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}), problems }, warnings }
 }
 
-/** The hint row's text after the circle. */
+/** A brief sentence as the reason in the line under the prompt: its first clause, without the full stop, the command it names left to the line. */
+function reason(sentence: string): string {
+  const why = sentence.split('; ')[0].replace(/\.$/, '')
+  // a sentence's capital goes, unless the word is a name in capitals
+  return /^[A-Z][a-z]/.test(why) ? why[0].toLowerCase() + why.slice(1) : why
+}
+
 /** The brief's status, turned yellow when a recall this session ran past the hook's time limit. */
 export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
   return s.level === 'ok' && c.timeouts > 0 ? { ...s, level: 'warn', fix: MAINTAIN } : s
 }
 
-export function statusText(s: IircStatus, c: SessionCounts): string {
-  s = liveStatus(s, c)
-  const fix = s.level !== 'ok' && s.fix ? ` · run ${s.fix}` : ''
-  if (s.pages === null) return `iirc: ${s.note}${fix}`
+/** One part of the summary line: its text and how it is drawn. */
+type LinePart = { text: string; color?: string; bold?: boolean }
+
+const LINE_CELLS = 5
+// theme colors for the circle, so the band matches the prompt around it
+const CIRCLE_COLOR = { ok: 'success', warn: 'warning', error: 'error' } as const
+
+/**
+ * The summary line above the prompt, after its circle and accent bar: the name, then what this session did.
+ * A counter at zero is left out, the gauge with nothing suggested, and the page count once the session
+ * suggested, searched, read, or wrote anything. Problems go to the line under the prompt, not here.
+ */
+export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
+  const out: LinePart[] = [{ text: 'iirc', bold: true, color: 'claude' }]
+  const num = (text: string): LinePart => ({ text, bold: true, color: 'claude' })
+  const word = (text: string): LinePart => ({ text, color: 'subtle' })
+  const items: LinePart[][] = []
+  const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
+  if (s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
+  if (c.suggested > 0) {
+    const filled = Math.round((c.used / c.suggested) * LINE_CELLS)
+    // each filled cell takes the gradient color of its position, as the card's gauge does
+    const cells = Array.from({ length: LINE_CELLS }, (_, k): LinePart => (k < filled ? { text: '█', color: gaugeColor(k / (LINE_CELLS - 1)) } : { text: '░', color: 'inactive' }))
+    items.push([...cells, { text: ' ' }, num(`${c.used}/${c.suggested}`), word(' suggested read')])
+  }
+  for (const [n, label] of [[c.searches, 'searched'], [c.reads, 'read'], [c.writes, 'written']] as const) {
+    if (n > 0) items.push([num(String(n)), word(` ${label}`)])
+  }
   // the mode shows only when it is not the default, so a weaker search stands out
-  const mode = s.mode === 'semantic+keyword' ? '' : ` · [${s.mode}] mode`
-  const timedOut = c.timeouts > 0 ? ` · [${c.timeouts}] timed out` : ''
-  return `iirc: [${s.pages}] ${s.pages === 1 ? 'page' : 'pages'} · [${c.used}/${c.suggested}] used · [${c.reads}] reads · [${c.writes}] writes${timedOut}${mode}${fix}`
+  if (s.mode && s.mode !== 'semantic+keyword') items.push([{ text: 'string search', color: 'warning' }])
+  items.forEach((item, k) => out.push(k === 0 ? { text: ' ' } : word(' · '), ...item))
+  return out
+}
+
+/** The summary line as plain text, for the text help; the band draws the same parts after its circle and accent bar. */
+export function statusText(s: IircStatus, c: SessionCounts): string {
+  return statusParts(s, c).map(p => p.text).join('')
+}
+
+/** What the person needs to do, most severe first: the brief's problems, then this session's timed-out recalls. */
+export function actions(s: IircStatus | null, c: SessionCounts): Problem[] {
+  const out = [...(s?.problems ?? [])]
+  if (c.timeouts > 0) out.push({ level: 'warn', fix: MAINTAIN, why: `${c.timeouts} suggestion ${c.timeouts === 1 ? 'lookup' : 'lookups'} timed out this session` })
+  return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
+}
+
+/** The line under the prompt as its parts: a mark, the command, why, and how many more; none when all is well. */
+export function actionParts(s: IircStatus | null, c: SessionCounts): LinePart[] {
+  const all = actions(s, c)
+  if (all.length === 0) return []
+  const [first] = all
+  const color = first.level === 'error' ? 'error' : 'warning'
+  // a fix that is a command reads "Run it"; one that is not, such as updating the plugin, is the instruction itself
+  const isCommand = !!first.fix && /^\/?iirc /.test(first.fix)
+  const out: LinePart[] = [{ text: first.level === 'error' ? '✖ ' : '▲ ', color }]
+  if (first.fix) {
+    if (isCommand) out.push({ text: 'Run ', color })
+    out.push({ text: isCommand ? first.fix : first.fix[0].toUpperCase() + first.fix.slice(1), bold: true, color }, { text: `: ${first.why}`, color })
+  } else {
+    out.push({ text: first.why[0].toUpperCase() + first.why.slice(1), color })
+  }
+  if (all.length > 1) out.push({ text: `, and ${all.length - 1} more`, color })
+  return out
+}
+
+/** The line under the prompt as plain text, empty when all is well. */
+export function actionText(s: IircStatus | null, c: SessionCounts): string {
+  return actionParts(s, c).map(p => p.text).join('')
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -301,6 +376,8 @@ async function runDirect($: EngineInterface, args: string): Promise<string> {
   try {
     const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, ...argv], { cwd: await $.session.root(), timeoutMs: slow ? 600000 : 60000 })
     if (['doctor', 'sync', 'rebuild-search-index'].includes(verb)) refreshBrief($)
+    // a read or a search the person ran is one of the session's counts
+    if (verb === 'read' || verb === 'search') refreshCounts($)
     const out = `${ran.stdout}${ran.stderr}`.trim() || '(no output)'
     return ran.exitCode === 0 ? out : `iirc ${args} exited ${ran.exitCode}:\n${out}`
   } catch (err) {
@@ -321,7 +398,9 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   } catch {}
   if (max !== '?') await update($, maxSuggested, () => Number(max))
   // the engine puts the plugin's name in front of a command's text
-  const head = s === null ? 'no session brief yet' : statusText(s, await read($, counts)).replace(/^iirc: /, '')
+  const c = await read($, counts)
+  const todo = actionText(s, c)
+  const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc\s*/, ''), todo].filter(Boolean).join('\n')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
   if (view === 'status') {
@@ -519,7 +598,7 @@ async function loadDemoSession($: EngineInterface) {
   await update($, demoSession, () => ({
     pages: { read: used, written, suggested: [...used, ...unread], used, gone: [] },
     counts: {
-      reads: used.length + 3, writes: written.length, suggested: used.length + unread.length, used: used.length,
+      reads: used.length + 3, writes: written.length, searches: 5, suggested: used.length + unread.length, used: used.length,
       missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: DEMO_COUNTS.match, timeouts: DEMO_COUNTS.timeouts,
     },
     health: DEMO_HEALTH,
@@ -575,7 +654,8 @@ async function loadCounts($: EngineInterface) {
       const list = (key: string) => (Array.isArray(got[key]) ? (got[key] as string[]) : [])
       await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
-      await update($, counts, () => ({ reads: n('read'), writes: n('written'), suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
+      const searches = typeof got.searched === 'number' ? got.searched : 0
+      await update($, counts, () => ({ reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts }))
 }
 
 /** Ask iirc which pages are suspect and what each store holds back, for the card. */
@@ -867,19 +947,36 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The brief under the prompt, beside the engine's hint: a status line takes no color.
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+  // The summary line in the band above the prompt; /iirc summary-line-visibility off hides it, and a survey takes the band.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const s = await read($, status)
-    const original = await next(e)
-    if (s === null || !(await read($, isStatusShown))) return original
+    if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
+    const original = await next(e)
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {original}
-        <Box flexDirection="row">
-          <Text color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>
-          <Text color="subtle">{statusText(s, c)}</Text>
+        <Box key="iirc-line" flexDirection="row">
+          <Text color={CIRCLE_COLOR[liveStatus(s, c).level]}>● </Text>
+          <Text color={TAGLINE_FROM}>▍</Text>
+          {statusParts(s, c).map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>)}
+        </Box>
+      </Box>
+    )
+  })
+
+  // Under the prompt, beside the engine's hint: a line only when the person needs to act.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const todo = actionParts(await read($, status), await read($, counts))
+    if (todo.length === 0) return next(e)
+    const original = await next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        {original}
+        <Box key="iirc-todo" flexDirection="row">
+          {todo.map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>)}
         </Box>
       </Box>
     )

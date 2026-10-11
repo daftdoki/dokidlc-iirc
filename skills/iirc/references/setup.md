@@ -95,8 +95,9 @@ model for every machine that uses this repository, so commit
 
 By default the plugin draws the hook lines for the creator: suggested pages
 under the prompt or failed command, a row when a command failed and then
-worked, and a colored line under the prompt with the page count and the
-pages this session read and wrote. The creator turns that line on or off
+worked, a line above the prompt with the page count and the pages this
+session searched, read, and wrote, and a line under the prompt when
+something needs fixing. The creator turns the line above the prompt on or off
 by typing `/iirc summary-line-visibility on` or `/iirc summary-line-visibility off`; it is on by
 default and the choice holds on that machine. In `.claude/iirc.toml`,
 `ui = false` turns all of it off, and `show_hooks = true` also prints the raw

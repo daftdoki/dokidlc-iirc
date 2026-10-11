@@ -2,7 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import { actionText, liveStatus, paragraphs, parseBrief, parseDoctor, parseRecall, parseRecovered, statusText, wrapPieces } from './register'
+import type { SessionCounts } from '../types'
 
 const RECALL =
   'iirc: 2 pages may apply. Read a page whose summary bears on this task; skip the rest: `iirc read alpha-page.md` (first summary (with parens)) · `iirc read beta.md` (second one) (suspect: 40 days; if it holds, `iirc verify beta.md`)'
@@ -51,7 +52,8 @@ async function promptRow($: Engine, uuid: string) {
   })
 }
 
-const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · run /iirc run-maintenance'
+const LINE = 'iirc 68 pages'
+const TODO = '▲ Run /iirc run-maintenance: maintenance is due (1 near-duplicate pair)'
 
 // The hint row as the terminal draws it under the prompt, mounted fresh each time.
 let mounts = 0
@@ -65,10 +67,39 @@ function hintRow($: Engine) {
   })
 }
 
+// a session's counts: none, except what the test names
+function counts(some: Partial<SessionCounts> = {}): SessionCounts {
+  return { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0, ...some }
+}
+
+// a drawn row as its Text parts: each part's text and the props it is drawn with
+function parts(node: unknown): [string, Record<string, unknown>][] {
+  const out: [string, Record<string, unknown>][] = []
+  const walk = (n: unknown) => {
+    if (!n || typeof n !== 'object') return
+    const { type, props, children } = n as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+    if (type === 'Text') out.push([(children ?? []).filter(c => typeof c === 'string').join(''), JSON.parse(JSON.stringify(props ?? {}))])
+    else for (const c of children ?? []) walk(c)
+  }
+  walk(node)
+  return out
+}
+
+// The band above the prompt, mounted fresh each time.
+function bandRow($: Engine, hasSurvey = false) {
+  return $.ui.mount({
+    plugin: 'iirc',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    requestId: `band-${++mounts}`,
+    props: { hasSurvey, isWorking: false, maxRows: 12, bodyColumns: 80, scroll: { offset: 0, bodyRows: 11 }, view: {} },
+  })
+}
+
 // Work the module starts on a timer lands a little after the clock settles.
 async function waitFor($: Engine, text: string) {
   for (let i = 0; i < 30; i++) {
-    if (await (await hintRow($)).find({ text })) return true
+    if (await (await bandRow($)).find({ text })) return true
     await new Promise(r => setTimeout(r, 10))
   }
   return false
@@ -89,12 +120,12 @@ test('parses the recall line', () => {
 test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
-    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: '/iirc run-maintenance' },
+    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: '/iirc run-maintenance', problems: [{ level: 'warn', fix: '/iirc run-maintenance', why: 'maintenance is due (1 near-duplicate pair)' }] },
     warnings: ['Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.'],
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc add-embedding-model MODEL HOST` with their answer.')!.status
   expect(setup.level).toBe('error')
-  expect(statusText(setup, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs setup · run iirc add-embedding-model MODEL HOST')
+  expect(statusText(setup, counts())).toBe('iirc')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!
   expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc doctor' })
   // a model id may hold a dot; inside the parentheses it does not end the mode
@@ -104,7 +135,7 @@ test('parses the recovery nudge and the brief', () => {
   const cpu = parseBrief('iirc: 5 pages, string only (all-minilm-l6-v2 model files missing; `iirc add-embedding-model all-minilm-l6-v2 cpu` to fix).')!
   expect(cpu.status.fix).toBe('iirc add-embedding-model all-minilm-l6-v2 cpu')
   expect(down.warnings).toEqual([])
-  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
+  expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, counts())).toBe('iirc')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status.fix).toBe('/iirc run-maintenance')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 store changes not committed.')!.status.fix).toBe('/iirc run-maintenance')
   // setup errors keep doctor --fix, even when maintenance is due too
@@ -119,8 +150,9 @@ test('parses the recovery nudge and the brief', () => {
   expect(parseBrief("iirc: 9 pages, string only (this machine cannot serve nomic-embed-text; `iirc doctor` names the ways out). This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status.fix).toBe('iirc doctor')
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
-  expect(statusText(one, { reads: 3, writes: 1, suggested: 4, used: 2, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: [1] page · [2/4] used · [3] reads · [1] writes · [keyword] mode')
-  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs migration · run iirc migrate')
+  expect(statusText(one, counts({ reads: 3, writes: 1, suggested: 4, used: 2 }))).toBe('iirc ███░░ 2/4 suggested read · 3 read · 1 written · string search')
+  expect(statusText(one, counts())).toBe('iirc 1 page · string search')
+  expect(statusText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, counts())).toBe('iirc')
 })
 
 test('wraps page lines by word and keeps each part styled', () => {
@@ -201,15 +233,20 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('draws the brief in the hint row, toasts its warnings, and toasts the stop nudge', async ($: Engine, on: On) => {
+test('draws the brief above the prompt and its fix under it, toasts its warnings, and toasts the stop nudge', async ($: Engine, on: On) => {
   engine(on)
   const toast: unknown[] = []
   on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
-  expect(await (await hintRow($)).find({ text: 'iirc:' })).toBeUndefined()
+  expect(await (await hintRow($)).find({ key: 'iirc-todo' })).toBeUndefined()
+  expect(await (await bandRow($)).find({ key: 'iirc-line' })).toBeUndefined()
   await hookRow($, 'SessionStart', BRIEF, 'h4')
   await hookRow($, 'Stop', STOP, 'h5')
+  const band = await bandRow($)
+  expect(await band.find({ text: LINE })).toBeDefined()
+  expect(await band.find({ text: 'engine row' })).toBeDefined()
   const row = await hintRow($)
-  expect(await row.find({ text: LINE })).toBeDefined()
+  expect(await row.find({ text: TODO })).toBeDefined()
+  expect(await row.find({ text: LINE })).toBeUndefined()
   expect(await row.find({ text: 'engine row' })).toBeDefined()
   expect(toast[0]).toBe('iirc: Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
@@ -261,25 +298,36 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run /iirc run-maintenance')).toBe(true)
+  expect(await waitFor($, 'iirc ██░░░ 1/3 suggested read · 2 read · 1 written')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
   // read-matching-pages reads pages too, so it refreshes the counts
   const before = argv.length
   await $.tool.call({ tool: 'Bash', command: 'iirc read-matching-pages ollama', tool_use_id: 't8' })
   await clock.settle()
   expect(argv.slice(before).map(a => a.slice(1))).toContainEqual(['summarize-session-usage', 's1'])
+  // a search is counted too
+  const searched = argv.length
+  await $.tool.call({ tool: 'Bash', command: 'iirc search ollama hangs', tool_use_id: 't8s' })
+  await clock.settle()
+  expect(argv.slice(searched).map(a => a.slice(1))).toContainEqual(['summarize-session-usage', 's1'])
+  // and so is one the person ran with /iirc search
+  const direct = argv.length
+  await $.command.run({ command: 'iirc', args: 'search ollama' })
+  await clock.settle()
+  expect(argv.slice(direct).map(a => a.slice(1))).toEqual([['search', 'ollama'], ['summarize-session-usage', 's1']])
 })
 
-test('/iirc summary-line-visibility off hides the hint-row line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
+test('/iirc summary-line-visibility off hides the summary line, on shows it, and other /iirc args reach the skill', async ($: Engine, on: On) => {
   engine(on)
   on('ui.toast', () => ({ value: undefined }))
   await hookRow($, 'SessionStart', BRIEF, 'h7')
-  expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
+  expect(await (await bandRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility off' })).text).toBe('iirc summary-line-visibility off')
-  expect(await (await hintRow($)).find({ text: LINE })).toBeUndefined()
+  expect(await (await bandRow($)).find({ text: LINE })).toBeUndefined()
+  expect(await (await hintRow($)).find({ text: TODO })).toBeDefined()     // a problem still shows
   expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility' })).text).toContain('is off')
   expect((await $.command.run({ command: 'iirc', args: 'summary-line-visibility on' })).text).toBe('iirc summary-line-visibility on')
-  expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
+  expect(await (await bandRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'what do we know about hooks?' })).text).toBe('the skill ran')
   expect((await $.command.run({ command: 'iirc', args: 'add-remote-store x y' })).text).toBe('the skill ran')
   for (const args of ['run-maintenance', 'run-maintenance --unattended']) expect((await $.command.run({ command: 'iirc', args })).text).toBe('the skill ran')
@@ -292,7 +340,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'a suggestion line names up to 4 pages; ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   await hookRow($, 'SessionStart', BRIEF, 'h8')
   const text = (await $.command.run({ command: 'iirc:iirc', args: '  ' })).text
-  expect(text).toContain(LINE.replace('iirc: ', ''))
+  expect(text).toContain(LINE.replace(/^iirc\s+/, ''))
   expect(text).toContain('/iirc help')
   expect(text).not.toContain('the skill ran')
   const helpText = (await $.command.run({ command: 'iirc', args: 'help' })).text
@@ -494,11 +542,11 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
 test('a config error reads as hooks off, and a timed-out recall turns the line yellow', () => {
   const off = parseBrief('iirc: hooks off, .claude/iirc.toml: [suggestions.nomic-embed-text] semantic_only must be a number from 0.1 to 0.6. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.')!
   expect(off.status.level).toBe('error')
-  expect(statusText(off.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: hooks off · run iirc doctor --fix')
+  expect(statusText(off.status, counts())).toBe('iirc')
   const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.')!.status
-  const c = { reads: 1, writes: 0, suggested: 2, used: 1, missed: [], match: { all: null, read: null, unread: null }, timeouts: 2 }
+  const c = counts({ reads: 1, suggested: 2, used: 1, timeouts: 2 })
   expect(liveStatus(ok, c).level).toBe('warn')
-  expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run /iirc run-maintenance')
+  expect(statusText(ok, c)).toBe('iirc ███░░ 1/2 suggested read · 1 read')
   const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. Maintenance is due (3 suggestion lookups timed out in the last 7 days and since the last run); run /iirc run-maintenance.')!
   expect(brief.status.level).toBe('warn')
   expect(brief.status.fix).toBe('/iirc run-maintenance')
@@ -892,7 +940,7 @@ test('/iirc reader demo draws its sample numbers in the pane only; the summary l
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'td1' })
   await clock.settle()
   await hookRow($, 'SessionStart', BRIEF, 'hd2')
-  const REAL = 'iirc: [68] pages · [1/2] used · [1] reads · [0] writes · run /iirc run-maintenance'
+  const REAL = 'iirc ███░░ 1/2 suggested read · 1 read'
   expect(await waitFor($, REAL)).toBe(true)
   const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
   const card = await $.ui.mount({
@@ -907,7 +955,7 @@ test('/iirc reader demo draws its sample numbers in the pane only; the summary l
   expect(await pane.find({ key: 'open-s-page-0.md' })).toBeDefined()        // the demo's pages, in the pane
   expect(await pane.find({ text: '×4' })).toBeDefined()
   // the summary line and the card drawn before the demo keep the real numbers
-  expect(await (await hintRow($)).find({ text: '[6/10] used' })).toBeUndefined()
+  expect(await (await bandRow($)).find({ text: '6/10 suggested read' })).toBeUndefined()
   expect(await waitFor($, REAL)).toBe(true)
   expect(await card.find({ text: '62%' })).toBeDefined()
   expect(await card.find({ text: '68%' })).toBeUndefined()
@@ -1008,4 +1056,130 @@ test('a demo reader that Claude Code did not place leaves no demo behind', async
   await pane.press({ key: 'tab-session' })
   expect(await pane.find({ key: 'open-s-page-0.md' })).toBeUndefined()
   expect(await pane.find({ key: 'open-s-noisy.md' })).toBeDefined()
+})
+
+
+// the summary line above the prompt: a circle in the level's color, the accent bar, the name, then what this session did
+const OK_BRIEF = 'iirc: 110 pages, semantic via 127.0.0.1:11434. Topics: x 110.'
+const head = (level: string): [string, Record<string, unknown>][] => [['● ', { color: level }], ['▍', { color: '#e8875f' }], ['iirc', { bold: true, color: 'claude' }]]
+const num = (n: string): [string, Record<string, unknown>] => [n, { bold: true, color: 'claude' }]
+const word = (w: string): [string, Record<string, unknown>] => [w, { color: 'subtle' }]
+const SP: [string, Record<string, unknown>] = [' ', {}]
+const DOT = word(' · ')
+const LINE_EXAMPLES: { name: string; usage: Record<string, unknown> | null; text: string; drawn: [string, Record<string, unknown>][]; todo: string }[] = [
+  {
+    name: 'a quiet session shows the page count',
+    usage: null,
+    text: 'iirc 110 pages',
+    drawn: [...head('success'), SP, num('110'), word(' pages')],
+    todo: '',
+  },
+  {
+    name: 'a busy session shows the gauge and the counters',
+    usage: { read: ['a.md', 'b.md', 'c.md'], written: ['w.md'], suggested: ['a.md', 'b.md', 'x.md', 'y.md', 'z.md'], used: ['a.md', 'b.md'], searched: 4, timeouts: 0 },
+    text: 'iirc ██░░░ 2/5 suggested read · 4 searched · 3 read · 1 written',
+    drawn: [
+      ...head('success'), SP,
+      ['█', { color: '#e5534b' }], ['█', { color: '#dd7d3c' }], ['░', { color: 'inactive' }], ['░', { color: 'inactive' }], ['░', { color: 'inactive' }],
+      SP, num('2/5'), word(' suggested read'), DOT, num('4'), word(' searched'), DOT, num('3'), word(' read'), DOT, num('1'), word(' written'),
+    ],
+    todo: '',
+  },
+  {
+    name: 'a timed-out recall turns the circle yellow and asks for maintenance under the prompt',
+    usage: { read: ['a.md', 'b.md', 'c.md'], written: [], suggested: [], used: [], searched: 0, timeouts: 1 },
+    text: 'iirc 3 read',
+    drawn: [...head('warning'), SP, num('3'), word(' read')],
+    todo: '▲ Run /iirc run-maintenance: 1 suggestion lookup timed out this session',
+  },
+]
+
+for (const ex of LINE_EXAMPLES) {
+  test(`the summary line above the prompt: ${ex.name}`, async ($: Engine, on: On) => {
+    engine(on)
+    const clock = mock.clock(on)
+    const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    on('session.id', () => ({ value: 's1' }))
+    on('ui.toast', () => ({ value: undefined }))
+    on('process.run', ($, e) => (e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ missed: [], match: {}, gone: [], ...ex.usage })) : ran(OK_BRIEF)))
+    await hookRow($, 'SessionStart', OK_BRIEF, `hl-${ex.text.length}`)
+    if (ex.usage) {
+      await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: `tl-${ex.text.length}` })
+      await clock.settle()
+    }
+    expect(await waitFor($, `● ▍${ex.text}`)).toBe(true)
+    expect(parts(await (await bandRow($)).find({ key: 'iirc-line' }))).toEqual(ex.drawn)
+    // under the prompt, only a problem draws anything
+    const hint = await hintRow($)
+    if (ex.todo) expect(await hint.find({ text: ex.todo })).toBeDefined()
+    else expect(await hint.find({ key: 'iirc-todo' })).toBeUndefined()
+    expect(await hint.find({ text: 'engine row' })).toBeDefined()
+  })
+}
+
+test('the summary line hides zero counters, the gauge with no suggestion, and the page count once anything happened', () => {
+  const ok = parseBrief(OK_BRIEF)!.status
+  expect(statusText(ok, counts())).toBe('iirc 110 pages')
+  expect(statusText(ok, counts({ searches: 1 }))).toBe('iirc 1 searched')
+  expect(statusText(ok, counts({ writes: 2 }))).toBe('iirc 2 written')
+  expect(statusText(ok, counts({ reads: 1, writes: 1 }))).toBe('iirc 1 read · 1 written')
+  // a suggestion nobody read keeps the gauge, empty; one in ten rounds up to a cell
+  expect(statusText(ok, counts({ suggested: 3 }))).toBe('iirc ░░░░░ 0/3 suggested read')
+  expect(statusText(ok, counts({ suggested: 10, used: 1 }))).toBe('iirc █░░░░ 1/10 suggested read')
+  expect(statusText(ok, counts({ suggested: 4, used: 4 }))).toBe('iirc █████ 4/4 suggested read')
+  // a timeout alone is no activity: the page count stays
+  expect(statusText(ok, counts({ timeouts: 1 }))).toBe('iirc 110 pages')
+  // the line holds no problem: a warning or an error leaves the counts alone, and an error with no pages leaves the name
+  expect(statusText(parseBrief(BRIEF)!.status, counts())).toBe('iirc 68 pages')
+  expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts({ reads: 2 }))).toBe('iirc 2 read')
+  expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts())).toBe('iirc')
+  expect(statusText(parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status, counts()))
+    .toBe('iirc 5 pages · string search')
+})
+
+test('the drawn summary line: the circle takes the level\'s theme color, the search mode note is a warning, and a survey or off hides the line', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  expect(await (await bandRow($)).find({ key: 'iirc-line' })).toBeUndefined()      // no brief yet
+  await hookRow($, 'SessionStart', 'iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.', 'hm1')
+  const drawn = parts(await (await bandRow($)).find({ key: 'iirc-line' }))
+  expect(drawn[0]).toEqual(['● ', { color: 'warning' }])
+  expect(drawn).toContainEqual(['string search', { color: 'warning' }])
+  expect(await (await bandRow($, true)).find({ key: 'iirc-line' })).toBeUndefined()
+  await $.command.run({ command: 'iirc', args: 'summary-line-visibility off' })
+  expect(await (await bandRow($)).find({ key: 'iirc-line' })).toBeUndefined()
+  // the line under the prompt does not follow the setting
+  expect(await (await hintRow($)).find({ text: '▲ Run iirc doctor: 127.0.0.1:11434 does not answer' })).toBeDefined()
+  await $.command.run({ command: 'iirc', args: 'summary-line-visibility on' })
+  await hookRow($, 'SessionStart', 'iirc: not set up on this machine. Ask the creator; then run `iirc add-embedding-model MODEL HOST` with their answer.', 'hm2')
+  expect(parts(await (await bandRow($)).find({ key: 'iirc-line' }))).toEqual(head('error'))
+})
+
+test('the line under the prompt: what to do and why, in the brief\'s words, the most severe first', () => {
+  const ok = parseBrief(OK_BRIEF)!.status
+  expect(actionText(null, counts())).toBe('')
+  expect(actionText(ok, counts())).toBe('')
+  expect(actionText(parseBrief(BRIEF)!.status, counts())).toBe(TODO)
+  expect(actionText(ok, counts({ timeouts: 2 }))).toBe('▲ Run /iirc run-maintenance: 2 suggestion lookups timed out this session')
+  expect(actionText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, counts()))
+    .toBe('✖ Run iirc init: this repository has no .iirc/')
+  expect(actionText(parseBrief("iirc: this repository or machine still uses the memory plugin's layout. Ask the creator whether to migrate; if yes, run `iirc migrate`.")!.status, counts()))
+    .toBe("✖ Run iirc migrate: this repository or machine still uses the memory plugin's layout")
+  expect(actionText(parseBrief("iirc: 9 pages, semantic via h:1. This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status, counts()))
+    .toBe("▲ Run iirc doctor --fix: this machine's or repository's iirc settings have the old shape")
+  // setup before upkeep, and the rest counted
+  const two = parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance. Persistence: .claude/settings.json does not exist.')!.status
+  expect(actionText(two, counts({ timeouts: 1 }))).toBe('▲ Run iirc doctor --fix: persistence: .claude/settings.json does not exist, and 2 more')
+  // a fix that is not a command is the instruction itself
+  expect(actionText({ level: 'error', pages: null, mode: null, note: 'needs a plugin update', fix: 'update the plugin', problems: [{ level: 'error', fix: 'update the plugin', why: 'this repository needs a newer iirc plugin' }] }, counts({ timeouts: 1 })))
+    .toBe('✖ Update the plugin: this repository needs a newer iirc plugin, and 1 more')
+})
+
+test('the drawn line under the prompt: the mark and the reason in the level\'s color, the command bold', async ($: Engine, on: On) => {
+  engine(on)
+  on('ui.toast', () => ({ value: undefined }))
+  await hookRow($, 'SessionStart', 'iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.', 'ha1')
+  expect(parts(await (await hintRow($)).find({ key: 'iirc-todo' }))).toEqual([
+    ['✖ ', { color: 'error' }], ['Run ', { color: 'error' }], ['iirc init', { bold: true, color: 'error' }], [': this repository has no .iirc/', { color: 'error' }],
+  ])
 })

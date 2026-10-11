@@ -141,7 +141,7 @@ Context was just compacted and this session wrote no iirc. If the summary above 
 ```
 
 When `.claude/iirc.toml` does not load, the brief is this line, every
-other hook stays quiet, and the line under the prompt turns red:
+other hook stays quiet, and the line under the prompt names the fix in red:
 
 ```
 iirc: hooks off, <the error>. Every iirc hook stays quiet until it is fixed; run `iirc doctor --fix`.
@@ -210,8 +210,8 @@ host restarts. On a remote ollama host, iirc's request sets the keep-alive
 for iirc's model and overrides the operator's own setting for that model. `run_recall` writes a marker, `inflight/SESSION` in the
 state directory, and removes it when it finishes. When the next suggestion line or
 the session snapshot finds the marker, `note_timeout` logs a `timeout`
-row. `iirc doctor` reports the 7-day count, and the line under the prompt
-shows "[N] timed out" in yellow.
+row. `iirc doctor` reports the 7-day count, the circle above the prompt
+turns yellow, and the line under the prompt says `▲ Run /iirc run-maintenance: N suggestion lookups timed out this session`.
 
 ### A shell command fails, recovers, and the agent stops
 
@@ -286,7 +286,7 @@ prints the trust markers, or `iirc doctor --fix` if that fails.
 | Common words | `bin/iirc_words.txt` | English words that never count as a strong term. From wordfreq, CC-BY-SA 4.0; see `NOTICE`. `scripts/common-words.py` rebuilds it. |
 | The engine pin | `iirc.pin` | The memoryfield-tool commit, and nomic, the model whose distances match the tool's. |
 | Command hooks | `hooks/hooks.json` | The events above. |
-| The hooks module | `hooks/register.tsx` | Draws the hook lines, the line under the prompt, and the `/iirc` cards. See [UI.md](UI.md). Near compaction, asks the agent to write. |
+| The hooks module | `hooks/register.tsx` | Draws the hook lines, the lines above and under the prompt, and the `/iirc` cards. See [UI.md](UI.md). Near compaction, asks the agent to write. |
 | The guard | `scripts/guard.sh` | The `PreToolUse` asks and denies. |
 | The replays | `scripts/replay-files.py`, `scripts/line-replay.py` | Build replay files from judged labels, and replay prompts into `claude -p` sessions. See [The replays](#the-replays). |
 | The skill | `skills/iirc/SKILL.md`, `skills/iirc/references/` | When to search, when to write, the writing rules, setup, and tune. |

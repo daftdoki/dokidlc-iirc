@@ -2,11 +2,14 @@
 export type RecalledPage = { name: string; summary: string; isSuspect: boolean; match?: string }
 
 /** What iirc said about one tool call: pages its error recalled, and commands it asked to have written up. */
-/** What the hint row shows of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears it. */
-export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string }
+/** What the lines at the prompt show of the brief: green, yellow for a warning, red when iirc needs setup or migration; `fix` is the command that clears the first problem, and `problems` each one the brief names, most severe first. */
+export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null; mode: string | null; note: string | null; fix?: string; problems?: Problem[] }
 
-/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
-export type SessionCounts = { reads: number; writes: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number }
+/** One thing the person needs to do: the command that does it, if the brief names one, and why, in the brief's words. */
+export type Problem = { level: 'warn' | 'error'; fix?: string; why: string }
+
+/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `searches` counts its own `iirc search` and `iirc read-matching-pages` runs; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
+export type SessionCounts = { reads: number; writes: number; searches: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number }
 
 /** The average match percentage of this session's suggestions: all of them, the ones read, and the ones not read; null with none. */
 export type MatchAverages = { all: number | null; read: number | null; unread: number | null }
@@ -55,7 +58,7 @@ declare module 'claude-code' {
       status: IircStatus | null
       /** Distinct pages this session read or pulled, and wrote, from `iirc summarize-session-usage`. */
       counts: SessionCounts
-      /** Whether the hint row shows the brief; `/iirc status on|off`, kept in $.store. */
+      /** Whether the band above the prompt shows the summary line; `/iirc summary-line-visibility on|off`, kept in $.store. */
       isStatusShown: boolean
       /** The page the reader tab shows, and the way back. */
       reader: Reader
