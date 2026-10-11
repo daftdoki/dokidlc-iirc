@@ -5,8 +5,6 @@ plugin's hooks module, `hooks/register.tsx`, catches each of those lines as
 Claude Code stores it and draws it for you. It is on by default. It is
 tested on Claude Code 2.1.295.
 
-![The suggested-pages list under a prompt, and the iirc line under the prompt](images/iirc-ui.png)
-
 ## Under your prompt
 
 ![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
