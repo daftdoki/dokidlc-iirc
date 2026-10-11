@@ -75,7 +75,6 @@ def test_config_text_points_at_dot_iirc(tmp_path):
 
 
 def test_normalize_host():
-    assert iirc.normalize_host(None) == "http://127.0.0.1:11434"
     assert iirc.normalize_host("localhost:11434") == "http://localhost:11434"
     assert iirc.normalize_host("http://x:1/") == "http://x:1"
     assert iirc.normalize_host("https://x:1") == "https://x:1"

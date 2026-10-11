@@ -131,7 +131,6 @@ def plugin_commit() -> str:
     if re.fullmatch(r"[0-9a-f]{7,40}", PLUGIN_ROOT.name):
         return PLUGIN_ROOT.name[:7]
     return "unknown"
-DEFAULT_HOST = "127.0.0.1:11434"
 
 
 def config_file() -> Path:
@@ -944,9 +943,9 @@ def read_log(days: int | None = None, session: str | None = None) -> list[dict]:
 # --- host guard -------------------------------------------------------------
 
 
-def normalize_host(raw: str | None) -> str:
+def normalize_host(raw: str) -> str:
     """Accept host:port or http://host:port; return a base URL."""
-    value = (raw or DEFAULT_HOST).strip().rstrip("/")
+    value = raw.strip().rstrip("/")
     if not value.startswith(("http://", "https://")):
         value = "http://" + value
     return value
