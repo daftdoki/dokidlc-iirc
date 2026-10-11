@@ -1506,7 +1506,7 @@ def test_brief_counts_near_duplicate_pairs(tmp_path, monkeypatch, capsys):
     assert "near-duplicate" not in capsys.readouterr().out
     _index(tmp_path, monkeypatch, _CLOSE)
     iirc.main(["doctor", "--brief"])
-    assert "1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ." in capsys.readouterr().out
+    assert "Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance." in capsys.readouterr().out
     iirc.write_config_file({"semantic": False})               # string mode: nothing refreshes the index
     iirc.main(["doctor", "--brief"])
     assert "near-duplicate" not in capsys.readouterr().out
@@ -1637,7 +1637,8 @@ def test_doctor_brief_counts_unpushed(tmp_path, monkeypatch, capsys):
     assert "not pushed" not in capsys.readouterr().out
     _page(agent.dir, "local-only.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "local")
     iirc.main(["doctor", "--brief"])
-    assert "1 store commit not pushed (iirc sync)." in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Maintenance is due (1 store commit not pushed); run /iirc run-maintenance." in out and "iirc sync" not in out
 
 
 def test_project_id_normalizes_origin(tmp_path):
@@ -4029,3 +4030,33 @@ def test_run_maintenance_starts_from_a_clean_commit_and_prints_its_undo(tmp_path
         subprocess.run(["bash", "-c", cmd], check=True, capture_output=True)
     assert (field / "mine.md").read_text() == mine and (agent.dir / "shared.md").read_text() == shared
     assert (proj / "docs" / "a.md").read_text() == "an edit outside the store\n"
+
+
+def test_brief_says_maintenance_is_due_in_one_sentence(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    iirc.main(["doctor", "--brief"])
+    assert "Maintenance" not in capsys.readouterr().out
+    _log([("start", f"s{i}", 1) for i in range(5)] + [("timeout", "s1", 1)])
+    sha = _git(tmp_path, "log", "-1", "--format=%h").strip()
+    _page(field, "cites.md", extra=f"refs:\n- docs/a.md@{sha}\n")
+    _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "page")
+    (tmp_path / "docs" / "a.md").write_text("two\n"); _git(tmp_path, "commit", "-qam", "change")
+    iirc.main(["doctor", "--brief"])
+    out = capsys.readouterr().out
+    assert ("Maintenance is due (never run in this repository, 5 sessions; 1 suspect page (cites.md); "
+            "1 suggestion lookup timed out in the last 7 days); run /iirc run-maintenance.") in out
+    assert "suspect:" not in out and "iirc doctor names the cause" not in out
+
+
+def test_doctor_ends_with_run_maintenance_when_due(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": True})
+    _no_host(monkeypatch)
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    assert "run-maintenance" not in capsys.readouterr().out
+    _index(tmp_path, monkeypatch, _CLOSE)
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    assert capsys.readouterr().out.rstrip().splitlines()[-1] == "run-maintenance is due: 1 near-duplicate pair"

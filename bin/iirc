@@ -3600,29 +3600,22 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             parts.append(f"memoryfield-tool is not at the pin {pin['tool_rev'][:7]}; every write refuses until `iirc doctor --fix` runs.")
         if top:
             parts.append(f"Topics: {top}.")
-        if suspects:
-            parts.append(f"{len(suspects)} suspect: {', '.join(suspects[:3])} (cited file changed).")
         dirty = sum(uncommitted(s) for s in live_stores())
         if dirty:
             parts.append(f"{dirty} store change{'s' if dirty != 1 else ''} not committed.")
         ahead = sum(unpushed(s) for s in live_stores())
-        if ahead:
-            parts.append(f"{ahead} store commit{'s' if ahead != 1 else ''} not pushed (iirc sync).")
         missing = [label for ok, label, _ in git_checks() if not ok]
         if missing:
             parts.append("Persistence: " + "; ".join(missing) + ".")
         if scan > SCAN_BUDGET:
             parts.append(f"The start scan took {scan:.1f} s over {cited} cited file{'' if cited == 1 else 's'}, past the {SCAN_BUDGET:g} s budget; tell the creator.")
-        try:
-            # string mode never refreshes the index, so its pairs would be stale
-            close = sum(1 for d, _, _ in flagged_pairs(PAIR_BUDGET) if d <= active_model().near[1]) if semantic_enabled() else 0
-        except Exception:   # a hook must never fail the session start
-            close = 0
-        timeouts = sum(1 for r in read_log(days=7) if r.get("repo") == str(ROOT) and r.get("cmd") == "timeout")
-        if timeouts:
-            parts.append(f"{timeouts} suggestion lookup{'s' if timeouts != 1 else ''} timed out in the last 7 days, past the hook's {RECALL_HOOK_TIMEOUT} s limit: iirc doctor names the cause.")
-        if close:
-            parts.append(f"{close} near-duplicate pair{'' if close == 1 else 's'}: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.")
+        try:   # a hook must never fail the session start
+            due = maintenance_due(suspects, ahead, len(close_pairs(PAIR_BUDGET)))
+        except Exception:
+            due = []
+        if due:
+            # one sentence for the person and the model; the skill walks through each reason
+            parts.append(f"Maintenance is due ({'; '.join(due)}); run /iirc run-maintenance.")
         if hook == "SessionStart":
             # the conditions this session's recall ran under, so an analysis compares like with like
             log_event("start", source=source, transcript=event.get("transcript_path"), **conditions(mode, n))
@@ -3645,6 +3638,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     print(f"     index cache: {idx} (derived, never committed; rebuilt by `iirc rebuild-search-index`)")
     if not ok and not args.fix:
         print(FIX_HINT)
+    pages = [p for st in live_stores() for p in list_pages(st.dir)]
+    due = maintenance_due(suspect_pages(pages), sum(unpushed(st) for st in live_stores()), len(close_pairs()))
+    if due:
+        print(f"run-maintenance is due: {'; '.join(due)}")
 
     sys.exit(0 if ok else 1)
 
