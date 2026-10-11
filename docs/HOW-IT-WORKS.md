@@ -376,9 +376,14 @@ that arrived with a clone runs only after the agent asks you and runs
 
 A check should read local state. A check that must contact the outside
 world runs only with your consent, as URL refs do. iirc knows one by its
-own command line: curl, wget, gh, `git fetch`, `pull`, `push`, `clone`,
-or `ls-remote`, ssh, scp, rsync to a host, nc, ncat, or http as a
-command. `iirc write` accepts such a check without running it.
+own command line (`NETWORK_CHECK_RE` in `bin/iirc`): curl, wget, gh,
+ssh, scp, sftp, nc, ncat, socat, http, or npx as a command; `git fetch`,
+`pull`, `push`, `clone`, `ls-remote`, `lfs fetch`, `remote update`, or
+`submodule update --remote`; rsync to a host; `npm install`, `pip
+install`, `uv pip install`, `docker pull`, or `brew install`; and inline
+code given to `sh -c` or to `python -c`, `node -e`, `perl -e`, or
+`ruby -e` that names a network library. A command with only a version
+or help flag, such as `curl --version`, is local. `iirc write` accepts such a check without running it.
 `find-suspect-pages` gives the page a glance note and does not run the
 check; `find-suspect-pages --network` runs it, and a failure makes the
 page suspect. `iirc verify PAGE --network` and `iirc approve-page-check`

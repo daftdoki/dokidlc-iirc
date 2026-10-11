@@ -2202,22 +2202,33 @@ def age_hint(fm: dict, now: datetime | None = None) -> str | None:
     return f"{fm.get('kind')} page, {days} days since {'verified' if fm.get('verified') else 'written'}"
 
 
+# where a simple command starts: the line start, a newline, ; & | ( { or a backtick, or $(
+CMD_START = r"(?:^|[\n;&|(`{]\s*|\$\(\s*)"
+
 # redirects are writes, except to /dev/null; the rest are the tools a check must never use
 UNSAFE_CHECK_RE = re.compile(
     r"(?<![<>])>{1,2}(?!&|\s*/dev/null\b)"                       # a redirect, except to /dev/null
     r"|\bsed\s+(-i|--in-place)|\btee\b|\|\s*(sh|bash|zsh)\b|\beval\b"
-    r"|(?:^|[;&|(]\s*|\$\(\s*)(sudo\s+)?(rm|mv|dd|chmod|chown|kill|install|cp)\s"   # as a command, not inside a name
+    r"|" + CMD_START + r"(sudo\s+)?(rm|mv|dd|chmod|chown|kill|install|cp)\s"   # as a command, not inside a name
     r"|\bsystemctl\s+(start|stop|restart|enable|disable)\b|\bcurl\b[^|]*\|")
 
 # a check should read local state; these commands contact a host, so such a check runs only with the creator's consent,
-# as URL refs do. Anchored as a command, as above; a script the check calls is not inspected
+# as URL refs do. Matched as a command, as above. Inline code given to sh -c or an interpreter is scanned;
+# a script file the check calls is not.
+_NET_PREFIX = (   # words that run the next word as a command, each with its options; and VAR=value assignments
+    r"(?:(?:(?:if|then|else|do|while|until|!|\{|sudo|doas|env|exec|nohup|time|nice|stdbuf|xargs"
+    r"|timeout(?:\s+-\S+)*\s+\S+|(?:ba|z|da|k)?sh(?:\s+-\w+)*\s+-\w*c)"
+    r"(?:\s+-\S+(?:\s+(?!-)[^\s'\";&|]+)?)*|command(?:\s+-p)?|\w+=\S*)\s+)*")   # command -v only looks a name up
+_NET_TOOL_END = r"['\"]?(?!\s+(?:--?version|-V|--?help|-h|help|version)\s*(?:$|[\n;&|)`<>]|\d>))(?=[\s;&|)'\"`]|$)"   # a version or help flag alone is local
 NETWORK_CHECK_RE = re.compile(
-    r"(?:^|[;&|(`]\s*|\$\(\s*)"                                     # where a command starts
-    r"(?:(?:if|then|else|do|while|until|!|sudo|env|command|exec|nohup|time|timeout\s+\S+|\w+=\S*)\s+)*"   # what may precede it
-    r"(?:\S*/)?"                                                      # an absolute or relative path to it
-    r"(?:(?:curl|wget|gh|ssh|scp|nc|ncat|http|https)(?=\s|$)"
-    r"|git\s+(?:-[Cc]\s+\S+\s+|--?[\w-]+(?:=\S+)?\s+)*(?:fetch|pull|push|clone|ls-remote)\b"
-    r"|rsync\b[^;&|\n]*\s(?:[\w.@-]+::?|rsync://))")                 # rsync only to a host
+    CMD_START + _NET_PREFIX + r"['\"\\]?(?:[^\s'\";&|()]*/)?"    # an optional quote or backslash, then a path to it
+    r"(?:(?:curl|wget|gh|ssh|scp|sftp|nc|ncat|socat|http|https|npx)" + _NET_TOOL_END +
+    r"|git(?:\s+(?:-[Cc]|--git-dir|--work-tree|--namespace|--exec-path|--config-env)\s+\S+|\s+--?[\w-]+(?:=\S+)?)*"
+    r"\s+(?:fetch|pull|push|clone|ls-remote|lfs\s+(?:fetch|pull|push|clone)|remote\s+update|submodule\s+update\b[^;&|\n]*\s--remote)\b"
+    r"|rsync\b[^;&|\n]*\s['\"]?(?:(?:[\w.-]+@)?(?:[\w.-]+|\[[^\]\s]+\])::?|rsync://)"      # rsync only to a host
+    r"|npm\s+(?:install|i|ci|add|update|exec)\b|(?:python3?\s+-m\s+)?pip3?\s+(?:install|download)\b|uv\s+pip\s+(?:install|download)\b"
+    r"|docker\s+pull\b|brew\s+(?:install|upgrade|update)\b"
+    r"|(?:python3?|node|perl|ruby)(?:\s+-\S+)*?\s+-\w*[ce]\s+[^\n]*?(?:urllib|requests|https?\b|[sS]ocket|fetch\(|net/http))")
 NETWORK_NOTE = "its check contacts the network; runs with --network"
 
 
@@ -2260,8 +2271,9 @@ def validate_check(command: str, page: str = "", network: bool = False) -> None:
     if UNSAFE_CHECK_RE.search(command):
         die("check must be read-only: no redirects (except to /dev/null), sed -i, tee, pipes into a shell, eval, or rm, mv, cp, dd, chmod, chown, kill, install, or systemctl state changes")
     if network_check(command) and not network:
-        print("iirc: this check contacts the network, so it runs only under `iirc find-suspect-pages --network`, "
-              "with the creator's consent. A check should read local state where it can.", file=sys.stderr)
+        print("iirc: this check contacts the network, so it runs only with the creator's consent: under "
+              "`iirc find-suspect-pages --network`, `iirc verify PAGE --network`, or `iirc approve-page-check PAGE`. "
+              "A check should read local state where it can.", file=sys.stderr)
         approve_check(command, page)
         return
     reason = run_check(command)
@@ -2306,15 +2318,15 @@ def suspicion(fm: dict, root: Path | None = None, run_checks: bool = False, now:
         reason = ref_changed(str(ref), root)
         if reason:
             found.append(("ref", reason))
-    if run_checks and fm.get("check") and network_check(str(fm["check"])) and not check_urls:
-        found.append(("network", NETWORK_NOTE))     # nothing is known wrong; it waits for consent
-    elif run_checks and fm.get("check"):
-        if check_hash(str(fm["check"])) in (approved if approved is not None else approved_checks()):
+    if run_checks and fm.get("check"):
+        if check_hash(str(fm["check"])) not in (approved if approved is not None else approved_checks()):
+            found.append(("unapproved", f"check not approved on this machine: `{fm['check']}` (iirc approve-page-check PAGE runs it once and approves it)"))
+        elif network_check(str(fm["check"])) and not check_urls:
+            found.append(("network", NETWORK_NOTE))     # nothing is known wrong; it waits for consent
+        else:
             reason = run_check(str(fm["check"]))
             if reason:
                 found.append(("check", reason))
-        else:
-            found.append(("unapproved", f"check not approved on this machine: `{fm['check']}` (iirc approve-page-check PAGE runs it once and approves it)"))
     hint = age_hint(fm, now)
     if hint:
         found.append(("age", hint))
@@ -2386,12 +2398,13 @@ def suspect_rows(check_urls: bool = False, clean_too: bool = False) -> tuple[lis
 
 
 def network_checks() -> list[tuple[str, str]]:
-    """(page label, check) for each page of this project whose check contacts the network."""
+    """(page label, check) for each page of this project whose approved check contacts the network: what --network runs."""
     found = []
+    approved = approved_checks()
     for store in live_stores():
         for page in list_pages(store.dir):
             fm, _ = parse_page(page.read_text())
-            if same_project(fm) and fm.get("check") and network_check(str(fm["check"])):
+            if same_project(fm) and fm.get("check") and network_check(str(fm["check"])) and check_hash(str(fm["check"])) in approved:
                 found.append((page_label(store.name, page.name), str(fm["check"])))
     return found
 

@@ -4246,17 +4246,48 @@ NETWORK_CHECKS = ("curl -sfIL https://example.com", "scripts/x && curl -s localh
                   "git push", "git clone https://x", "git ls-remote origin", "ssh host true", "scp host:f .",
                   "rsync -a host:/srv/x .", "rsync -a ./x rsync://h/m", "echo hi | nc host 80", "ncat -z host 22",
                   "http GET https://x", "https example.com", "timeout 5 curl x", "env A=1 wget x", "/usr/bin/curl x",
-                  "if curl -s x; then true; fi", "sudo ssh h")
+                  "if curl -s x; then true; fi", "sudo ssh h",
+                  # a newline or a brace starts a command too
+                  "true\ncurl -sf https://x", "{ curl x; }", "true && { gh api x; }",
+                  # the name ends at a separator, and may be quoted or escaped
+                  "gh|cat", "curl;", "curl&& true", "(curl x)", "'curl' x", '"curl" x', "\\curl x",
+                  # prefix words take options
+                  "sudo -u me curl x", "env -i curl x", "env -u X curl x", "nice -n 5 wget x", "xargs -n1 curl",
+                  # git options with a separate argument, and more of git's remote verbs
+                  "git --git-dir /x fetch", "git --work-tree /x fetch", "git -c a=b pull", "git lfs fetch", "git lfs pull",
+                  "git remote update", "git submodule update --init --remote",
+                  # rsync to a quoted host or an IPv6 address
+                  "rsync -a 'host:/x' .", 'rsync -a "me@host:/x" .', "rsync -a [::1]:/x .", "rsync -a me@[fe80::1]:/x .",
+                  "sftp host", "socat - TCP:host:80",
+                  # inline code a wrapper runs
+                  "bash -c 'curl x'", "sh -c \"true; gh api x\"", "zsh -c 'wget x'", "bash -e -c 'ssh h'",
+                  "python3 -c 'import urllib.request; urllib.request.urlopen(\"https://x\")'",
+                  "python -c 'import requests'", "node -e 'fetch(\"https://x\")'", "perl -e 'use Socket'",
+                  "ruby -e 'require \"net/http\"'", "python3 -c 'import socket'",
+                  # package managers fetch from a registry
+                  "npx cowsay hi", "npm install", "npm i left-pad", "npm ci", "pip install x", "pip3 download x",
+                  "uv pip install x", "python3 -m pip install x", "docker pull alpine", "brew install jq")
 LOCAL_CHECKS = ("command -v curl >/dev/null", "command -v gh", "which gh", "grep -q curl README.md", "git log -1 gh-pages",
                 "git status --porcelain", "test -f scripts/fetch", "ls ~/.ssh", "rsync --version", "grep -q 'git fetch' Makefile",
-                "test -x /usr/bin/curl-config", "git remote -v")
+                "test -x /usr/bin/curl-config", "git remote -v",
+                # a version or help flag alone is local
+                "curl --version", "gh --version", "gh help", "nc -h", "wget -V", "curl --version >/dev/null && true",
+                "git submodule update --init", "git lfs ls-files", "npm ls", "pip list", "uv pip list", "brew list",
+                "docker images", "python3 -c 'print(1)'", "bash -c 'test -f x'", "test -n \"$CURL\"", "echo '{ ok }'",
+                "git config --get remote.origin.url")
+
+
+def test_unsafe_check_re_sees_a_newline_a_brace_and_backticks():
+    for bad in ("`rm x`", "echo `rm x`", "true\nrm x", "{ rm x; }", "true\nchmod 600 f"):
+        assert iirc.UNSAFE_CHECK_RE.search(bad), bad
+    assert iirc.CMD_START in iirc.UNSAFE_CHECK_RE.pattern and iirc.CMD_START in iirc.NETWORK_CHECK_RE.pattern
 
 
 def test_network_check_re_matches_commands_not_names():
     for bad in NETWORK_CHECKS:
-        assert iirc.NETWORK_CHECK_RE.search(bad), bad
+        assert iirc.network_check(bad), bad
     for good in LOCAL_CHECKS:
-        assert not iirc.NETWORK_CHECK_RE.search(good), good
+        assert not iirc.network_check(good), good
 
 
 
@@ -4289,10 +4320,35 @@ def test_write_accepts_a_network_check_without_running_it(tmp_path, monkeypatch,
     iirc.main(["write", "up.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding",
                "--check", "scripts/upstream check && gh api repos/a/b"])
     assert ran == [] and (field / "up.md").is_file()
-    assert "runs only under `iirc find-suspect-pages --network`" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "`iirc find-suspect-pages --network`" in err and "`iirc verify PAGE --network`" in err and "`iirc approve-page-check PAGE`" in err
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    iirc.main(["write", "nl.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding",
+               "--check", "true\ncurl -sf https://x"])
+    assert ran == [] and (field / "nl.md").is_file()     # a newline starts a command
     monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
     iirc.main(["write", "local.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding", "--check", "test -d ."])
     assert ran == ["test -d ."]                  # a local check still runs at write
+
+
+def test_write_refuses_a_command_in_backticks(tmp_path, monkeypatch, capsys):
+    import io
+    field, _ = _network_page(tmp_path, monkeypatch, approved=False)
+    ran = _stub_checks(monkeypatch)
+    monkeypatch.setattr("sys.stdin", io.StringIO("x\n\n## Sources\n\n- y\n"))
+    with pytest.raises(SystemExit):
+        iirc.main(["write", "bt.md", "--title", "T", "--summary", "s", "--topics", "t", "--kind", "finding", "--check", "test -n `rm x`"])
+    assert ran == [] and "must be read-only" in capsys.readouterr().err and not (field / "bt.md").exists()
+
+
+def test_an_unapproved_network_check_is_named_as_unapproved(tmp_path, monkeypatch, capsys):
+    field, cmd = _network_page(tmp_path, monkeypatch, approved=False)
+    ran = _stub_checks(monkeypatch)
+    rows, _, _ = iirc.suspect_rows()
+    assert [s for s, _ in rows[0][2]] == ["unapproved"] and ran == []
+    assert iirc.network_checks() == []                     # --network runs only approved checks, so it names only those
+    iirc.approve_check(cmd, "net.md")
+    assert iirc.network_checks() == [("net.md", cmd)]
 
 
 def test_find_suspect_pages_leaves_a_network_check_for_network(tmp_path, monkeypatch, capsys):

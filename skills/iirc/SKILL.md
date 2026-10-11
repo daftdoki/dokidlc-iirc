@@ -224,9 +224,11 @@ age. `find-suspect-pages` also runs each page's `--check` command and marks fail
   refuses one that does not. Checks run only from `find-suspect-pages`,
   `verify`, `approve-page-check`, and `write`, never from hooks.
 - A check that must contact the outside world runs only with the
-  creator's consent, like URL refs. The wrapper knows one by its command:
-  curl, wget, gh, `git fetch|pull|push|clone|ls-remote`, ssh, scp, rsync
-  to a host, nc, ncat, or http. `write` accepts it without running it.
+  creator's consent, like URL refs. The wrapper knows one by its
+  commands: a host client (curl, wget, gh, ssh, nc, and the like), a git
+  verb that reaches a remote, a package install, or inline `sh -c` or
+  `python -c` code that does one of these. `write` accepts it without
+  running it.
   `find-suspect-pages` marks the page `glance` and leaves the check for
   `find-suspect-pages --network`. `verify` on that page needs
   `iirc verify PAGE --network`; ask the creator first, as for URLs. The
