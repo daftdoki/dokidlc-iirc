@@ -72,8 +72,8 @@ on this machine.
 | an OpenAI-compatible host, such as vLLM serving qwen3-embedding | the base URL | a server that answers `POST URL/v1/embeddings` |
 | this CPU, all-MiniLM-L6-v2 through onnxruntime | `cpu` | about 90 MB of model files, which the command fetches; no ollama |
 
-The models are `qwen3-embedding-0.6b`, `nomic-embed-text`,
-`embeddinggemma`, and `all-minilm-l6-v2`. A model has one name whatever
+The models are `qwen3-embedding-0.6b`, `nomic-embed-text`, and
+`all-minilm-l6-v2`. A model has one name whatever
 serves it: qwen3 0.6B is `qwen3-embedding:0.6b-fp16` or
 `qwen3-embedding:0.6b` to ollama and `qwen3-embedding` to an
 OpenAI-compatible server, and one repository can use it through ollama
@@ -189,7 +189,6 @@ similar pairs up to the model's near-duplicate distance:
 |---|---|---|
 | `nomic-embed-text` | 0.07 | 0.10 |
 | `qwen3-embedding-0.6b` | 0.12 | 0.17 |
-| `embeddinggemma` | 0.10 | 0.14 |
 | `all-minilm-l6-v2` | 0.14 | 0.20 |
 
 Say "merge the near-duplicate pages". When a
@@ -372,7 +371,6 @@ both = 0.62
 |---|---|---|---|---|
 | `nomic-embed-text` | 0.28 | 0.38 | 0.10 to 0.60 | 0.45 |
 | `qwen3-embedding-0.6b` | 0.40 | 0.60 | 0.10 to 0.90 | 0.90 |
-| `embeddinggemma` | 0.40 | 0.68 | 0.10 to 0.90 | 0.90 |
 | `all-minilm-l6-v2` | 0.60 | 0.68 | 0.10 to 0.90 | 0.90 |
 
 The defaults come from a replay of judged prompts
@@ -423,7 +421,7 @@ are in `gate` in [`bin/iirc`](../bin/iirc).
   one of the 1,000 most common English words.
 
 So put the tool name, the version, the error code, or the path in the
-summary. Every model embeds the whole page: nomic, qwen3, and gemma the
+summary. Every model embeds the whole page: nomic and qwen3 the
 page file up to 8192 bytes, frontmatter and body; MiniLM the title,
 summary, topics, and body in windows. A page about two things therefore
 matches prompts about either. Keep one finding per page. `iirc write`

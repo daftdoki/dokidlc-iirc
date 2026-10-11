@@ -574,7 +574,6 @@ this never reaches the gate), and its near-duplicate distances.
 |---|---|---|---|---|
 | `nomic-embed-text` | ollama `nomic-embed-text` | the page file cut at 8,192 bytes, as memoryfield-tool embeds it | 0.28 / 0.38 | 0.45 |
 | `qwen3-embedding-0.6b` | ollama `qwen3-embedding:0.6b-fp16` or `qwen3-embedding:0.6b`; an OpenAI-compatible host (`POST URL/v1/embeddings`) `qwen3-embedding` | the page file cut at 8,192 bytes; the query takes qwen3's instruction prefix | 0.40 / 0.60 | 0.90 |
-| `embeddinggemma` | ollama `embeddinggemma` | the page file cut at 8,192 bytes, with gemma's document prefix | 0.40 / 0.68 | 0.90 |
 | `all-minilm-l6-v2` | this CPU, through `bin/iirc-cpu` and onnxruntime | title, summary, topics, and the body before Sources, in 200-token windows at a stride of 150 | 0.60 / 0.68 | 0.90 |
 
 The threshold defaults come from one pooling round: each model's best F1 on

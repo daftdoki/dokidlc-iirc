@@ -3305,7 +3305,7 @@ def _fake_openai(monkeypatch, model, dims=None, listed=True, version=False):
         srv.shutdown()
 
 
-@pytest.mark.parametrize("model, protocol", [("nomic-embed-text", "ollama"), (QWEN, "ollama"), ("embeddinggemma", "ollama"), (QWEN, "openai")])
+@pytest.mark.parametrize("model, protocol", [("nomic-embed-text", "ollama"), (QWEN, "ollama"), (QWEN, "openai")])
 def test_backend_prefixes(tmp_path, monkeypatch, capsys, model, protocol):
     """Each model gets its own query and document prefixes over the raw page file, through each protocol it has, into its own store."""
     field = _vector_project(tmp_path, monkeypatch)
@@ -3331,8 +3331,6 @@ def test_backend_prefixes(tmp_path, monkeypatch, capsys, model, protocol):
         assert f"string only (127.0.0.1:{port} does not answer" in capsys.readouterr().out
     assert iirc.iirc_embed.MODELS[QWEN].query_prefix == \
         "Instruct: Given a request to a coding agent, retrieve the memory pages that help with it\nQuery: "
-    assert (iirc.iirc_embed.MODELS["embeddinggemma"].query_prefix, iirc.iirc_embed.MODELS["embeddinggemma"].doc_prefix) == \
-        ("task: search result | query: ", "title: none | text: ")
 
 
 def _load_cpu():
@@ -3478,7 +3476,7 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
         import numpy as np
         assert rf.iirc.read_config()["embedding_models"][0]["model"] == backend.model.id
         seen.append((backend.model.id, str(rf.iirc.config_file()), os.environ["IIRC_CACHE_DIR"]))
-        near = 0 if backend.model.id == "nomic-embed-text" else 1     # "gamma" is near alpha for nomic, near beta for gemma
+        near = 0 if backend.model.id == "nomic-embed-text" else 1     # "gamma" is near alpha for nomic, near beta for qwen3
         pad = [0.0] * (backend.model.dims - 3)                       # the model's width, or the store is refused
         return [np.asarray([[t.count("alpha") + (near == 0) * t.count("gamma"), t.count("beta") + (near == 1) * t.count("gamma"), 0.01] + pad],
                            dtype=np.float32) for t in texts]
@@ -3487,8 +3485,8 @@ def test_replay_files_pool_lists_unlabelled(tmp_path, monkeypatch):
     monkeypatch.setattr(rf.iirc, "host_answers", lambda *a, **k: True)    # the stub is the backend; CI has no ollama
     prompts = {"q1": ("gamma rays", "prompt")}
     assert rf.ranked_pages("nomic-embed-text", tmp_path, prompts, tmp_path / "pool") == {"q1": ["alpha-notes.md"]}
-    assert rf.ranked_pages("embeddinggemma", tmp_path, prompts, tmp_path / "pool") == {"q1": ["beta-notes.md"]}
-    assert {m for m, _, _ in seen} == {"nomic-embed-text", "embeddinggemma"}
+    assert rf.ranked_pages(QWEN, tmp_path, prompts, tmp_path / "pool") == {"q1": ["beta-notes.md"]}
+    assert {m for m, _, _ in seen} == {"nomic-embed-text", QWEN}
     assert all(cfg.startswith(str(tmp_path / "pool")) and cache.startswith(str(tmp_path / "pool")) for _, cfg, cache in seen)
     assert {k: os.environ.get(k) for k in before} == before
     assert (field / "index.md").read_text() == iirc.INDEX_TEMPLATE                   # no index stamp, no commit in the repository
@@ -3514,22 +3512,22 @@ def test_replay_files_merge_pool(tmp_path, capsys):
 def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
     """Page-to-page distances differ by model as prompt-to-page ones do; a pair close for one model is not close for another."""
     import numpy as np
-    nomic, gemma = iirc.iirc_embed.MODELS["nomic-embed-text"], iirc.iirc_embed.MODELS["embeddinggemma"]
+    nomic, qwen = iirc.iirc_embed.MODELS["nomic-embed-text"], iirc.iirc_embed.MODELS[QWEN]
     assert nomic.near == (0.10, 0.07)
     for m in iirc.iirc_embed.MODELS.values():
         assert 0 < m.near[1] < m.near[0] < m.cut
     _project(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "cache_dir", lambda: tmp_path / "cache")
-    d = (nomic.near[0] + gemma.near[0]) / 2                     # past nomic's line, inside gemma's
+    d = (nomic.near[0] + qwen.near[0]) / 2                      # past nomic's line, inside qwen3's
     vecs = {"a.md": (1.0, 0.0), "b.md": (1 - d, (1 - (1 - d) ** 2) ** 0.5)}
-    rows = np.zeros((2, 768), dtype=np.float32)
-    for i, head in enumerate(vecs.values()):
-        rows[i, :2] = head
-    for model in (nomic.id, gemma.id):
-        path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(tmp_path), model)
+    for m in (nomic, qwen):
+        rows = np.zeros((2, m.dims), dtype=np.float32)
+        for i, head in enumerate(vecs.values()):
+            rows[i, :2] = head
+        path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(tmp_path), m.id)
         iirc.iirc_embed.save(path, iirc.iirc_embed.Vectors(list(vecs), ["sha-a", "sha-b"], rows))
     assert iirc.near_duplicates() == []                          # nomic
-    _machine_model(gemma.id)
+    _machine_model(qwen.id)
     assert iirc.near_duplicates() == [(round(d, 3), "a.md", "b.md")]   # same page shas, other model: not nomic's cached answer
 
 
@@ -4640,8 +4638,8 @@ def test_set_embedding_model_edits_lines(tmp_path, monkeypatch, capsys):
     iirc.main(["set-embedding-model", "nomic-embed-text"])
     assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "nomic-embed-text"\n\n[stores.project]\nkind = "project"\n'
     toml.write_text('[stores.project]  # the pages\nkind = "project"\n')
-    iirc.main(["set-embedding-model", "embeddinggemma"])
-    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n\n[stores.project]  # the pages\nkind = "project"\n'
+    iirc.main(["set-embedding-model", "all-minilm-l6-v2"])
+    assert toml.read_text() == 'embedding_model = "all-minilm-l6-v2"\n\n[stores.project]  # the pages\nkind = "project"\n'
 
 
 def test_set_embedding_model_leaves_the_machines_string_search(tmp_path, monkeypatch, capsys):
@@ -4729,7 +4727,7 @@ def _repo_model(root, model):
 def test_model_names_are_one_per_model():
     """One id per model, each protocol's names under it; the ids are the ollama tables' names, so no table or vector store is renamed."""
     emb = iirc.iirc_embed
-    assert set(emb.MODELS) == {"nomic-embed-text", QWEN, "embeddinggemma", "all-minilm-l6-v2"}
+    assert set(emb.MODELS) == {"nomic-embed-text", QWEN, "all-minilm-l6-v2"}
     qwen = emb.MODELS[QWEN]
     assert qwen.names == {"ollama": ["qwen3-embedding:0.6b-fp16", "qwen3-embedding:0.6b"], "openai": ["qwen3-embedding"]}
     assert emb.model_named("qwen3-embedding:0.6b") is qwen and emb.model_named("qwen3-embedding") is qwen and emb.model_named(QWEN) is qwen
@@ -4852,8 +4850,8 @@ def test_remove_embedding_model(tmp_path, monkeypatch, capsys):
     iirc.main(["remove-embedding-model", "nomic-embed-text"])
     assert iirc.read_config()["embedding_models"] == [a]
     with pytest.raises(SystemExit):
-        iirc.main(["remove-embedding-model", "embeddinggemma"])
-    assert "embeddinggemma" in capsys.readouterr().err and iirc.read_config()["embedding_models"] == [a]
+        iirc.main(["remove-embedding-model", "all-minilm-l6-v2"])
+    assert "all-minilm-l6-v2" in capsys.readouterr().err and iirc.read_config()["embedding_models"] == [a]
 
 
 def test_prefer_embedding_host(tmp_path, monkeypatch, capsys):
@@ -4936,9 +4934,9 @@ def test_set_embedding_model_writes_only_the_repository(tmp_path, monkeypatch, c
     assert "http" not in toml.read_text() and iirc.config_file().read_text() == machine
     assert "embedded again" in out and "defaults" in out and "tuning judgments" in out and "commit" in out
     assert rebuilt == [False] and iirc.active_model().id == QWEN
-    iirc.main(["set-embedding-model", "embeddinggemma"])                  # a model this machine cannot serve: written, nothing rebuilt
+    iirc.main(["set-embedding-model", "all-minilm-l6-v2"])                # a model this machine cannot serve: written, nothing rebuilt
     out = capsys.readouterr().out
-    assert "this machine cannot serve embeddinggemma" in out and rebuilt == [False] and 'embedding_model = "embeddinggemma"' in toml.read_text()
+    assert "this machine cannot serve all-minilm-l6-v2" in out and rebuilt == [False] and 'embedding_model = "all-minilm-l6-v2"' in toml.read_text()
     with pytest.raises(SystemExit):
         iirc.main(["set-embedding-model", "qwen3-embedding:0.6b"])         # a protocol's name is not the model's
     assert QWEN in capsys.readouterr().err and iirc.config_file().read_text() == machine
@@ -4948,16 +4946,16 @@ def test_repository_without_a_model_gets_the_first_served_one(tmp_path, monkeypa
     """A repository that names no model uses the machine list's first; a hook only names it, and the first command writes it."""
     _project(tmp_path, monkeypatch)
     _no_host(monkeypatch)
-    _machine_config({"search_mode": "semantic", "embedding_models": [_entry("embeddinggemma", "http://127.0.0.1:11434"), _entry(QWEN, "http://127.0.0.1:11434")]})
+    _machine_config({"search_mode": "semantic", "embedding_models": [_entry("all-minilm-l6-v2", iirc.CPU, "onnx"), _entry(QWEN, "http://127.0.0.1:11434")]})
     toml = tmp_path / ".claude" / "iirc.toml"
-    assert iirc.active_model().id == "embeddinggemma" and not toml.exists()
+    assert iirc.active_model().id == "all-minilm-l6-v2" and not toml.exists()
     out = _brief(["doctor", "--brief", "--hook"], monkeypatch, capsys)
-    assert "names no embedding model" in out and "`iirc set-embedding-model embeddinggemma`" in out and not toml.exists()
+    assert "names no embedding model" in out and "`iirc set-embedding-model all-minilm-l6-v2`" in out and not toml.exists()
     iirc.main(["rebuild-search-index", "--vectors-only"])            # what a search starts in the background, from a hook too
     assert not toml.exists()
     iirc.main(["search", "alpha"])
     err = capsys.readouterr().err
-    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n' and 'embedding_model = "embeddinggemma"' in err
+    assert toml.read_text() == 'embedding_model = "all-minilm-l6-v2"\n' and 'embedding_model = "all-minilm-l6-v2"' in err
 
 
 def test_a_failed_choice_write_keeps_the_choice_in_memory(tmp_path, monkeypatch, capsys):
@@ -5133,11 +5131,11 @@ def test_doctor_fix_converts_the_old_shape(tmp_path, monkeypatch, capsys):
     assert text.startswith(f'show_hooks = true\nembedding_model = "{QWEN}"\n') and tomllib.loads(text)["suggestions"] == {QWEN: {"both": 0.6}}
     assert "# both = 0.7" in text                                       # the table that lost to the one already there stays, commented out
     # an ollama table with no URL runs where embedding_host says, else on this machine's ollama
-    path.write_text('embedding = {backend = "ollama", model = "embeddinggemma"}\n'); iirc._CONFIG = None
+    path.write_text('embedding = {backend = "ollama", model = "nomic-embed-text"}\n'); iirc._CONFIG = None
     toml.unlink(); iirc.set_root(tmp_path)
     _doctor(["doctor", "--fix"], capsys)
-    assert iirc.read_config() == {"search_mode": "semantic", "embedding_models": [_entry("embeddinggemma", "http://127.0.0.1:11434")]}
-    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n'
+    assert iirc.read_config() == {"search_mode": "semantic", "embedding_models": [_entry("nomic-embed-text", "http://127.0.0.1:11434")]}
+    assert toml.read_text() == 'embedding_model = "nomic-embed-text"\n'
 
 
 def test_no_reader_of_the_old_shape(tmp_path, monkeypatch, capsys):

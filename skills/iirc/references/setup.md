@@ -15,8 +15,7 @@ belongs to the machine: its list of embedding models in
    well. Which do you want?" If they ask what the difference is: semantic
    search finds the missing-wheel page from "why does install fail on a
    mac"; string search needs "pysqlite3". The models are
-   `nomic-embed-text`, `qwen3-embedding-0.6b`, `embeddinggemma`, and
-   `all-minilm-l6-v2`.
+   `nomic-embed-text`, `qwen3-embedding-0.6b`, and `all-minilm-l6-v2`.
 2. Ask where it runs on this machine: ollama here (`local`), the URL of
    an ollama or OpenAI-compatible host, or this CPU (`cpu`, MiniLM only).
    The host is whatever the creator named; a guess is never right.

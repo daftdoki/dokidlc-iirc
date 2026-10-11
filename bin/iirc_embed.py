@@ -51,7 +51,7 @@ def _knobs(semantic_only: float, both: float, high: float = 0.90) -> dict[str, t
 
 
 # The recall knobs differ per model because distances do: relevant pairs sit at a median 0.36 for
-# nomic, 0.53 for qwen3, and 0.64 for embeddinggemma (evidence 6-models.md). Each default is the pooling
+# nomic and 0.53 for qwen3 (evidence 6-models.md). Each default is the pooling
 # round's choice (quest 2610100115-p5, step 26): the best F1 on the agent-builder replay among grid points
 # that refuse no relevant pair the model's earlier defaults passed on the neckbeard replay. nomic's
 # 0.28/0.38 was already that point. qwen3's values came from its ollama build and hold for every build of it.
@@ -65,8 +65,6 @@ MODELS: dict[str, Model] = {m.id: m for m in (
     # F16 first, to match the bf16 build an OpenAI-compatible server runs; ollama's default tag is Q8_0
     Model("qwen3-embedding-0.6b", {"ollama": ["qwen3-embedding:0.6b-fp16", "qwen3-embedding:0.6b"], "openai": ["qwen3-embedding"]},
           _QWEN3_QUERY, "", 1024, _knobs(0.40, 0.60), 0.90, (0.17, 0.12)),
-    Model("embeddinggemma", {"ollama": ["embeddinggemma"]}, "task: search result | query: ", "title: none | text: ", 768,
-          _knobs(0.40, 0.68), 0.90, (0.14, 0.10)),
     Model("all-minilm-l6-v2", {"onnx": ["all-minilm-l6-v2"]}, "", "", 384, _knobs(0.60, 0.68), 0.90, (0.20, 0.14), "plain"),
 )}
 DEFAULT_MODEL = "nomic-embed-text"
