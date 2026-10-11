@@ -4724,19 +4724,28 @@ def test_unknown_repository_model_is_a_config_error(tmp_path):
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
 
 
-def _backend_repo(tmp_path, monkeypatch, settings: dict | None, name: str = "settings.json"):
-    """A repository whose .claude/NAME holds these settings (None: no settings file), on a machine whose default is nomic."""
+@pytest.fixture
+def backend_repo(tmp_path, monkeypatch):
+    """backend_repo(settings, name): a repository whose .claude/NAME holds these settings (None: no settings file), on a machine
+    whose default is nomic; it returns the path of .claude/iirc.toml. Afterwards the repository's model is gone and the root
+    reloaded, so no later test inherits it."""
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
-    (tmp_path / ".claude").mkdir(exist_ok=True)
-    if settings is not None:
-        (tmp_path / ".claude" / name).write_text(json.dumps(settings))
-    iirc.write_config_file({"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
-    return tmp_path / ".claude" / "iirc.toml"
+    toml = tmp_path / ".claude" / "iirc.toml"
+
+    def make(settings: dict | None, name: str = "settings.json"):
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        if settings is not None:
+            (tmp_path / ".claude" / name).write_text(json.dumps(settings))
+        iirc.write_config_file({"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+        return toml
+    yield make
+    toml.unlink(missing_ok=True)
+    iirc.set_root(tmp_path)
 
 
-def test_set_search_backend_sets_the_repository_model(tmp_path, monkeypatch, capsys):
-    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+def test_set_search_backend_sets_the_repository_model(tmp_path, backend_repo, capsys):
+    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
     toml.write_text('# stores\nshow_hooks = true\n\n[stores.project]\nkind = "project"\n')
     iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
     assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "qwen3-embedding:0.6b"\n\n[stores.project]\nkind = "project"\n'
@@ -4751,19 +4760,18 @@ def test_set_search_backend_sets_the_repository_model(tmp_path, monkeypatch, cap
     iirc.main(["set-search-backend", "--host", "frame:11434", "--model", "embeddinggemma"])
     assert toml.read_text() == 'embedding_model = "embeddinggemma"\n\n[stores.project]  # the pages\nkind = "project"\n'
     assert iirc.read_config()["embedding_host"] == "http://frame:11434"
-    toml.unlink(); iirc.set_root(tmp_path)
 
 
-def test_set_search_backend_sets_the_machine_default(tmp_path, monkeypatch, capsys):
+def test_set_search_backend_sets_the_machine_default(tmp_path, backend_repo, capsys):
     for settings in (None, {"enabledPlugins": {"iirc@dokidlc": False, "other@dokidlc": True}}):
-        toml = _backend_repo(tmp_path, monkeypatch, settings)
+        toml = backend_repo(settings)
         iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
         assert not toml.exists() and iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
         assert f"the machine default in {iirc.config_file()}" in capsys.readouterr().out
 
 
-def test_set_search_backend_target_flags(tmp_path, monkeypatch, capsys):
-    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}}, name="settings.local.json")
+def test_set_search_backend_target_flags(tmp_path, backend_repo, capsys):
+    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}}, name="settings.local.json")
     iirc.main(["set-search-backend", "--local", "--model", "embeddinggemma", "--machine"])
     assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
     iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])   # settings.local.json installs it too
@@ -4779,20 +4787,18 @@ def test_set_search_backend_target_flags(tmp_path, monkeypatch, capsys):
     assert "string search" in capsys.readouterr().err and iirc.read_config()["semantic"] is True
     iirc.main(["set-search-backend", "--substring"])
     assert iirc.read_config()["semantic"] is False and toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n'
-    toml.unlink(); iirc.set_root(tmp_path)
 
 
 
-def test_repository_target_leaves_the_machines_string_search(tmp_path, monkeypatch, capsys):
+def test_repository_target_leaves_the_machines_string_search(tmp_path, backend_repo, capsys):
     """String search is the machine's choice: a repository's model leaves it, and the output names the command that changes it."""
-    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
     iirc.write_config_file({**iirc.read_config(), "semantic": False})
     for flags in (["--local", "--model", "qwen3-embedding:0.6b"], ["--openai", "https://llm.example.net/v1"]):
         iirc.main(["set-search-backend", *flags])
         assert iirc.read_config()["semantic"] is False and "embedding_model" in toml.read_text()
         out = capsys.readouterr().out
         assert "This machine uses string search" in out and "`iirc set-search-backend --machine`" in out, out
-    toml.unlink(); iirc.set_root(tmp_path)
 
 
 def test_openai_model_with_no_url_on_this_machine(tmp_path, monkeypatch, capsys):
@@ -4816,10 +4822,10 @@ def test_openai_model_with_no_url_on_this_machine(tmp_path, monkeypatch, capsys)
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
 
 
-def test_settings_local_overrides_settings_and_a_bad_file_stops(tmp_path, monkeypatch, capsys):
+def test_settings_local_overrides_settings_and_a_bad_file_stops(tmp_path, backend_repo, capsys):
     """As in Claude Code, settings.local.json's value for a key wins over settings.json's; a settings file that does not parse
     stops set-search-backend with the file named, and nothing written."""
-    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+    toml = backend_repo({"enabledPlugins": {"iirc@dokidlc": True}})
     (tmp_path / ".claude" / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"iirc@dokidlc": False}}))
     iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
     assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
