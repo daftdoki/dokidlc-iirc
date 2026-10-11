@@ -4961,6 +4961,28 @@ def test_repository_without_a_model_gets_the_first_served_one(tmp_path, monkeypa
     assert toml.read_text() == 'embedding_model = "embeddinggemma"\n' and 'embedding_model = "embeddinggemma"' in err
 
 
+def test_a_failed_choice_write_keeps_the_choice_in_memory(tmp_path, monkeypatch, capsys):
+    """The first-time model write and the asked host's write each say in one line why the choice was not saved, and the command goes on
+    with the choice."""
+    _project(tmp_path, monkeypatch)
+    _no_host(monkeypatch)
+    a, b = _entry(QWEN, "http://127.0.0.1:11434"), _entry(QWEN, "https://llm.example.net", "openai")
+    _machine_config({"search_mode": "semantic", "embedding_models": [a, b]})
+
+    def refuse(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(iirc, "write_checked_config", refuse)
+    iirc.main(["search", "alpha"])
+    err = capsys.readouterr().err
+    assert "could not be saved" in err and QWEN in err and "Permission denied" in err and iirc.active_model().id == QWEN
+    monkeypatch.setattr(iirc.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "2")
+    monkeypatch.setattr(iirc, "write_config_file", refuse)
+    iirc.ask_host(QWEN)
+    out, err = capsys.readouterr()
+    assert "could not be saved" in err and "Permission denied" in err and iirc.host_entry()[0].host == b["host"]
+
+
 def test_machine_that_cannot_serve_the_model_falls_back_and_says_so(tmp_path, monkeypatch, capsys):
     """No listed host serves the repository's model: search matches strings, and the brief and doctor say why and name the ways out."""
     _project(tmp_path, monkeypatch)

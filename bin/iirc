@@ -3094,7 +3094,12 @@ def ask_host(model: str) -> None:
         print(f"  {i}. {e.host} ({PROTOCOL_TEXT[e.protocol]}, as {e.name})")
     pick = input(f"1-{len(entries)} [1]: ").strip()
     chosen = entries[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(entries) else entries[0]
-    set_preferred(model, chosen.host)
+    try:
+        set_preferred(model, chosen.host)
+    except OSError as e:
+        print(f"iirc: the choice of {chosen.host} for {model} could not be saved ({e}); this command uses it, and the next one asks again",
+              file=sys.stderr)
+        return
     print(f"{model} runs through {chosen.host} on this machine; `iirc prefer-embedding-host` changes it")
 
 
@@ -3111,7 +3116,12 @@ def adopt_model() -> None:
     """A repository that names no model gets the first on this machine's list, written once by the first command that needs a model."""
     if MODEL_SOURCE != FIRST_LISTED or CONFIG_ERROR or not live_stores():
         return
-    path = write_model(MODEL.id, "iirc")
+    try:
+        path = write_model(MODEL.id, "iirc")
+    except OSError as e:
+        print(f"iirc: this repository names no embedding model, and {MODEL.id}, the first on this machine's list, could not be saved "
+              f"to {STORE_CONFIG} ({e}); this command uses it", file=sys.stderr)
+        return
     print(f"iirc: this repository named no embedding model; embedding_model = \"{MODEL.id}\", the first on this machine's list, "
           f"is now in {path} (commit it; `iirc set-embedding-model` changes it)", file=sys.stderr)
 
