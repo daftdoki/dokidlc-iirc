@@ -4438,8 +4438,9 @@ def close_pairs(budget: float | None = None) -> list[tuple[float, str, str]]:
     return [p for p in flagged_pairs(budget) if p[0] <= active_model().near[1]] if semantic_enabled() else []
 
 
-def commit_before_maintenance() -> None:
-    """Commit each store's loose files, under the store's path only, so the run starts from a commit."""
+def commit_before_maintenance() -> list[str]:
+    """Commit each store's loose files, under the store's path only, so the run starts from a commit. Each store it could not commit, and why."""
+    failed = []
     for store in live_stores():
         if not uncommitted(store):
             continue
@@ -4449,7 +4450,8 @@ def commit_before_maintenance() -> None:
         except LockTimeout:
             reason = "another iirc command holds the store"
         if reason:
-            print(f"{store.name}: not committed before maintenance: {reason}")
+            failed.append(f"store {store.name} was not committed before the run ({reason})")
+    return failed
 
 
 def starting_commits() -> list[dict]:
@@ -4478,7 +4480,7 @@ def last_network_check(rows: list[dict]) -> float | None:
 def cmd_run_maintenance(args: argparse.Namespace) -> None:
     """The one upkeep command: the safe automatic part, then what is left to decide. Changes no page's text."""
     require_stores()
-    commit_before_maintenance()
+    loose = commit_before_maintenance()
     # the sync runs before the setup check, so the check does not report commits the sync then pushes
     synced = io.StringIO()
     with contextlib.redirect_stdout(synced):
@@ -4537,7 +4539,7 @@ def cmd_run_maintenance(args: argparse.Namespace) -> None:
     checked = last_network_check(log)
     network_due = unchecked_urls > 0 and (checked is None or time.time() - checked >= NETWORK_CHECK_DAYS * 86400)
     ahead = sum(unpushed(s) for s in live_stores())
-    left = []
+    left = [f"{line}: its loose files are outside the undo; clear the cause, then run again" for line in loose]
     if failed:
         left.append(f"{plural(len(failed), 'setup check')} failed: offer iirc doctor --fix")
     if ahead:

@@ -4060,3 +4060,15 @@ def test_doctor_ends_with_run_maintenance_when_due(tmp_path, monkeypatch, capsys
     with pytest.raises(SystemExit):
         iirc.main(["doctor"])
     assert capsys.readouterr().out.rstrip().splitlines()[-1] == "run-maintenance is due: 1 near-duplicate pair"
+
+
+def test_run_maintenance_leaves_a_store_it_could_not_commit_first(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report: True)
+    _page(field, "loose.md")
+    monkeypatch.setattr(iirc, "commit_store", lambda store, message: "a merge or rebase is in progress")
+    iirc.main(["run-maintenance"])
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].startswith("Starting commits:")
+    assert "store project was not committed before the run (a merge or rebase is in progress)" in out[out.index("Left to decide:"):]
