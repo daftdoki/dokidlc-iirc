@@ -111,6 +111,11 @@ test('parses the recovery nudge and the brief', () => {
   expect(parseBrief('iirc: 9 pages, semantic via h:1. memoryfield-tool is not at the pin abc1234; every write refuses until `iirc doctor --fix` runs. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
+  // a host with dots and a path: the mode ends at '. ', not at the first dot
+  const dotted = parseBrief('iirc: 9 pages, semantic via llm.example.net/ollama. 2 store changes not committed.')!
+  expect(dotted.status).toMatchObject({ level: 'warn', pages: 9, mode: 'semantic+keyword', fix: '/iirc run-maintenance' })
+  expect(dotted.warnings).toEqual(['2 store changes not committed.'])
+  expect(parseBrief('iirc: 9 pages, semantic via llm.example.net/ollama.')!.status).toMatchObject({ level: 'ok', pages: 9, mode: 'semantic+keyword' })
   expect(parseBrief("iirc: 9 pages, string only (this machine cannot serve nomic-embed-text; `iirc doctor` names the ways out). This machine's or repository's iirc settings have the old shape; `iirc doctor --fix` converts them.")!.status.fix).toBe('iirc doctor')
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')

@@ -273,7 +273,7 @@ def host_url(raw: str) -> str:
 
 
 def where(entry: Entry) -> str:
-    """The entry's host as the brief names it: no scheme, and no dot after it, because hooks/register.tsx reads the mode up to the first dot."""
+    """The entry's host as the brief names it: no scheme."""
     return "this CPU" if entry.host == CPU else re.sub(r"^https?://", "", entry.host)
 
 
@@ -320,7 +320,6 @@ def search_status() -> str:
     if not semantic_enabled():
         return "string search"
     model, (e, _) = active_model(), host_entry()
-    # a model id may hold a dot, so it goes inside the parentheses, which hooks/register.tsx reads whole
     if e is None:
         return f"string only (this machine cannot serve {model.id}; `iirc doctor` names the ways out)"
     if host_up():

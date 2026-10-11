@@ -58,7 +58,8 @@ const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears 
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
 const STOP_RE = /iirc: before you stop, note that (.*?) failed and then worked/
 const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plugin's layout/
-const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S*[^\s.]|string only \([^)]*\)|string search)[^.]*\.\s*(.*)/s
+// the mode ends at the closing parenthesis or at '. ', so a host may hold dots and a path
+const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S+?|string only \([^)]*\)|string search)\.(?=\s|$)\s*(.*)/s
 // the command that clears each kind of warning, in the order the line under the prompt names one:
 // setup errors first, then the one upkeep command, which covers suspect pages, loose and unpushed commits, timeouts, and near-duplicates
 const MAINTAIN = '/iirc run-maintenance'
