@@ -4815,6 +4815,22 @@ def test_openai_model_with_no_url_on_this_machine(tmp_path, monkeypatch, capsys)
     assert says in capsys.readouterr().out
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
 
+
+def test_settings_local_overrides_settings_and_a_bad_file_stops(tmp_path, monkeypatch, capsys):
+    """As in Claude Code, settings.local.json's value for a key wins over settings.json's; a settings file that does not parse
+    stops set-search-backend with the file named, and nothing written."""
+    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+    (tmp_path / ".claude" / "settings.local.json").write_text(json.dumps({"enabledPlugins": {"iirc@dokidlc": False}}))
+    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
+    assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "qwen3-embedding:0.6b"
+    (tmp_path / ".claude" / "settings.local.json").write_text("{not json")
+    before = iirc.config_file().read_text()
+    capsys.readouterr()
+    with pytest.raises(SystemExit):
+        iirc.main(["set-search-backend", "--local", "--model", "embeddinggemma"])
+    assert ".claude/settings.local.json" in capsys.readouterr().err
+    assert iirc.config_file().read_text() == before and not toml.exists()
+
 def test_sweep_uses_only_the_active_models_rows(tmp_path, monkeypatch, capsys):
     """A row from another model, or from before rows named their model, is on another distance scale: the sweep leaves it out."""
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.5, "noise"), ("p4.md", 0.5, "relevant")])

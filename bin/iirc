@@ -2727,11 +2727,25 @@ def check_format() -> None:
 
 
 SETTINGS_FILE = ".claude/settings.json"   # project settings, relative to ROOT, as STORE_CONFIG is
+LOCAL_SETTINGS_FILE = ".claude/settings.local.json"   # this checkout's own; Claude Code lets its keys win over SETTINGS_FILE's
 # what INSTALL.md step 7 writes: a clone resolves the marketplace and enables the plugin from this file alone
 PROJECT_SETTINGS = {
     "extraKnownMarketplaces": {"dokidlc": {"source": {"source": "github", "repo": "daftdoki/dokidlc-plugins"}}},
     "enabledPlugins": {"iirc@dokidlc": True},
 }
+
+
+def enabled_plugins(path: str) -> dict:
+    """enabledPlugins in the settings file at PATH, relative to ROOT; empty with no file. A file that does not parse is a ConfigError."""
+    file = ROOT / path
+    if not file.is_file():
+        return {}
+    try:
+        data = json.loads(file.read_text())
+    except (OSError, ValueError) as e:
+        raise ConfigError(f"{path} does not parse: {e}")
+    plugins = data.get("enabledPlugins") if isinstance(data, dict) else None
+    return plugins if isinstance(plugins, dict) else {}
 
 
 def cmd_init(args: argparse.Namespace) -> None:
@@ -2839,15 +2853,18 @@ def cmd_migrate(args: argparse.Namespace) -> None:
             claude_md.write_text(OLD_SECTION_RE.sub(lambda m: CLAUDE_MD_PARAGRAPH.strip("\n"), text, count=1))
             done.append("CLAUDE.md: the Memory section is now the IIRC section")
             staged.append("CLAUDE.md")
-    settings = ROOT / SETTINGS_FILE
-    if settings.is_file():
+    try:
+        plugins = enabled_plugins(SETTINGS_FILE)
+    except ConfigError as e:
+        plugins = {}
+        print(f"iirc: {e}; rename memory@dokidlc to iirc@dokidlc there by hand", file=sys.stderr)
+    if "memory@dokidlc" in plugins:
+        settings = ROOT / SETTINGS_FILE
         data = json.loads(settings.read_text())
-        plugins = data.get("enabledPlugins")
-        if isinstance(plugins, dict) and "memory@dokidlc" in plugins:
-            data["enabledPlugins"] = {("iirc@dokidlc" if k == "memory@dokidlc" else k): v for k, v in plugins.items()}
-            settings.write_text(json.dumps(data, indent=2) + "\n")
-            done.append(f"{SETTINGS_FILE}: memory@dokidlc is now iirc@dokidlc")
-            staged.append(SETTINGS_FILE)
+        data["enabledPlugins"] = {("iirc@dokidlc" if k == "memory@dokidlc" else k): v for k, v in plugins.items()}
+        settings.write_text(json.dumps(data, indent=2) + "\n")
+        done.append(f"{SETTINGS_FILE}: memory@dokidlc is now iirc@dokidlc")
+        staged.append(SETTINGS_FILE)
     set_root(ROOT)
     if CONFIG_ERROR:
         # no store loads, so no page was rewritten; a commit now would record a half-done migration,
@@ -3000,15 +3017,10 @@ def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]
 
 
 def iirc_installed() -> bool:
-    """True when this repository's .claude/settings.json or .claude/settings.local.json enables an iirc@ plugin."""
-    for name in ("settings.json", "settings.local.json"):
-        try:
-            plugins = json.loads((ROOT / ".claude" / name).read_text()).get("enabledPlugins")
-        except (OSError, ValueError, AttributeError):
-            continue
-        if isinstance(plugins, dict) and any(k.startswith("iirc@") and v is True for k, v in plugins.items()):
-            return True
-    return False
+    """True when this repository's settings enable an iirc@ plugin. As in Claude Code, a key in .claude/settings.local.json
+    wins over the same key in .claude/settings.json. A settings file that does not parse is a ConfigError."""
+    plugins = {**enabled_plugins(SETTINGS_FILE), **enabled_plugins(LOCAL_SETTINGS_FILE)}
+    return any(k.startswith("iirc@") and v is True for k, v in plugins.items())
 
 
 def set_top_level_text(text: str, key: str, value: str) -> str:
@@ -3039,7 +3051,10 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
     if model and iirc_embed.MODELS.get(model, iirc_embed.MODELS["all-minilm-l6-v2"]).backend != backend:
         die(f"{model} is not a model for this backend; the {backend} models are "
             + ", ".join(m.id for m in iirc_embed.MODELS.values() if m.backend == backend))
-    repository = backend != "substring" and (args.repository or (not args.machine and iirc_installed()))
+    try:
+        repository = backend != "substring" and (args.repository or (not args.machine and iirc_installed()))
+    except ConfigError as e:
+        die(f"set-search-backend: {e}; fix it, or choose with --repository or --machine. Nothing was written.")
     toml = ROOT / STORE_CONFIG
     if repository:
         new = set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model)
