@@ -73,20 +73,24 @@ folded group of tool calls, the rows appear under the group.
 In the band above the prompt, one line sums up iirc for the session:
 
 ```
-● ▍iirc status  2/5 suggested read │ 4 searched │ 3 read │ 1 written
+● ▍iirc status  2/5 suggested read │ 4 searched │ 3 read │ 1 written      qwen3-embedding-0.6b · 76 pages
 ```
 
 | Part | Means |
 |---|---|
-| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off |
-| `76 pages` | the pages in every store; shown only until the session has a suggestion, a search, a read, or a write |
+| `●` | turns ◐ ◓ ◑ ◒ while the suggestion hook searches; then green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off |
 | `2/5 suggested read` | of the pages the suggestion hook suggested this session, how many were then read; left out until a page is suggested |
 | `4 searched` | the session's own `iirc search` and `iirc read-matching-pages` runs; a hook's suggestion is not one |
 | `3 read` | different pages this session read with `iirc read` or `iirc read-matching-pages` |
 | `1 written` | different pages this session wrote |
-| `string search` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
+| `qwen3-embedding-0.6b` | at the right end, the embedding model; `string search` in yellow instead when search runs on terms alone (no embedding host, or the string fallback chosen at setup), and the circle turns yellow |
+| `76 pages` | at the right end, the pages in every store |
 
-A counter at zero is left out. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
+A counter at zero is left out, and a counter that rose shows its number
+bright with a dim `+N` for four seconds. When the terminal is too narrow
+for both, the right end goes and the line itself shows the page count
+until the session does something, and `string search` when it applies.
+A click on the line opens the iirc pane, as `/iirc reader` does. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
 `migrate`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`,
 `prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line.
 
