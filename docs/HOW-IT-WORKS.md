@@ -457,12 +457,16 @@ line per finding as `PAGE: CHECK: what; fix`. It writes nothing.
 | `title`, `summary` | the write warnings above |
 | `secret` | a line that matches a secret pattern |
 | `own-title` | a search for the page's own title ranks another page first, or misses it; needs the vector store and an embedding host that answers, else the last line says why it was skipped |
-| `hub` | 6 or more tune judgments, with at least 3 noise judgments for each relevant one |
+| `hub` | 6 or more tune judgments that still apply, with at least 3 noise judgments for each relevant one |
 | `superseded` | a page that says "superseded by [[" or "replaced by [[", or has a `superseded` key, and keeps more than one paragraph |
 
 `hub` rests on tune judgments alone. Page-to-page distances are not on
 the scale of the thresholds: for each page, 82 to 94 of the 95 pages fell
-within 0.38 of it. `superseded` matches only the link form, because "replaced by"
+within 0.38 of it.
+A hub count leaves out a judgment on a suggestion that the gate refuses under the current thresholds.
+A hub count leaves out a judgment recorded before the page's last `iirc write` commit, so a rewrite resets the count.
+A judgment with no candidate row in the eval files, and a page with no
+`iirc write` commit, keep counting. `superseded` matches only the link form, because "replaced by"
 occurs in ordinary prose. The tune reference has the agent run the audit before it judges, with a
 step for each flagged page: thresholds tuned while a page is badly
 written bend to make up for it.
