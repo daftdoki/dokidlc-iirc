@@ -35,6 +35,10 @@ let sessionRowStops: (string | null)[] = []
 let pageHeights: number[] = []
 let scrollRest = 0
 const sessionPages = atom({ plugin: 'iirc', key: 'sessionPages' } as const, { read: [], written: [], suggested: [], used: [], gone: [] } as SessionPages)
+// `/iirc reader demo`'s sample session: the pane draws it in place of the real one until the pane closes or a
+// plain `/iirc reader` opens. It never goes into sessionPages, counts, or health, which the summary line and the cards draw
+type SessionView = { pages: SessionPages; counts: SessionCounts; health: IircHealth | null }
+const demoSession = atom({ plugin: 'iirc', key: 'demoSession' } as const, null as SessionView | null)
 // one pane with two tabs of its own: this session's pages, and a reader the page names open.
 // Not two panes: an open from a click counts as unasked, and an unasked pane waits undrawn below
 // 144 columns; tabs inside one pane switch with no open at all
@@ -429,7 +433,8 @@ function pageStops(page: ShownPage): string[] {
 async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   const r = await read($, reader)
   const isPage = r.tab === 'page' && r.page !== null
-  const stops = isPage && r.page ? pageStops(r.page) : sessionStops(await read($, sessionPages), await read($, counts), await read($, health))
+  const v = await sessionView($)
+  const stops = isPage && r.page ? pageStops(r.page) : sessionStops(v.pages, v.counts, v.health)
   if (stops.length === 0) return
   const c = await read($, cursor)
   const at = isPage ? c.page : c.session
@@ -463,6 +468,7 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 async function openSession($: EngineInterface, isDemo = false) {
   if (isDemo) await loadDemoSession($)
   else {
+    await update($, demoSession, () => null)
     refreshCounts($)
     await refreshHealth($)
   }
@@ -472,7 +478,8 @@ async function openSession($: EngineInterface, isDemo = false) {
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
   await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
-  const first = sessionStops(await read($, sessionPages), await read($, counts), await read($, health))[0]
+  const v = await sessionView($)
+  const first = sessionStops(v.pages, v.counts, v.health)[0]
   if (first && sessionRowStops.indexOf(first) < paneRows) await $.ui.focus({ requestId: PANE, key: first }).catch(() => undefined)
 }
 
@@ -486,12 +493,19 @@ async function loadDemoSession($: EngineInterface) {
   const used = names.slice(0, 6)
   const unread = names.slice(6, 10)
   const written = names.slice(10, 12)
-  await update($, sessionPages, () => ({ read: used, written, suggested: [...used, ...unread], used, gone: [] }))
-  await update($, counts, () => ({
-    reads: used.length + 3, writes: written.length, suggested: used.length + unread.length, used: used.length,
-    missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: { all: 68, read: 74, unread: 55 }, timeouts: 0,
+  await update($, demoSession, () => ({
+    pages: { read: used, written, suggested: [...used, ...unread], used, gone: [] },
+    counts: {
+      reads: used.length + 3, writes: written.length, suggested: used.length + unread.length, used: used.length,
+      missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: { all: 68, read: 74, unread: 55 }, timeouts: 0,
+    },
+    health: DEMO_HEALTH,
   }))
-  await update($, health, () => DEMO_HEALTH)
+}
+
+/** What the pane's session tab draws: the demo's sample session while it is open, else this session's. */
+async function sessionView($: EngineInterface): Promise<SessionView> {
+  return (await read($, demoSession)) ?? { pages: await read($, sessionPages), counts: await read($, counts), health: await read($, health) }
 }
 
 /** The card's TRUST, STORES, and SUGGESTED, NOT READ as plain lines, for where the card cannot draw. */
@@ -779,7 +793,8 @@ export const register: Register = on => {
       items = [drawReaderNote($, e, r)]
       top = 0
     } else {
-      const session = sessionItems($, e, await read($, sessionPages), await read($, counts), await read($, health), c.session)
+      const v = await sessionView($)
+      const session = sessionItems($, e, v.pages, v.counts, v.health, c.session)
       sessionRowStops = session.map(x => x.stop)
       items = session.map(x => x.el)
       top = Math.min(c.sessionTop, Math.max(0, items.length - paneRows))
@@ -821,7 +836,10 @@ export const register: Register = on => {
   })
   // a closed pane starts at the Session tab next time, with no stale page or way back
   on('ui.close', async ($, e, next) => {
-    if (e.id === PANE) await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
+    if (e.id === PANE) {
+      await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
+      await update($, demoSession, () => null)
+    }
     return next(e)
   })
 

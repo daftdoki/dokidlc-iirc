@@ -859,3 +859,49 @@ test('the status chip turns yellow when the CLI says maintenance is due, and onl
   due = []
   expect(await (await chip('due-0')).find({ text: ' ✔ all good ' })).toBeDefined()
 })
+
+test('/iirc reader demo draws its sample numbers in the pane only; the summary line and a drawn card keep the real ones', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const names = Array.from({ length: 12 }, (_, i) => `page-${i}.md`)
+  on('session.id', () => ({ value: 's1' }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    if (e.argv[0] === 'ls') return ran(['index.md', ...names].join('\n'))
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [{ name: 'project', kind: 'project', pages: 68, uncommitted: 0, unpushed: 0 }] }))
+    if (e.argv.includes('summarize-session-usage')) {
+      return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'noisy.md'], used: ['a.md'], missed: [['noisy.md', 4]], match: { all: 62, read: 75, unread: 49 } }))
+    }
+    return ran(BRIEF)
+  })
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'td1' })
+  await clock.settle()
+  await hookRow($, 'SessionStart', BRIEF, 'hd2')
+  const REAL = 'iirc: [68] pages · [1/2] used · [1] reads · [0] writes · run /iirc run-maintenance'
+  expect(await waitFor($, REAL)).toBe(true)
+  const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+  const card = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'card-before-demo',
+    props: { command: 'iirc', args: 'status', text, isErrored: false },
+  })
+  expect(await card.find({ text: '62%' })).toBeDefined()
+  await $.command.run({ command: 'iirc', args: 'reader demo' })
+  await clock.settle()
+  const pane = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } })
+  expect(await pane.find({ key: 'open-s-page-0.md' })).toBeDefined()        // the demo's pages, in the pane
+  expect(await pane.find({ text: '×4' })).toBeDefined()
+  // the summary line and the card drawn before the demo keep the real numbers
+  expect(await (await hintRow($)).find({ text: '[6/10] used' })).toBeUndefined()
+  expect(await waitFor($, REAL)).toBe(true)
+  expect(await card.find({ text: '62%' })).toBeDefined()
+  expect(await card.find({ text: '68%' })).toBeUndefined()
+  // a plain reader after the demo shows the real session again
+  await $.command.run({ command: 'iirc', args: 'reader' })
+  await clock.settle()
+  expect(await pane.find({ key: 'open-s-page-0.md' })).toBeUndefined()
+  expect(await pane.find({ key: 'open-s-noisy.md' })).toBeDefined()
+})

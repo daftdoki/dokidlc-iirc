@@ -65,6 +65,8 @@ declare module 'claude-code' {
       sessionPages: SessionPages
       /** Suspect pages and store state from `iirc doctor --health`, read as a plain /iirc runs. */
       health: IircHealth | null
+      /** `/iirc reader demo`'s sample session, which only the reader's Session tab draws, until the reader closes. */
+      demoSession: { pages: SessionPages; counts: SessionCounts; health: IircHealth | null } | null
       /** `iirc max-suggested-pages` as a plain /iirc last read it, for the drawn help. */
       maxSuggested: number | null
       /** Whether this compaction window asked `iirc remind-to-write --at compaction` already. */
