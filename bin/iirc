@@ -202,6 +202,16 @@ def host_candidates() -> list[tuple[str, str]]:
     return [c for c in out if not (c[0] in seen or seen.add(c[0]))]
 
 
+def no_url() -> str | None:
+    """What to say when the model is OpenAI-compatible and the setup file has no URL for it; None otherwise.
+    The command it names writes the URL to the machine and, as --openai's default is the one OpenAI-compatible model,
+    leaves a repository's model as it is."""
+    model = active_model()
+    if model.backend != "openai" or embedding_config().get("url"):
+        return None
+    return f"this machine has no URL for {model.id}; `iirc set-search-backend --openai URL` sets one"
+
+
 _RESOLVED: tuple[str, str, bool] | None = None
 
 
@@ -222,7 +232,7 @@ def resolve_host() -> tuple[str, str, bool]:
         cands = host_candidates()
         _RESOLVED = (cands[0][0], cands[0][1], False)
         for url, source in cands:
-            if host_answers(url, no_route=True) if backend == "openai" else host_answers(url):
+            if url and (host_answers(url, no_route=True) if backend == "openai" else host_answers(url)):
                 _RESOLVED = (url, source, True)
                 break
     return _RESOLVED
@@ -270,6 +280,8 @@ def search_mode() -> str:
         return f"semantic via {where}"
     if model.backend == "onnx":
         return f"string only ({model.id} model files missing; `iirc set-search-backend --cpu` to fix)"
+    if no_url():
+        return f"string only ({no_url()})"
     return f"string only ({where} does not answer; `iirc set-search-backend` to fix)"
 HOST_TIMEOUT = 2.0
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -1039,6 +1051,9 @@ def require_host() -> bool:
         return True
     if active_model().backend == "onnx":
         print(f"iirc: the {active_model().id} model files are not in {minilm_dir()}; results are string matches only. Run `iirc set-search-backend --cpu` to fetch them.", file=sys.stderr)
+        return False
+    if no_url():
+        print(f"iirc: {no_url()}; results are string matches only.", file=sys.stderr)
         return False
     tried = ", ".join(f"{u} ({src})" for u, src in host_candidates())
     print(f"iirc: no embedding host answers (tried {tried}); results are string matches only. Run `iirc set-search-backend` to choose a host, or `iirc set-search-backend --substring` if ollama cannot run here.", file=sys.stderr)
@@ -3728,6 +3743,8 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
         report(f"embedding model {model.id}, set in {source}", True)
         if model.backend == "onnx":
             up = report(f"{model.id} model files in {minilm_dir()} match their pinned sha256", minilm_files_ok(), "iirc set-search-backend --cpu")
+        elif no_url():
+            report(f"an OpenAI-compatible URL for {model.id} on this machine", False, no_url())
         elif model.backend == "openai":
             base, source, up = resolve_host()
             status = host_status(base)

@@ -4794,6 +4794,27 @@ def test_repository_target_leaves_the_machines_string_search(tmp_path, monkeypat
         assert "This machine uses string search" in out and "`iirc set-search-backend --machine`" in out, out
     toml.unlink(); iirc.set_root(tmp_path)
 
+
+def test_openai_model_with_no_url_on_this_machine(tmp_path, monkeypatch, capsys):
+    """A repository names the OpenAI-compatible model and this machine has no URL for it: every message says so,
+    and names the command that writes the URL without changing the repository's model."""
+    _project(tmp_path, monkeypatch)
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
+    iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    (tmp_path / ".claude" / "iirc.toml").write_text('embedding_model = "qwen3-embedding"\n')
+    iirc.set_root(tmp_path); iirc._RESOLVED = None
+    says = "this machine has no URL for qwen3-embedding; `iirc set-search-backend --openai URL`"
+    assert says in iirc.search_mode()
+    assert not iirc.require_host() and says in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        iirc.main(["doctor"])
+    assert says in capsys.readouterr().out
+    (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path); iirc._RESOLVED = None
+
 def test_sweep_uses_only_the_active_models_rows(tmp_path, monkeypatch, capsys):
     """A row from another model, or from before rows named their model, is on another distance scale: the sweep leaves it out."""
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.5, "noise"), ("p4.md", 0.5, "relevant")])
