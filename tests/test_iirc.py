@@ -3018,7 +3018,7 @@ def _listed(model, url, protocol, name):
 
 @contextlib.contextmanager
 def _fake_ollama(monkeypatch, model="nomic-embed-text", name=None, tags=None, listed=True):
-    """An ollama that answers /, /api/version, /api/tags, and /api/embed: each text's vector counts the _WORDS in it, padded with zeros to
+    """An ollama that answers /, /api/version, /api/tags, /api/show, and /api/embed: each text's vector counts the _WORDS in it, padded with zeros to
     the model's width. `name` is the build it serves, by default the model's first ollama name, and `tags` what /api/tags lists, by default
     that build. With `listed`, the machine's list names it. Yields the inputs it embedded, with the host's URL as .url."""
     import http.server
@@ -3034,6 +3034,8 @@ def _fake_ollama(monkeypatch, model="nomic-embed-text", name=None, tags=None, li
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/api/show":
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"details": {"quantization_level": "F16"}}'); return
             assert self.path == "/api/embed" and body["model"] == name and body["truncate"] is True
             seen.extend(body["input"])
             out = json.dumps({"embeddings": _vector_rows(body["input"], width)}).encode()
@@ -4937,3 +4939,73 @@ def test_machine_that_cannot_serve_the_model_falls_back_and_says_so(tmp_path, mo
     assert f"FAIL this machine cannot serve {QWEN}" in out
     for way in (f"iirc add-embedding-model {QWEN} URL", "ollama pull", "iirc set-embedding-model", "all-minilm-l6-v2"):
         assert way in out, way
+
+
+@contextlib.contextmanager
+def _probe_ollama(monkeypatch, model, answer, quantization="F16"):
+    """An ollama that has the model's first build, reports `quantization` for it, and embeds every text as answer[0]."""
+    import http.server
+    name = iirc.iirc_embed.MODELS[model].names["ollama"][0]
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def _json(self, body):
+            out = json.dumps(body).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+
+        def do_GET(self):
+            self._json({"version": "0.12.0"} if self.path == "/api/version" else {"models": [{"name": name}]})
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.path == "/api/show":
+                self._json({"details": {"quantization_level": quantization}})
+            else:
+                self._json({"embeddings": [list(answer[0]) for _ in body["input"]]})
+
+        def log_message(self, *a): pass
+    srv = _serve(H)
+    try:
+        yield f"http://127.0.0.1:{srv.server_port}"
+    finally:
+        srv.shutdown()
+
+
+def test_fingerprint_warns_and_refuses(tmp_path, monkeypatch, capsys):
+    """add-embedding-model and doctor compare the host's probe vector with the plugin's reference: under 0.995 is a warning,
+    another width an error; the ollama build's quantization is shown."""
+    import numpy as np
+    _project(tmp_path, monkeypatch)
+    real_which = iirc.shutil.which
+    monkeypatch.setattr(iirc.shutil, "which", lambda name: f"/bin/{name}" if name in ("uv", "memoryfield-tool") else real_which(name))
+    monkeypatch.setattr(iirc, "installed_rev", lambda: iirc.read_pin()["tool_rev"])
+    refs = json.loads((ROOT / "bin" / "fingerprints.json").read_text())
+    assert refs["probe"] and set(refs["models"]) <= set(iirc.iirc_embed.MODELS)
+    assert {"nomic-embed-text", QWEN, "all-minilm-l6-v2"} <= set(refs["models"])
+    for model, ref in refs["models"].items():
+        assert len(ref["vector"]) == iirc.iirc_embed.MODELS[model].dims and ref["build"]
+    ref = np.asarray(refs["models"]["nomic-embed-text"]["vector"])
+    other = np.zeros_like(ref); other[np.argmin(np.abs(ref))] = 1.0
+    other -= (other @ ref) / (ref @ ref) * ref                                  # a direction at a right angle to the reference
+    near = 0.99 * ref / np.linalg.norm(ref) + (1 - 0.99 ** 2) ** 0.5 * other / np.linalg.norm(other)
+    answer = [ref]
+    with _probe_ollama(monkeypatch, "nomic-embed-text", answer) as url:
+        iirc.main(["add-embedding-model", "nomic-embed-text", url])
+        out = capsys.readouterr().out
+        assert "fingerprint: cosine 1.00000" in out and "F16" in out and "warning" not in out
+        answer[0] = near
+        iirc.main(["add-embedding-model", "nomic-embed-text", url])
+        out = capsys.readouterr().out
+        assert "warning: this host's nomic-embed-text gives different vectors from the reference build (cosine 0.99000" in out
+        assert len(iirc.machine_models()) == 1                                 # a warning still adds the host
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        out = capsys.readouterr().out
+        assert "note this host's nomic-embed-text gives different vectors from the reference build (cosine 0.99000" in out
+        answer[0] = np.ones(1024)
+        with pytest.raises(SystemExit):
+            iirc.main(["doctor"])
+        assert re.search(r"FAIL fingerprint of nomic-embed-text on .*1024 wide", capsys.readouterr().out)
+        iirc.main(["remove-embedding-model", "nomic-embed-text"]); capsys.readouterr()
+        with pytest.raises(SystemExit):
+            iirc.main(["add-embedding-model", "nomic-embed-text", url])
+        assert "1024 wide" in capsys.readouterr().err and iirc.machine_models() == []

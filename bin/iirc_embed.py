@@ -169,9 +169,9 @@ def run_cpu(backend: Backend, texts: list[str], kind: str):
         return None
 
 
-def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float = EMBED_TIMEOUT):
+def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float = EMBED_TIMEOUT, any_width: bool = False):
     """One float32 block per text (one row, or one per window), or None when the backend fails or answers with something else,
-    such as another width than the model's."""
+    such as another width than the model's. With `any_width`, another width is returned, for the fingerprint to name it."""
     import numpy as np
     if not texts:
         return []
@@ -181,7 +181,7 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
             if got is None:
                 return None
             vecs, owner = np.asarray(got[0], dtype=np.float32), np.asarray(got[1])
-            if vecs.ndim != 2 or len(owner) != len(vecs) or vecs.shape[1] != backend.model.dims:
+            if vecs.ndim != 2 or len(owner) != len(vecs) or (vecs.shape[1] != backend.model.dims and not any_width):
                 return None
             parts = [vecs[owner == i] for i in range(len(texts))]
             return parts if all(len(p) for p in parts) else None
@@ -195,7 +195,7 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
     except (urllib.error.URLError, OSError, ValueError, TypeError, AttributeError, KeyError):
         return None
     # another width is another model served under its name, such as Qwen3-Embedding 8B (4096); load() would refuse the store it made
-    if vecs.ndim != 2 or len(vecs) != len(texts) or vecs.shape[1] != backend.model.dims:
+    if vecs.ndim != 2 or len(vecs) != len(texts) or (vecs.shape[1] != backend.model.dims and not any_width):
         return None
     return [vecs[i:i + 1] for i in range(len(texts))]
 
