@@ -4800,6 +4800,23 @@ def test_add_embedding_model_refuses_an_openai_host_of_another_width(tmp_path, m
     assert f"768 wide, and {QWEN} is 1024" in capsys.readouterr().err and not iirc.config_file().exists()
 
 
+def test_doctor_names_each_dropped_entry(tmp_path, monkeypatch, capsys):
+    """machine_models() leaves out an entry it cannot use, and doctor names each one and why."""
+    _project(tmp_path, monkeypatch)
+    _doctor_ready(monkeypatch)
+    _no_host(monkeypatch)
+    good = _entry("nomic-embed-text", "http://127.0.0.1:11434")
+    _machine_config({"search_mode": "semantic", "embedding_models": [
+        good, {"model": "bogus", "host": "http://a:1", "protocol": "ollama", "name": "bogus"},
+        {"model": "nomic-embed-text", "host": "http://b:1", "protocol": "openai", "name": "nomic-embed-text"},
+        {"model": QWEN, "host": "http://c:1", "protocol": "ollama", "name": "qwen3-embedding:4b"}]})
+    assert [e.host for e in iirc.machine_models()] == [good["host"]]
+    out = _doctor(["doctor"], capsys)
+    assert re.search(r"FAIL .*bogus.* is not a known model", out)
+    assert re.search(r"FAIL .*http://b:1.*nomic-embed-text has no name on openai", out)
+    assert re.search(r"FAIL .*http://c:1.*qwen3-embedding:4b is not one of .*ollama names", out)
+
+
 def test_add_embedding_model_refuses_a_host_without_the_model(tmp_path, monkeypatch, capsys):
     """An ollama host without the model is refused with the pull command, OLLAMA_HOST named for another host; nothing is pulled or written."""
     _project(tmp_path, monkeypatch)

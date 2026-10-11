@@ -196,16 +196,24 @@ def raw_models() -> list[dict]:
     return [e for e in read_config().get("embedding_models") or [] if isinstance(e, dict)]
 
 
+def entry_problem(e: dict) -> str | None:
+    """Why machine_models() leaves out this embedding_models entry, or None when it keeps it."""
+    model = iirc_embed.MODELS.get(str(e.get("model")))
+    if model is None:
+        return f"{e.get('model')} is not a known model; the models are {', '.join(iirc_embed.MODELS)}"
+    if not isinstance(e.get("host"), str) or not e["host"]:
+        return "it names no host"
+    if e.get("protocol") not in model.names:
+        return f"{model.id} has no name on {e.get('protocol')}; it runs on {', '.join(model.names)}"
+    if e.get("name") not in model.names[e["protocol"]]:
+        return f"{e.get('name')} is not one of {model.id}'s {e['protocol']} names: {', '.join(model.names[e['protocol']])}"
+    return None
+
+
 def machine_models() -> list[Entry]:
-    """The setup file's embedding_models: each a known model on a protocol it has a name for. An entry that is not is left out."""
-    out = []
-    for e in raw_models():
-        model = iirc_embed.MODELS.get(str(e.get("model")))
-        if model is None or e.get("protocol") not in model.names or e.get("name") not in model.names[e["protocol"]] \
-                or not isinstance(e.get("host"), str) or not e["host"]:
-            continue
-        out.append(Entry(model.id, e["host"], e["protocol"], e["name"]))
-    return out
+    """The setup file's embedding_models: each a known model on a protocol it has a name for. An entry that is not is left out, and
+    doctor names it."""
+    return [Entry(e["model"], e["host"], e["protocol"], e["name"]) for e in raw_models() if entry_problem(e) is None]
 
 
 def preferred_hosts() -> dict[str, str]:
@@ -4042,6 +4050,11 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
 
     model, (e, ambiguous) = active_model(), host_entry()
     report(f"embedding model {model.id}, set in {MODEL_SOURCE}", True)
+    for raw in raw_models():
+        why = entry_problem(raw)
+        if why:
+            report(f"embedding_models entry {raw.get('model')} on {raw.get('host')} is left out: {why}", False,
+                   f"correct it in {config_file()}, or remove it and run iirc add-embedding-model MODEL HOST")
     up = False   # embeddings work, so --fix can reindex
     if not config_file().is_file():
         # the creator has not chosen a model or a host; --fix must not install or pull for one they did not choose
