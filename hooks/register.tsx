@@ -55,19 +55,18 @@ const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked
 const STOP_RE = /iirc: before you stop, note that (.*?) failed and then worked/
 const MIGRATE_RE = /^iirc: this repository or machine still uses the memory plugin's layout/
 const BRIEF_RE = /iirc: (\d+) pages?, (semantic via \S*[^\s.]|string only \([^)]*\)|string search)[^.]*\.\s*(.*)/s
-// the command that clears each kind of warning, in the order the line under the prompt names one
+// the command that clears each kind of warning, in the order the line under the prompt names one:
+// setup errors first, then the one upkeep command, which covers suspect pages, unpushed commits, timeouts, and near-duplicates
+const MAINTAIN = '/iirc run-maintenance'
 const WARNING_FIX: [RegExp, string][] = [
   [/memoryfield-tool is not at the pin/, 'iirc doctor --fix'],
-  [/suspect:/, 'iirc find-suspect-pages'],
-  [/not pushed/, 'iirc sync'],
   [/Persistence:/, 'iirc doctor --fix'],
-  [/near-duplicate/, 'iirc doctor'],
-  [/timed out/, 'iirc doctor'],
+  [/Maintenance is due/, MAINTAIN],
 ]
 // sentences of the brief that are instructions to the model, not news for the person
 const BRIEF_QUIET = /^(Topics:|Stores:|A hook names|Context was just compacted)/
 // commands that change the page count or the setup the brief reports, and commands that read pages (read also matches read-matching-pages)
-const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-search-backend|init|doctor)\b/
+const CHANGES_BRIEF_RE = /\biirc\s+(write|delete|sync|migrate|set-search-backend|init|doctor|run-maintenance)\b/
 const COUNTS_RE = /\biirc\s+(read|write)\b/
 // fixed red, yellow, green rather than the theme's, whose success color may be blue
 const LEVEL_COLOR = { ok: '#57ab5a', warn: '#d4a72c', error: '#e5534b' } as const
@@ -93,9 +92,10 @@ const DEMO_HEALTH: IircHealth = {
 }
 // pages the card names under SUGGESTED, NOT READ, and under TRUST
 const LIST_MAX = 3
-// the commands /iirc runs directly, as the card and the text help list them
-// tune-suggestions and audit-page-findability go to the skill, which runs them and asks for each fix; the rest run directly
+// the commands /iirc lists, as the card and the text help list them
+// run-maintenance, tune-suggestions, and audit-page-findability go to the skill, which runs them and asks for each fix; the rest run directly
 const COMMANDS: [string, string, 'MAINTENANCE' | 'LOOK UP'][] = [
+  ['run-maintenance', 'the only thing you need to run, weekly', 'MAINTENANCE'],
   ['doctor', 'check the setup and the pages', 'MAINTENANCE'],
   ['doctor --fix', 'install or repair, rebuild the index', 'MAINTENANCE'],
   ['find-suspect-pages', 'pages that may be wrong', 'MAINTENANCE'],
@@ -223,7 +223,7 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
 /** The hint row's text after the circle. */
 /** The brief's status, turned yellow when a recall this session ran past the hook's time limit. */
 export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
-  return s.level === 'ok' && c.timeouts > 0 ? { ...s, level: 'warn', fix: 'iirc doctor' } : s
+  return s.level === 'ok' && c.timeouts > 0 ? { ...s, level: 'warn', fix: MAINTAIN } : s
 }
 
 export function statusText(s: IircStatus, c: SessionCounts): string {
@@ -495,8 +495,8 @@ async function loadDemoSession($: EngineInterface) {
 export function healthLines(checkup: IircHealth | null, c: SessionCounts): string[] {
   const lines: string[] = []
   if (checkup) {
-    lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with iirc find-suspect-pages`)
-    lines.push('stores: ' + checkup.stores.map(storeText).join('; ') + (checkup.stores.some(x => x.unpushed > 0) ? '; fix with iirc sync' : ''))
+    lines.push(checkup.suspect.length === 0 ? 'trust: no suspect pages' : `trust: ${checkup.suspect.length} suspect: ${checkup.suspect.slice(0, LIST_MAX).join(', ')}; fix with ${MAINTAIN}`)
+    lines.push('stores: ' + checkup.stores.map(storeText).join('; ') + (checkup.stores.some(x => x.unpushed > 0) ? `; fix with ${MAINTAIN}` : ''))
   }
   if (c.match.all !== null) lines.push(`average match: ${matchText(c.match)}`)
   if (c.missed.length > 0) lines.push('suggested, not read: ' + c.missed.slice(0, LIST_MAX).map(([p, n]) => `${p} ×${n}`).join(', '))
@@ -910,7 +910,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   const isUnpushed = !!checkup && checkup.stores.some(x => x.unpushed > 0)
   // the brief is as old as the session start; a suspect page or an unpushed store found since turns the chip yellow
   const isHealthWarn = !!checkup && (checkup.suspect.length > 0 || isUnpushed)
-  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: checkup!.suspect.length > 0 ? 'iirc find-suspect-pages' : 'iirc sync' }
+  if (s && s.level === 'ok' && isHealthWarn) s = { ...s, level: 'warn', fix: MAINTAIN }
   const level = s ? s.level : 'warn'
   const tone = LEVEL_COLOR[level]
   // flat arrays of elements: a fragment inside a row lays out as a column on the terminal
@@ -985,8 +985,8 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   if (checkup) {
     const n = checkup.suspect.length
     const text = n === 0 ? 'no suspect pages' : `${n} suspect ${n === 1 ? 'page' : 'pages'}: a cited file changed`
-    trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? 'iirc find-suspect-pages' : undefined))
-    factWidths.push(widthOf(text, n > 0 ? 'iirc find-suspect-pages' : undefined))
+    trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? MAINTAIN : undefined))
+    factWidths.push(widthOf(text, n > 0 ? MAINTAIN : undefined))
     for (const name of checkup.suspect.slice(0, LIST_MAX)) {
       trustRows.push(
         <Box key={`s${name}`} flexDirection="row" paddingLeft={14}>
@@ -1000,7 +1000,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
     checkup.stores.forEach((x, k) => {
       const isOk = x.uncommitted === 0 && x.unpushed === 0
       const rest = storeText(x).slice(x.name.length)
-      const fix = x.unpushed > 0 ? 'iirc sync' : undefined
+      const fix = x.unpushed > 0 ? MAINTAIN : undefined
       storeRows.push(fact(`st${k}`, k === 0 ? 'STORES' : '', isOk, [
         <Text key="n" bold color="claude">{x.name}</Text>,
         <Text key="r" color="subtle">{rest}</Text>,

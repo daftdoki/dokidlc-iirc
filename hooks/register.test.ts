@@ -9,7 +9,7 @@ const RECALL =
 const RECOVERY =
   'iirc: `uv tool` failed 2 times this session before it worked. If the fix was not obvious from a file in the repository, write one `iirc write` page.'
 const BRIEF =
-  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ. A hook names matching pages when the creator prompts; read one whose summary bears on the task. `iirc search QUERY` before an install, a fix, or a design.'
+  'iirc: 68 pages, semantic via 127.0.0.1:11434. Topics: claude-code 21, questlog 19. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance. A hook names matching pages when the creator prompts; read one whose summary bears on the task. `iirc search QUERY` before an install, a fix, or a design.'
 const STOP =
   'iirc: before you stop, note that `uv tool` (2 failures) failed and then worked this session, and nothing was written to iirc.'
 
@@ -51,7 +51,7 @@ async function promptRow($: Engine, uuid: string) {
   })
 }
 
-const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · run iirc doctor'
+const LINE = 'iirc: [68] pages · [0/0] used · [0] reads · [0] writes · run /iirc run-maintenance'
 
 // The hint row as the terminal draws it under the prompt, mounted fresh each time.
 let mounts = 0
@@ -89,8 +89,8 @@ test('parses the recall line', () => {
 test('parses the recovery nudge and the brief', () => {
   expect(parseRecovered(RECOVERY)).toEqual([{ command: 'uv tool', failures: 2 }])
   expect(parseBrief(BRIEF)).toEqual({
-    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: 'iirc doctor' },
-    warnings: ['1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.'],
+    status: { level: 'warn', pages: 68, mode: 'semantic+keyword', note: null, fix: '/iirc run-maintenance' },
+    warnings: ['Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.'],
   })
   const setup = parseBrief('iirc: not set up on this machine. Ask the creator; then run `iirc set-search-backend` with their answer.')!.status
   expect(setup.level).toBe('error')
@@ -99,7 +99,10 @@ test('parses the recovery nudge and the brief', () => {
   expect(down.status).toMatchObject({ level: 'warn', pages: 5, mode: 'keyword', fix: 'iirc set-search-backend' })
   expect(down.warnings).toEqual([])
   expect(statusText(parseBrief('iirc: this repository has no .iirc/. Ask the creator whether to create one; if yes, run `iirc init`.')!.status, { reads: 0, writes: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0 })).toBe('iirc: needs init · run iirc init')
-  expect(parseBrief('iirc: 9 pages, semantic via h:1. 2 suspect: a.md, b.md (cited file changed).')!.status.fix).toBe('iirc find-suspect-pages')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suspect pages (a.md, b.md)); run /iirc run-maintenance.')!.status.fix).toBe('/iirc run-maintenance')
+  // setup errors keep doctor --fix, even when maintenance is due too
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. memoryfield-tool is not at the pin abc1234; every write refuses until `iirc doctor --fix` runs. Maintenance is due (1 store commit not pushed); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
+  expect(parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist. Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')!.status.fix).toBe('iirc doctor --fix')
   expect(parseBrief('iirc: 9 pages, semantic via h:1. Topics: x 9.')!.status).toMatchObject({ level: 'ok' })
   const one = parseBrief('iirc: 1 page, string search. Topics: x 1.')!.status
   expect(one.level).toBe('ok')
@@ -195,7 +198,7 @@ test('draws the brief in the hint row, toasts its warnings, and toasts the stop 
   const row = await hintRow($)
   expect(await row.find({ text: LINE })).toBeDefined()
   expect(await row.find({ text: 'engine row' })).toBeDefined()
-  expect(toast[0]).toBe('iirc: 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.')
+  expect(toast[0]).toBe('iirc: Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.')
   expect(String(toast[1])).toContain('`uv tool` (2 failures)')
 })
 
@@ -212,7 +215,7 @@ test('at session start, asks iirc for the brief and toasts its warnings once', a
   await clock.settle()
   expect(await waitFor($, LINE)).toBe(true)
   expect(String((argv[0] as string[])[0])).toContain('bin/iirc')
-  expect(toast).toEqual(['iirc: 1 near-duplicate pair: iirc doctor names them; merge each, or link one page to the other with [[name]] if their kinds differ.'])
+  expect(toast).toEqual(['iirc: Maintenance is due (1 near-duplicate pair); run /iirc run-maintenance.'])
 })
 
 test('after a command that changes the brief, asks iirc for it again', async ($: Engine, on: On) => {
@@ -245,7 +248,7 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   expect(await waitFor($, LINE)).toBe(true)
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
-  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run iirc doctor')).toBe(true)
+  expect(await waitFor($, 'iirc: [68] pages · [1/3] used · [2] reads · [1] writes · run /iirc run-maintenance')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
   // read-matching-pages reads pages too, so it refreshes the counts
   const before = argv.length
@@ -266,6 +269,7 @@ test('/iirc summary-line-visibility off hides the hint-row line, on shows it, an
   expect(await (await hintRow($)).find({ text: LINE })).toBeDefined()
   expect((await $.command.run({ command: 'iirc', args: 'what do we know about hooks?' })).text).toBe('the skill ran')
   expect((await $.command.run({ command: 'iirc', args: 'add-remote-store x y' })).text).toBe('the skill ran')
+  for (const args of ['run-maintenance', 'run-maintenance --unattended']) expect((await $.command.run({ command: 'iirc', args })).text).toBe('the skill ran')
   for (const old of ['status-line off', 'unfold-suggestions', 'stats', 'thresholds']) expect((await $.command.run({ command: 'iirc', args: old })).text).toBe('the skill ran')
 })
 
@@ -289,6 +293,9 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
   expect(helpText).toMatch(/\/iirc doctor --fix .*rebuild the index/)
   expect((helpText ?? '').indexOf('/iirc set-search-backend')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))   // a setting, listed with the others
+  // the first maintenance row, before doctor: the one command a person needs
+  expect(helpText).toMatch(/\/iirc run-maintenance +the only thing you need to run, weekly/)
+  expect((helpText ?? '').indexOf('/iirc run-maintenance')).toBeLessThan((helpText ?? '').indexOf('/iirc doctor'))
   for (const surface of ['terminal', 'desktop'] as const) {
     const panel = await $.ui.mount({
       plugin: 'iirc',
@@ -329,7 +336,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   })
   expect(await status.find({ text: '68' })).toBeDefined()
   expect(await status.find({ text: ' ▲ needs a look ' })).toBeDefined()   // /iirc status draws every number
-  expect(await status.find({ text: 'iirc doctor' })).toBeDefined()
+  expect(await status.find({ text: '/iirc run-maintenance' })).toBeDefined()
   expect(await status.find({ text: 'ASK IN WORDS' })).toBeUndefined()
 })
 
@@ -449,8 +456,8 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   await clock.settle()
   await hookRow($, 'SessionStart', BRIEF, 'h9')
   const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
-  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with iirc find-suspect-pages')
-  expect(text).toContain('stores: shared 5 pages, 2 not pushed; fix with iirc sync')
+  expect(text).toContain('trust: 1 suspect: old-fact.md; fix with /iirc run-maintenance')
+  expect(text).toContain('stores: shared 5 pages, 2 not pushed; fix with /iirc run-maintenance')
   expect(text).toContain('suggested, not read: noisy.md ×4')
   expect(text).toContain('average match: 62% · read 75% · not read 49%')
   const card = await $.ui.mount({
@@ -460,7 +467,9 @@ test('a plain /iirc shows suspect pages, store state, and pages suggested but no
   expect(await card.find({ text: '1 suspect page: a cited file changed' })).toBeDefined()
   expect(await card.find({ text: 'old-fact' })).toBeDefined()
   expect(await card.find({ text: ' 5 pages, 2 not pushed' })).toBeDefined()
-  expect(await card.find({ text: 'iirc sync' })).toBeDefined()
+  expect(await card.find({ text: '/iirc run-maintenance' })).toBeDefined()
+  expect(await card.find({ text: 'iirc sync' })).toBeUndefined()
+  expect(await card.find({ text: 'iirc find-suspect-pages' })).toBeUndefined()
   expect(await card.find({ key: 'card-m-noisy.md' })).toBeDefined()           // a link to the reader
   expect(await card.find({ key: 'card-s-old-fact.md' })).toBeDefined()
   expect(await card.find({ text: '×4' })).toBeDefined()
@@ -476,10 +485,10 @@ test('a config error reads as hooks off, and a timed-out recall turns the line y
   const ok = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.')!.status
   const c = { reads: 1, writes: 0, suggested: 2, used: 1, missed: [], match: { all: null, read: null, unread: null }, timeouts: 2 }
   expect(liveStatus(ok, c).level).toBe('warn')
-  expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run iirc doctor')
-  const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. 3 suggestion lookups timed out in the last 7 days, past the hook\'s 5 s limit: iirc doctor names the cause.')!
+  expect(statusText(ok, c)).toBe('iirc: [9] pages · [1/2] used · [1] reads · [0] writes · [2] timed out · run /iirc run-maintenance')
+  const brief = parseBrief('iirc: 9 pages, semantic via 127.0.0.1:11434. Maintenance is due (3 suggestion lookups timed out in the last 7 days); run /iirc run-maintenance.')!
   expect(brief.status.level).toBe('warn')
-  expect(brief.status.fix).toBe('iirc doctor')
+  expect(brief.status.fix).toBe('/iirc run-maintenance')
 })
 
 test('/iirc reader opens the Session tab; a page name opens the reader tab, a linked page replaces it, Back returns', async ($: Engine, on: On) => {
