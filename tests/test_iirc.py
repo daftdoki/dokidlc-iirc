@@ -4087,13 +4087,24 @@ def test_run_maintenance_leaves_a_store_it_could_not_commit_first(tmp_path, monk
 
 
 def test_maintenance_due_reads_only_its_window_of_the_log(tmp_path, monkeypatch):
-    """The brief's due check reads the last 30 days: a rotated month before that is never opened."""
+    """The brief's due check reads the last 30 days: a rotated log last written before that is never opened."""
     _project(tmp_path, monkeypatch)
     _log([("start", f"s{i}", 1) for i in range(5)])
-    old = iirc.state_dir() / "log-2020-01.jsonl"
-    (iirc.state_dir() / "log.jsonl").rename(old)                         # rows dated today, in a file of an old month
+    old = iirc.state_dir() / f"log-{datetime.now(UTC):%Y-%m}.jsonl"
+    (iirc.state_dir() / "log.jsonl").rename(old)                         # rows dated today, in a file last written 60 days ago
+    os.utime(old, (time.time() - 60 * 86400,) * 2)
     assert _due() == []
     assert len(iirc.read_log()) == 5                                     # the unbounded read still sees them
+
+
+def test_read_log_reads_a_rotated_file_named_for_an_older_month(tmp_path, monkeypatch):
+    """rotate_logs names a file after its first row's month, so a file named two months back can hold last month's rows."""
+    _project(tmp_path, monkeypatch)
+    _log([("maintenance", "m", 20)] + [("start", f"s{i}", 10) for i in range(6)])
+    named = datetime.fromtimestamp(time.time() - 65 * 86400, UTC).strftime("%Y-%m")
+    (iirc.state_dir() / "log.jsonl").rename(iirc.state_dir() / f"log-{named}.jsonl")
+    c = iirc.logged_counts()
+    assert c["last_run"] is not None and c["sessions"] == 6
 
 
 def test_untuned_sessions_stops_at_its_limit(tmp_path, monkeypatch):
@@ -4119,3 +4130,77 @@ def test_doctor_names_an_unpushed_store_and_timeouts_once(tmp_path, monkeypatch,
     assert sum("not pushed" in line for line in lines) == 1
     assert sum("timed out" in line for line in lines) == 1
     assert lines[-1] == "run-maintenance is due: it settles the failures and notes above"
+
+
+def _undo_lines(out):
+    return {line.split(": ", 1)[0].strip(): line.split(": ", 1)[1] for line in out.splitlines() if line.startswith("  undo ")}
+
+
+def test_undo_leaves_another_machines_iirc_commit_pulled_later(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    _page(agent.dir, "shared.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "pages"); _git(agent.repo, "push", "-q", "origin", "main")
+    iirc.main(["run-maintenance"])
+    undo = _undo_lines(capsys.readouterr().out)
+    _page(agent.dir, "mine.md"); iirc.commit_store(agent, "iirc: write mine.md")
+    other = _other_clone(tmp_path, bare)
+    _page(other, "theirs.md"); _git(other, "add", "."); _git(other, "commit", "-qm", "iirc: write theirs.md"); _git(other, "push", "-q", "origin", "main")
+    iirc.main(["sync"]); capsys.readouterr()
+    assert (agent.dir / "theirs.md").is_file()
+    subprocess.run(["bash", "-c", undo["undo agent"]], check=True, capture_output=True)
+    assert (agent.dir / "theirs.md").is_file() and not (agent.dir / "mine.md").exists()
+
+
+def test_undo_leaves_a_persons_commit_with_an_iirc_line(tmp_path, monkeypatch, capsys):
+    field = _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
+    iirc.main(["run-maintenance"])
+    undo = _undo_lines(capsys.readouterr().out)
+    _page(field, "theirs.md"); _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "my page\n\niirc: told me to")
+    subprocess.run(["bash", "-c", undo["undo project"]], check=True, capture_output=True)
+    assert (field / "theirs.md").exists()
+
+
+def test_undo_with_no_run_commits_says_so(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
+    iirc.main(["run-maintenance"])
+    undo = _undo_lines(capsys.readouterr().out)
+    head = _git(tmp_path, "rev-parse", "HEAD")
+    r = subprocess.run(["bash", "-c", undo["undo project"]], capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.strip() == "nothing to undo" and r.stderr == ""
+    assert _git(tmp_path, "rev-parse", "HEAD") == head
+
+
+def test_iirc_commits_carry_this_machines_trailer(tmp_path, monkeypatch):
+    field = _project(tmp_path, monkeypatch)
+    _page(field, "a.md")
+    iirc.commit_store(iirc.store_named("project"), "iirc: write a.md")
+    assert f"IIRC-Machine: {socket.gethostname()}" in _git(tmp_path, "log", "-1", "--format=%B")
+
+
+def test_sync_refuses_a_detached_head(tmp_path, monkeypatch, capsys):
+    proj, agent, bare = _remote(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    _page(agent.dir, "shared.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "pages"); _git(agent.repo, "push", "-q", "origin", "main")
+    _git(agent.repo, "checkout", "-q", "--detach")
+    _page(agent.dir, "loose.md"); _git(agent.repo, "add", "."); _git(agent.repo, "commit", "-qm", "detached")
+    remote_head = _git(bare, "rev-parse", "main")
+    iirc.main(["sync"])
+    out = capsys.readouterr().out
+    assert "HEAD is detached" in out and "pushed" not in out
+    assert _git(bare, "rev-parse", "main") == remote_head
+
+
+def test_starting_commits_name_a_repository_with_no_commit(tmp_path, monkeypatch, capsys):
+    _project(tmp_path, monkeypatch)
+    iirc.write_config_file({"semantic": False})
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
+    subprocess.run(["rm", "-rf", str(tmp_path / ".git")], check=True)
+    _git(tmp_path, "init", "-q", "-b", "main")
+    monkeypatch.setattr(iirc, "uncommitted", lambda store: 0)                # nothing loose to commit
+    iirc.main(["run-maintenance"])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "Starting commits: none; project has no commit yet, so there is nothing to undo to"

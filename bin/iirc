@@ -833,9 +833,8 @@ def read_log(days: int | None = None, session: str | None = None) -> list[dict]:
         cutoff = datetime.now(UTC).timestamp() - days * 86400
     paths = sorted(state_dir().glob("log*.jsonl"))
     if cutoff is not None:
-        # a rotated month that ended before the cutoff holds no row worth reading
-        first = f"{datetime.fromtimestamp(cutoff, UTC):%Y-%m}"
-        paths = [p for p in paths if not re.fullmatch(r"log-\d{4}-\d{2}\.jsonl", p.name) or p.name[4:11] >= first]
+        # a rotated log last written before the cutoff holds no row worth reading; its name gives its first row's month, not its last
+        paths = [p for p in paths if p.name == "log.jsonl" or p.stat().st_mtime >= cutoff]
     lines = [line for path in paths for line in path.read_text().splitlines()]
     for line in lines:
         try:
@@ -3008,6 +3007,8 @@ def commit_paths(repo: Path, pathspec: list[str], message: str) -> str | None:
         return proc.stderr.strip() or "git add failed"
     if run_git(repo, "diff", "--cached", "--quiet", "--", *pathspec).returncode == 0:
         return None
+    # the trailer marks the commits this machine's iirc made, so an undo of a run reverts only those
+    message += ("\n" if "\n\nIIRC-" in message else "\n\n") + f"IIRC-Machine: {socket.gethostname()}"
     proc = run_git(repo, "commit", "-q", "-m", message, "--", *pathspec)
     if proc.returncode:
         return (proc.stderr.strip() or proc.stdout.strip() or "git commit failed").splitlines()[-1]
@@ -3057,8 +3058,11 @@ def git_net(repo: Path, *args: str, timeout: float = NET_TIMEOUT) -> subprocess.
 
 
 def current_branch(repo: Path) -> str:
-    out = run_git(repo, "symbolic-ref", "--short", "HEAD").stdout.strip()
-    return out or "main"
+    """The checked-out branch, or "" on a detached HEAD."""
+    return run_git(repo, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
+
+
+DETACHED = "HEAD is detached; check out a branch there, then run iirc sync"
 
 
 def last_line(proc: subprocess.CompletedProcess[str]) -> str:
@@ -3086,6 +3090,8 @@ def rebase_in_progress(repo: Path) -> bool:
 def pull_store(store: Store, ff_only: bool = False, timeout: float = NET_TIMEOUT) -> tuple[int, str | None]:
     """Pull the store's branch. (pages changed, reason or None). Never leaves a rebase of its own behind."""
     repo, branch = store.repo, current_branch(store.repo)
+    if not branch:
+        return 0, DETACHED
     before = run_git(repo, "rev-parse", "HEAD").stdout.strip()
     if ff_only:
         proc = git_net(repo, "pull", "-q", "--ff-only", "origin", branch, timeout=timeout)
@@ -3109,6 +3115,8 @@ def pull_store(store: Store, ff_only: bool = False, timeout: float = NET_TIMEOUT
 def push_store(store: Store, timeout: float = NET_TIMEOUT) -> str | None:
     """Push the store's branch; on rejection, one pull --rebase and one more push. None, or why it did not push."""
     branch = current_branch(store.repo)
+    if not branch:
+        return DETACHED
     proc = git_net(store.repo, "push", "-q", "-u", "origin", branch, timeout=timeout)
     if proc.returncode == 0:
         return None
@@ -3126,7 +3134,9 @@ def unpushed(store: Store) -> int:
     if store.kind != "remote" or not store.dir.is_dir() or not is_work_tree(store.repo):
         return 0
     branch = current_branch(store.repo)
-    if run_git(store.repo, "rev-parse", "--verify", "-q", f"origin/{branch}").returncode == 0:
+    if not branch:
+        out = run_git(store.repo, "rev-list", "--count", "HEAD", "--not", "--remotes=origin").stdout.strip()
+    elif run_git(store.repo, "rev-parse", "--verify", "-q", f"origin/{branch}").returncode == 0:
         out = run_git(store.repo, "rev-list", "--count", f"origin/{branch}..HEAD").stdout.strip()
     else:
         out = run_git(store.repo, "rev-list", "--count", "HEAD").stdout.strip()
@@ -3200,6 +3210,9 @@ def cmd_sync(args: argparse.Namespace) -> None:
     for store in remotes:
         if not store.dir.is_dir():
             print(f"{store.name}: not on this machine; run iirc doctor --fix")
+            continue
+        if not current_branch(store.repo):
+            print(f"{store.name}: not synced: {DETACHED.replace('there', f'in {store.dir}')}")
             continue
         try:
             with store_lock(store.field):
@@ -4522,21 +4535,29 @@ def commit_before_maintenance() -> list[str]:
     return failed
 
 
-def starting_commits() -> list[dict]:
-    """Each store's repository and HEAD, where an undo of the run goes back to."""
-    starts = []
+def starting_commits() -> tuple[list[dict], list[str]]:
+    """Each store's repository and HEAD, where an undo of the run goes back to; and why a store has none."""
+    starts, none = [], []
     for store in live_stores():
-        sha = run_git(store.repo, "rev-parse", "HEAD").stdout.strip() if is_work_tree(store.repo) else ""
+        if not is_work_tree(store.repo):
+            none.append(f"{store.name} is not in a git repository")
+            continue
+        sha = run_git(store.repo, "rev-parse", "--verify", "-q", "HEAD").stdout.strip()
         if sha:
             starts.append({"store": store.name, "repo": str(store.repo), "path": store_pathspec(store), "sha": sha})
-    return starts
+        else:
+            none.append(f"{store.name} has no commit yet")
+    return starts, none
 
 
 def undo_command(start: dict) -> str:
-    """Revert the iirc commits after the start that touch the store, newest first; the person's own commits stay."""
+    """Revert the commits after the start that this machine's iirc made in the store, newest first.
+    The person's own commits, and other machines' commits a sync pulls in, stay."""
     repo = shlex.quote(start["repo"])
-    commits = f"git -C {repo} log --format=%H --grep='^iirc: ' {start['sha']}..HEAD -- {shlex.quote(start['path'])}"
-    return f"git -C {repo} revert --no-edit $({commits})"
+    mark = shlex.quote(f"^IIRC-Machine: {re.escape(socket.gethostname())}$")
+    commits = f"git -C {repo} log --format=%H --grep={mark} {start['sha']}..HEAD -- {shlex.quote(start['path'])}"
+    return f'c=$({commits}); if [ -n "$c" ]; then git -C {repo} revert --no-edit $c; else echo nothing to undo; fi'
+
 
 
 def cmd_run_maintenance(args: argparse.Namespace) -> None:
@@ -4559,9 +4580,9 @@ def cmd_run_maintenance(args: argparse.Namespace) -> None:
         setup_checks(False, report, counts)
     counts["failed"] = failed
     # after the sync: its pull rebases a remote store onto other machines' commits, which an undo must not revert
-    starts = starting_commits()
-    print("Starting commits: " + (", ".join(f"{s['store']} at {s['sha'][:7]}" for s in starts) or "none, no store is in a git repository")
-          + ("; to undo this run and any iirc change after it, run the line for each store:" if starts else ""))
+    starts, none = starting_commits()
+    print("Starting commits: " + "; ".join([", ".join(f"{s['store']} at {s['sha'][:7]}" for s in starts) or "none"] + none)
+          + ("; to undo this run and any iirc change after it, run the line for each store:" if starts else ", so there is nothing to undo to"))
     for s in starts:
         print(f"  undo {s['store']}: {undo_command(s)}")
     print("setup: all checks pass" if not failed else f"setup: {plural(len(failed), 'check')} failed")
