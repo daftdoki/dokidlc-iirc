@@ -99,15 +99,18 @@ def project_root() -> Path:
 
 def set_root(root: Path) -> None:
     """Set the project root and load its stores. A bad store config is kept as CONFIG_ERROR; commands die on it, hooks stay quiet."""
-    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL
+    global ROOT, STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS, RECALL, MODEL, MODEL_SOURCE
     ROOT = Path(root).resolve()
     try:
         STORES, WRITE_DEFAULT = load_stores(ROOT)
-        SHOW_HOOKS = read_store_config(ROOT).get("show_hooks", False)
-        RECALL = load_knobs(read_store_config(ROOT))
+        cfg = read_store_config(ROOT)
+        MODEL, MODEL_SOURCE = model_and_source(cfg)   # before the knobs: they are the model's
+        SHOW_HOOKS = cfg.get("show_hooks", False)
+        RECALL = load_knobs(cfg)
         CONFIG_ERROR = None
     except ConfigError as e:
         STORES, WRITE_DEFAULT, CONFIG_ERROR, SHOW_HOOKS = [], None, str(e), False
+        MODEL, MODEL_SOURCE = model_and_source({})
         RECALL = {k: v[0] for k, v in knob_spec().items()}
 
 
@@ -166,6 +169,12 @@ def write_config_file(values: dict) -> Path:
     return path
 
 
+def embedding_config() -> dict:
+    """The setup file's embedding table: backend, model, and url. Empty when it has none."""
+    emb = read_config().get("embedding")
+    return emb if isinstance(emb, dict) else {}
+
+
 def semantic_enabled() -> bool:
     """Semantic search is the default. String search is a fallback chosen with `iirc set-search-backend --substring`,
     and that choice wins over an exported OLLAMA_HOST, which only names the first host to try."""
@@ -180,7 +189,7 @@ def host_candidates() -> list[tuple[str, str]]:
     """(base url, source) in order of preference: OLLAMA_HOST, then iirc set-search-backend, then the local default.
     An OpenAI-compatible backend has one candidate, the URL setup wrote."""
     if active_model().backend == "openai":
-        return [(openai_url(str((read_config().get("embedding") or {}).get("url") or "")), "iirc set-search-backend")]
+        return [(openai_url(str(embedding_config().get("url") or "")), "iirc set-search-backend")]
     out: list[tuple[str, str]] = []
     env = os.environ.get("OLLAMA_HOST")
     if env:
@@ -337,24 +346,24 @@ def read_store_config(root: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def model_and_source() -> tuple[iirc_embed.Model, str]:
-    """The embedding model this repository uses, and where it is set: `embedding_model` in .claude/iirc.toml,
-    else `embedding.model` in the machine setup file, else nomic-embed-text. Where the model runs is per machine."""
-    try:
-        name = read_store_config(ROOT).get("embedding_model")
-    except ConfigError:
-        name = None   # load_stores reports the bad file; until it is fixed, the machine default
-    if isinstance(name, str) and name in iirc_embed.MODELS:
-        return iirc_embed.MODELS[name], f"this repository's {STORE_CONFIG}"
-    emb = read_config().get("embedding")
-    name = emb.get("model") if isinstance(emb, dict) else None
+def model_and_source(cfg: dict) -> tuple[iirc_embed.Model, str]:
+    """The embedding model a repository uses, and where it is set: `embedding_model` in its .claude/iirc.toml (cfg, which
+    load_stores has checked), else `embedding.model` in the machine setup file, else nomic-embed-text. Where it runs is per machine."""
+    if "embedding_model" in cfg:
+        return iirc_embed.MODELS[cfg["embedding_model"]], f"this repository's {STORE_CONFIG}"
+    name = embedding_config().get("model")
     if isinstance(name, str) and name in iirc_embed.MODELS:
         return iirc_embed.MODELS[name], f"the machine default in {config_file()}"
     return iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL], "the built-in default"
 
 
+# set_root resolves the model once per root; set-search-backend resolves it again after it writes
+MODEL: iirc_embed.Model = iirc_embed.MODELS[iirc_embed.DEFAULT_MODEL]
+MODEL_SOURCE = "the built-in default"
+
+
 def active_model() -> iirc_embed.Model:
-    return model_and_source()[0]
+    return MODEL
 
 
 def knob_spec() -> dict[str, tuple[float, float, float, str]]:
@@ -1593,8 +1602,9 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
         elif failed:
             # the command as the excerpt and the error beside it, so tune can judge the recall after the transcript is gone
             keep_prompt(redact(failed[0]), recall_id=recall_id, error=clean(redact(failed[1]), 300))
+        model = active_model().id
         eval_event([{
-            "cmd": "candidate", "model": active_model().id, "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
+            "cmd": "candidate", "model": model, "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
             "distance": r.get("distance") if isinstance(r.get("distance"), (int, float)) else None,
             "paths": r.get("via") or [], "rare_terms": r.get("rare_terms") or [], "head_terms": r.get("head_terms") or [],
             "rule": r["rule"], "verdict": r["verdict"], "kind": (r.get("fm") or {}).get("kind"),
@@ -3037,7 +3047,7 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
     if repository:
         # the model goes to the repository; where it runs stays the machine's, and so does the machine's default model
         if backend == "openai":
-            values["embedding"] = {**(values.get("embedding") or {}), "url": host}
+            values["embedding"] = {**embedding_config(), "url": host}
     else:
         values["embedding"] = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
     if backend == "ollama":
@@ -3046,6 +3056,7 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
     if repository:
         toml.parent.mkdir(parents=True, exist_ok=True)
         toml.write_text(new)
+    set_root(ROOT)   # the model may have changed, and with it the thresholds
     global _RESOLVED
     _RESOLVED = None
     where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
@@ -3700,7 +3711,7 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
         pinned = install_tool(pin) and pin_matches(pin, installed_rev())
     report(f"memoryfield-tool at {pin['tool_rev'][:7]}", pinned, "iirc doctor --fix")
 
-    model, source = model_and_source()
+    model, source = MODEL, MODEL_SOURCE
     up = False   # embeddings work, so --fix can reindex
     if not config_file().is_file():
         # the creator has not chosen a backend; --fix must not install or pull for one they did not choose

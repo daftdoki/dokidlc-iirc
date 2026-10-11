@@ -41,7 +41,15 @@ def _machine_dirs(tmp_path_factory, monkeypatch):
     base = tmp_path_factory.mktemp("xdg")
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         monkeypatch.setenv(var, str(base / var.lower()))
+    # set_root resolves the model once; a test that never calls it must not get the last test's
+    monkeypatch.setattr(iirc, "MODEL", iirc.iirc_embed.MODELS[iirc.iirc_embed.DEFAULT_MODEL])
 
+
+
+def _machine_config(values: dict) -> None:
+    """Write the machine setup file and resolve the model again, as set-search-backend does after it writes."""
+    iirc.write_config_file(values)
+    iirc.set_root(iirc.ROOT)
 
 def test_field_name_is_stable_and_distinct(tmp_path):
     a = tmp_path / "Agent_One"
@@ -3292,7 +3300,7 @@ def _fake_openai(monkeypatch, model, dims=None):
         def log_message(self, *a): pass
     srv = http.server.HTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
+    _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
     iirc._RESOLVED = None
     try:
         yield seen
@@ -3307,7 +3315,7 @@ def test_backend_prefixes(tmp_path, monkeypatch, capsys, model):
     field = _vector_project(tmp_path, monkeypatch)
     m = iirc.iirc_embed.MODELS[model]
     if m.backend == "ollama":
-        iirc.write_config_file({"semantic": True, "embedding": {"backend": "ollama", "model": model}})
+        _machine_config({"semantic": True, "embedding": {"backend": "ollama", "model": model}})
         server = _fake_ollama(monkeypatch, model)
     else:
         server = _fake_openai(monkeypatch, model)
@@ -3324,7 +3332,7 @@ def test_backend_prefixes(tmp_path, monkeypatch, capsys, model):
     if m.backend == "openai":
         # a hosted endpoint that does not answer is a dead host: string search, and the brief says so
         s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-        iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{port}"}})
+        _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": model, "url": f"http://127.0.0.1:{port}"}})
         iirc._RESOLVED = None
         assert iirc.semantic_search("alpha") == []
         capsys.readouterr()
@@ -3397,7 +3405,7 @@ def test_onnx_windows_score_best_window(tmp_path, monkeypatch):
     # bin/iirc: the onnx backend sends the plain page text and keeps each page's best window
     field = _vector_project(tmp_path, monkeypatch)
     (field / "long-notes.md").write_text(f"---\ntitle: Long notes\nsummary: mostly alpha\ntopics:\n- greek\nkind: finding\n---\n{text}\n\n## Sources\n- gamma gamma\n")
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "onnx", "model": "all-minilm-l6-v2"}})
+    _machine_config({"semantic": True, "embedding": {"backend": "onnx", "model": "all-minilm-l6-v2"}})
     sent = []
 
     def run_cpu(backend, texts, kind):
@@ -3605,7 +3613,7 @@ def test_near_duplicate_thresholds_per_model(tmp_path, monkeypatch):
         path = iirc.iirc_embed.store_path(tmp_path / "cache", iirc.field_name(tmp_path), model)
         iirc.iirc_embed.save(path, iirc.iirc_embed.Vectors(list(vecs), ["sha-a", "sha-b"], rows))
     assert iirc.near_duplicates() == []                          # nomic
-    iirc.write_config_file({"embedding": {"backend": "ollama", "model": gemma.id}})
+    _machine_config({"embedding": {"backend": "ollama", "model": gemma.id}})
     assert iirc.near_duplicates() == [(round(d, 3), "a.md", "b.md")]   # same page shas, other model: not nomic's cached answer
 
 
@@ -3628,7 +3636,7 @@ def test_audit_names_the_active_model(tmp_path, monkeypatch, capsys):
     vectors = _audit_fixture(tmp_path, monkeypatch)
     monkeypatch.setattr(iirc, "page_vectors", lambda: vectors)
     _audit_host_answers(monkeypatch)
-    iirc.write_config_file({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
+    _machine_config({"embedding": {"backend": "ollama", "model": "qwen3-embedding:0.6b"}})
     iirc.main(["audit-page-findability", "old.md"])
     assert capsys.readouterr().out.splitlines()[-1] == "1 finding in 1 page; vectors checked with qwen3-embedding:0.6b"
 
@@ -3809,7 +3817,7 @@ def _refusing_openai(monkeypatch, get_status, post_status=None):
         def log_message(self, *a): pass
     srv = http.server.HTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    iirc.write_config_file({"semantic": True, "embedding": {"backend": "openai", "model": "qwen3-embedding", "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
+    _machine_config({"semantic": True, "embedding": {"backend": "openai", "model": "qwen3-embedding", "url": f"http://127.0.0.1:{srv.server_port}/v1"}})
     iirc._RESOLVED = None
     try:
         yield f"127.0.0.1:{srv.server_port}"
@@ -3871,6 +3879,7 @@ def test_vector_store_of_the_wrong_width_is_reembedded(tmp_path, monkeypatch):
         assert iirc.iirc_embed.load(path).vecs.shape == (2, 768)
         # the server now answers at another width than the model's: a failed embed, so nothing is saved and nothing is embedded again
         monkeypatch.setitem(iirc.iirc_embed.MODELS, "nomic-embed-text", iirc.iirc_embed.MODELS["nomic-embed-text"]._replace(dims=1024))
+        monkeypatch.setattr(iirc, "MODEL", iirc.iirc_embed.MODELS["nomic-embed-text"])
         for _ in range(2):
             seen.clear()
             assert [r for r in iirc.hybrid_search("alpha") if "semantic" in r["via"]] == []
