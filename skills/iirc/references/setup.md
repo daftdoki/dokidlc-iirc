@@ -27,6 +27,9 @@ iirc init                   if the creator said yes to a field
 iirc doctor --fix           installs the tool; for a local host on macOS also ollama and the model
 ```
 
+Every ollama embed request asks ollama to keep the model loaded for 24
+hours, so an ollama install needs no `OLLAMA_KEEP_ALIVE` setting.
+
 If `--cpu` fails because onnxruntime has no wheel for this machine, it
 writes nothing; offer the string fallback. A model change starts a
 vector store of its own: every page is embedded again, by the next

@@ -6,7 +6,7 @@ text it embeds. For nomic the text is what memoryfield-tool embeds, so
 distances match the tool's: `search_document: ` plus the raw page file cut at
 8,192 bytes, and `search_query: ` plus the query.
 
-Backends: ollama's /api/embed with truncate on; an OpenAI-compatible
+Backends: ollama's /api/embed with truncate on and keep_alive set; an OpenAI-compatible
 /v1/embeddings; and onnx, which runs bin/iirc-cpu (its own uv script, with
 onnxruntime and tokenizers) and returns one row per window of a page.
 
@@ -77,6 +77,8 @@ MINILM_FILES = {   # file name here: (path in the repository, sha256)
 }
 
 DOC_BYTES = 8192            # memoryfield-tool cuts the page file here before embedding
+# ollama unloads an idle model after 5 minutes; asking per request works on any host and survives a restart that drops OLLAMA_KEEP_ALIVE
+KEEP_ALIVE = "24h"
 EMBED_TIMEOUT = 30.0        # per request; a cold model load measured 13.6 s, and the recall hook stops at 5 s anyway
 CPU_TIMEOUT = 120.0         # bin/iirc-cpu per batch; its first run may still be installing onnxruntime
 BATCH = 16                  # pages per request when indexing
@@ -181,7 +183,8 @@ def embed(backend: Backend, texts: list[str], kind: str = "doc", timeout: float 
             data = _post(backend.url + "/v1/embeddings", {"model": backend.model.id, "input": texts}, timeout)["data"]
             rows = [d["embedding"] for d in sorted(data, key=lambda d: d["index"])]
         else:
-            rows = _post(backend.url + "/api/embed", {"model": backend.model.id, "input": texts, "truncate": True}, timeout).get("embeddings")
+            rows = _post(backend.url + "/api/embed", {"model": backend.model.id, "input": texts, "truncate": True,
+                                                       "keep_alive": KEEP_ALIVE}, timeout).get("embeddings")
         vecs = np.asarray(rows, dtype=np.float32)
     except (urllib.error.URLError, OSError, ValueError, TypeError, AttributeError, KeyError):
         return None

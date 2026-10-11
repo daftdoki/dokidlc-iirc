@@ -417,7 +417,8 @@ cards and `/iirc summarize-page-usage` show it. Each number has a response:
 - "[N] timed out" in yellow on the line: Claude Code killed `iirc suggest-pages` at
   the hook's 5 s limit. The session-start line counts the last 7 days'
   timeouts, and `iirc doctor` names the usual cause, a cold embedding
-  model. `OLLAMA_KEEP_ALIVE=24h` keeps ollama's model loaded.
+  model. iirc asks ollama to keep the model loaded for 24 hours, so look
+  for another model loaded in its place or a host that restarted.
 
 ### Tune the thresholds on evidence
 
