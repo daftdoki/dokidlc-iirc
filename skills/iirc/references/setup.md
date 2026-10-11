@@ -28,7 +28,10 @@ iirc doctor --fix           installs the tool; for a local host on macOS also ol
 ```
 
 Every ollama embed request asks ollama to keep the model loaded for 24
-hours, so an ollama install needs no `OLLAMA_KEEP_ALIVE` setting.
+hours, so an ollama install needs no `OLLAMA_KEEP_ALIVE` setting. On a
+remote host, this request overrides the operator's keep-alive setting for
+iirc's model. The model still loads cold after more than 24 hours with
+no search or index.
 
 If `--cpu` fails because onnxruntime has no wheel for this machine, it
 writes nothing; offer the string fallback. A model change starts a

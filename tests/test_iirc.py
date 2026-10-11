@@ -4219,9 +4219,10 @@ def test_ollama_embed_asks_to_keep_the_model_loaded(monkeypatch):
     monkeypatch.setattr(emb, "_post", post)
     assert emb.embed(emb.Backend(emb.MODELS["nomic-embed-text"], "http://h:11434"), ["a"]) is not None
     url, body = sent[-1]
-    assert url == "http://h:11434/api/embed" and body["keep_alive"] == emb.KEEP_ALIVE == "24h" and body["truncate"] is True
+    assert url == "http://h:11434/api/embed" and body["keep_alive"] == emb.KEEP_ALIVE and body["truncate"] is True
     assert emb.embed(emb.Backend(emb.MODELS["qwen3-embedding"], "http://h:8000"), ["a"]) is not None
     assert "keep_alive" not in sent[-1][1]   # an OpenAI-compatible host gets the body it knows
+    assert f"loaded for {emb.KEEP_ALIVE}," in iirc.TIMEOUT_FIX
 
 
 def test_memoryfield_tool_never_reaches_ollama(tmp_path, monkeypatch):

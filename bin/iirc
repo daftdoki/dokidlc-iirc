@@ -3470,8 +3470,9 @@ def doctor_ollama(model: iirc_embed.Model, fix_it: bool, report) -> bool:
     return up
 
 
-TIMEOUT_FIX = ("a cold embedding model is the usual cause; iirc asks ollama to keep the model loaded for 24h, so look for another model "
-               "loaded in its place or a host that restarted, and check the host with iirc set-search-backend")
+TIMEOUT_FIX = (f"a cold embedding model is the usual cause; iirc asks ollama to keep the model loaded for {iirc_embed.KEEP_ALIVE}, so the "
+               f"likely causes are no search or index in over {iirc_embed.KEEP_ALIVE}, another model loaded in its place, or a host that "
+               "restarted; check the host with iirc set-search-backend")
 
 
 def setup_checks(fix_it: bool, report, counts: dict) -> bool:

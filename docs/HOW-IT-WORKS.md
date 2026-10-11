@@ -199,8 +199,10 @@ later reads of a page it left out.
 Claude Code kills a hook past its timeout, usually when the embedding
 model is cold. Each ollama embed request sends `keep_alive` (`KEEP_ALIVE`,
 24h, in `bin/iirc_embed.py`), so ollama keeps the model loaded after any
-search or index. A model can still go cold when another model takes its
-place in memory or the host restarts. `run_recall` writes a marker, `inflight/SESSION` in the
+search or index. A model still goes cold after more than 24 hours with no
+search or index, when another model takes its place in memory, or when the
+host restarts. On a remote ollama host, iirc's request sets the keep-alive
+for iirc's model and overrides the operator's own setting for that model. `run_recall` writes a marker, `inflight/SESSION` in the
 state directory, and removes it when it finishes. When the next suggestion line or
 the session snapshot finds the marker, `note_timeout` logs a `timeout`
 row. `iirc doctor` reports the 7-day count, and the line under the prompt
