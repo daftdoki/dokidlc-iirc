@@ -48,9 +48,19 @@ what it creates; tell the creator what is left to commit. If `doctor` names
 something only the creator can do, such as installing ollama on a remote
 host, say exactly that and stop.
 
-The host is whatever the creator named; a guess is never right. `set-search-backend`
-runs once per machine: running it again overwrites their choice, so ask
-before a second run.
+The model can differ per repository; where it runs is per machine. Where
+this repository's `.claude/settings.json` or `.claude/settings.local.json`
+enables iirc, `set-search-backend` writes the model as `embedding_model`
+in `.claude/iirc.toml`; commit that file. Elsewhere it sets the machine
+default, which every repository without `embedding_model` uses.
+`--repository` or `--machine` picks the target when the creator names
+one. `--substring` always sets the machine. After a model switch, run
+`iirc rebuild-search-index`, then `iirc doctor`, which names the model
+and where it is set.
+
+The host is whatever the creator named; a guess is never right. Running
+`set-search-backend` again overwrites their choice, so ask before a
+second run.
 
 ## What the creator sees of the hooks
 

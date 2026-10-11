@@ -23,8 +23,9 @@ iirc audit-page-findability [PAGE]                pages search shows badly, each
 iirc verify PAGE.md                               you re-confirmed it; re-run its check, refresh its refs
 iirc approve-page-check PAGE.md                   run a page's check once and approve it here (ask first)
 iirc delete PAGE.md
-iirc set-search-backend [--local|--host URL|--openai URL|--cpu|--substring]
-                                                  the embedding model and where it runs, or the string fallback; once per machine
+iirc set-search-backend [--local|--host URL|--openai URL|--cpu|--substring] [--repository|--machine]
+                                                  the embedding model and where it runs, or the string fallback; the model goes to
+                                                  embedding_model in .claude/iirc.toml where this repository enables iirc, else the machine default
 iirc migrate                                      move a repository and this machine from the memory plugin's layout
 iirc doctor --fix                                 install or repair prerequisites; clone missing remote stores
 iirc init                                         create .iirc/, the CLAUDE.md paragraph, and .claude/settings.json if absent

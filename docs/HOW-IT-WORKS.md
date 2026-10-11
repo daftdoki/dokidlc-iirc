@@ -466,6 +466,7 @@ within 0.38 of it.
 
 A hub count leaves out a judgment on a suggestion that the gate refuses under the current thresholds.
 A hub count leaves out a judgment of a suggestion made before the page's last `iirc write` commit, so a rewrite resets the count.
+A hub count leaves out a judgment whose candidate row is another model's, or names no model.
 A judgment with no candidate row in the eval files, and a page with no
 `iirc write` commit, keep counting.
 
@@ -497,7 +498,7 @@ Each query runs a semantic search and a string search, and
 
 Semantic search matches meaning: "why does install fail on a mac" finds
 the page about a missing wheel, though they share no words. It needs an
-embedding model, chosen per machine with `iirc set-search-backend`; see
+embedding model, chosen per repository or per machine with `iirc set-search-backend`; see
 [Models](#models). It is weak on exact identifiers such as
 "pysqlite3-binary".
 
@@ -589,6 +590,19 @@ machine's host, when one answers, with `qwen3-embedding:0.6b`; otherwise
 this CPU. String search comes last. A machine with no `embedding` key in
 its setup file uses nomic, so an existing machine changes only when
 setup runs again.
+
+`active_model()` takes `embedding_model` from `.claude/iirc.toml`, else
+`embedding.model` from the machine setup file
+(`~/.config/dokidlc-iirc/config.toml`), else nomic. So two repositories
+on one machine can search with two models at once. An `embedding_model`
+not in `MODELS` is a configuration error. Where the model runs stays per
+machine: `embedding_host`, `embedding.url`, or the CPU files.
+`set-search-backend` writes `embedding_model` where the repository's
+`.claude/settings.json` or `.claude/settings.local.json` enables an
+`iirc@` plugin, and the machine default elsewhere; `--repository` and
+`--machine` override that. Each candidate row records its `model`, and
+the threshold evaluation and the audit's hub check read only the active
+model's rows, because each model has its own distance scale.
 
 ### Without ollama
 
@@ -729,7 +743,7 @@ gate is that kind of finding.
    counted as a read by the session, and records a verdict per pair with
    `iirc tune-suggestions record-relevance-judgments`: relevant, noise, or unsure. It judges from the prompt
    and what happened next, not from the match percentage.
-4. `iirc tune-suggestions evaluate-suggestion-thresholds` replays the gate over the judged pairs for a grid of
+4. `iirc tune-suggestions evaluate-suggestion-thresholds` replays the gate over the active model's judged pairs for a grid of
    `semantic_only` and `both` values across the active model's range,
    and prints precision, the share of relevant pages passed, and F1 for each. Below 30 judged pairs
    with a distance, it proposes nothing.

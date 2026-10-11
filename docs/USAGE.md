@@ -86,6 +86,17 @@ again. A new model embeds every page again: the next `iirc rebuild-search-index`
 it, or the first search that finds the pages missing starts it in the
 background.
 
+The model can differ per repository; where it runs is per machine. In a
+repository whose `.claude/settings.json` or `.claude/settings.local.json`
+enables an `iirc@` plugin, `iirc set-search-backend` writes the model as
+`embedding_model` in `.claude/iirc.toml`, which you commit, and writes
+only where it runs (the ollama host, the OpenAI-compatible URL, or this
+CPU) to this machine's setup file. In any other repository it sets the
+machine default, which every repository without `embedding_model` uses.
+`--repository` and `--machine` choose the target in either case.
+`--substring` always sets the machine. After a switch, run
+`iirc rebuild-search-index`. `iirc doctor` names the model and where it is set.
+
 ### Start iirc in a repository
 
 Say "start iirc in this repository". The agent asks, then runs
@@ -250,7 +261,7 @@ The `command.run` handler in
 | `/iirc summarize-page-usage`, `/iirc summarize-page-usage --days N` | Suggestion and page use over the last 7 days, or N days. |
 | `/iirc rebuild-search-index` | Rebuilds the search index. |
 | `/iirc estimate-context-tokens` | Bytes and tokens of `index.md` and of a sample search. |
-| `/iirc show-suggestion-thresholds` | The suggestion distances in force for this machine's model, from `[suggestions.MODEL-ID]`, and their ranges. |
+| `/iirc show-suggestion-thresholds` | The suggestion distances in force for the active model, from `[suggestions.MODEL-ID]`, and their ranges. |
 | `/iirc show-page-topics` | Every topic with its page count. |
 | `/iirc search QUERY` | Ranked pages for the query; all the words form one query. |
 | `/iirc read PAGE` | One or more pages, with their trust markers. |
@@ -289,7 +300,8 @@ describes each one.
 | Setting | Where it lives | Default | Range or values | What it changes | When to turn it |
 |---|---|---|---|---|---|
 | `semantic` | `~/.config/dokidlc-iirc/config.toml`, this machine | `true` | `true`, `false` | Semantic and string search, or string search only. | Ask the agent to run `iirc set-search-backend` again; it writes the file. |
-| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); `url` for `openai` only | Which model embeds pages and queries, and where it runs. | `iirc set-search-backend` writes it. |
+| `[embedding]` `backend`, `model`, `url` | the same file | none, which means nomic through ollama | `ollama`, `openai`, or `onnx`; a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); `url` for `openai` only | The machine's default model, for a repository with no `embedding_model`, and the OpenAI-compatible host's URL. | `iirc set-search-backend` writes it. |
+| `embedding_model` | `.claude/iirc.toml`, committed, so every clone | none, which means the machine's `[embedding]` `model` | a model in [Suggestion thresholds per model](#suggestion-thresholds-per-model); another name is a configuration error | Which model embeds this repository's pages and queries. It wins over the machine default. | `iirc set-search-backend` writes it where this repository enables iirc, or with `--repository`. |
 | `embedding_host` | the same file | none, then `127.0.0.1:11434` | `host:port` or `http://host:port` | Where ollama embeddings come from. A host that does not answer a 2 s probe is skipped. | When ollama moves to another host: `iirc set-search-backend --host URL`. |
 | `max_suggested` | the same file | `3` | 1 to 10 | Pages one suggestion line names at most. The line's byte cap is 120 + 200 times N. | `/iirc max-suggested-pages N`, when the row brings too much or too little. |
 | `OLLAMA_HOST` | the environment | unset | host or URL | The first host tried while search is semantic. `iirc set-search-backend --substring` wins over it. A host that does not answer loses to one that does. | Rarely. Prefer `iirc set-search-backend`, which warns when this is exported. |
@@ -319,7 +331,7 @@ records are kept 90 days.
 
 Each model has its own distance scale, so each has its own table in
 `.claude/iirc.toml`, named after the model with `:` changed to `-`. The
-hooks read the table of this machine's model; a threshold left out takes its
+hooks read the table of the active model (`embedding_model`, else the machine default); a threshold left out takes its
 default. `iirc show-suggestion-thresholds` prints the table name and the values in force.
 
 ```toml
@@ -448,8 +460,11 @@ judges each suggestion against what the session needed and evaluates the
 thresholds over those judgements. You see each proposal with its
 evidence: a page to narrow, split, or write, or a threshold value with
 the counts before and after. Nothing changes until you say yes. A
-threshold change edits this machine's model table in
-`.claude/iirc.toml`, which you commit.
+threshold change edits the active model's table in
+`.claude/iirc.toml`, which you commit. The evaluation reads only
+suggestions the active model made: each candidate row records its
+model, and a row from another model, or from before rows recorded one,
+is on another distance scale.
 
 To measure a change to search or the gate before it lands, the agent
 runs `iirc tune-suggestions evaluate-suggestion-thresholds --replay-prompts FILE...` on replay files of judged
