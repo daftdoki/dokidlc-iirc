@@ -167,7 +167,8 @@ makes the agent write a page. A plain `/iirc` draws a short card,
 
 | Setting | Where | Changed by |
 |---|---|---|
-| search mode and embedding host | `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc set-search-backend` again |
+| embedding model | `.claude/iirc.toml`, `embedding_model`, where the repository installs iirc; else the machine default in `~/.config/dokidlc-iirc/config.toml` | asking the agent to run `iirc set-search-backend` again |
+| search mode and where the model runs | `~/.config/dokidlc-iirc/config.toml` | the same command |
 | pages suggested per prompt, 3 by default | the same file, `max_suggested` | `/iirc max-suggested-pages N` |
 | how close a page must be for the hook to suggest it, per model | `.claude/iirc.toml`, `[suggestions.MODEL-ID]` | `/iirc tune-suggestions`, on your yes; `/iirc show-suggestion-thresholds` prints them |
 
