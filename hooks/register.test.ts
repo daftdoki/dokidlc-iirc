@@ -905,3 +905,20 @@ test('/iirc reader demo draws its sample numbers in the pane only; the summary l
   expect(await pane.find({ key: 'open-s-page-0.md' })).toBeUndefined()
   expect(await pane.find({ key: 'open-s-noisy.md' })).toBeDefined()
 })
+
+test('/iirc demo doctor draws the doctor card from sample checks and never runs doctor', async ($: Engine, on: On) => {
+  engine(on)
+  const argv: string[][] = []
+  on('process.run', ($, e) => (argv.push([...e.argv]), { value: { exitCode: 1, stdout: 'FAIL a real failure on this machine', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('ui.toast', () => ({ value: undefined }))
+  const text = (await $.command.run({ command: 'iirc', args: 'demo doctor' })).text
+  expect(argv.map(a => a.slice(1))).not.toContainEqual(['doctor'])
+  expect(parseDoctor(text)).not.toBeNull()
+  const card = await $.ui.mount({
+    plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'demo-doctor',
+    props: { command: 'iirc', args: 'demo doctor', text, isErrored: false },
+  })
+  expect(await card.find({ text: ' ✖ 1 of 13 failed ' })).toBeDefined()
+  expect(await card.find({ text: 'NOTES' })).toBeDefined()
+  expect(await card.find({ text: 'a real failure on this machine' })).toBeUndefined()
+})

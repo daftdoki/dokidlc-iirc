@@ -4,7 +4,7 @@
 #   scripts/screenshots.sh [REPO]
 #
 # REPO is a repository that runs this plugin and has pages in .iirc/ (default: the
-# current directory). The cards use sample numbers (/iirc demo); the pane uses
+# current directory). The cards use sample numbers (/iirc demo, /iirc demo doctor); the pane uses
 # sample numbers over REPO's real pages (/iirc reader demo). Needs vhs (brew install
 # vhs) and uv. Claude Code starts in REPO as you, logged in; one prompt is sent so
 # the suggested-pages row appears, then interrupted.
@@ -60,7 +60,7 @@ shot() {
   shot '/iirc demo' 4s card-home
   shot '/iirc demo status' 4s card-status
   shot '/iirc help' 4s card-help
-  shot '/iirc doctor' 10s card-doctor
+  shot '/iirc demo doctor' 4s card-doctor
   shot "/iirc show $page" 4s card-page
   printf 'Type "/clear"\nEnter\nSleep 2s\nType "%s"\nEnter\nSleep 5s\nEscape\nSleep 2s\nScreenshot prompt-row.png\nType "/iirc unfold-suggested-pages"\nEnter\nSleep 3s\nScreenshot prompt-row-open.png\n' "$prompt"
   shot '/iirc reader demo' 4s pane-docked-session

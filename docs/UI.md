@@ -136,7 +136,8 @@ TRUST and STORES come from `iirc doctor --health`, run as the status card
 opens, so they are current. The STATUS chip comes from the session-start
 brief; when TRUST or STORES finds a problem the brief did not, the chip
 turns yellow and names the fix. `/iirc demo` and `/iirc demo status`
-draw the two cards with sample numbers.
+draw the two cards with sample numbers, and `/iirc demo doctor` draws the
+doctor card from sample checks.
 
 `/iirc help` draws the rest:
 
