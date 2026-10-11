@@ -835,6 +835,7 @@ def test_recall_hook_end_to_end(tmp_path, monkeypatch, capsys):
     evals = [json.loads(line) for f in sorted((tmp_path / "st" / "dokidlc-iirc").glob("eval-*.jsonl")) for line in f.read_text().splitlines()]
     mine = [e for e in evals if e["recall_id"] == first["recall_id"]]
     assert mine and mine[0]["page"] == "pysqlite3-install-override.md" and mine[0]["verdict"] == "passed" and mine[0]["rule"] == "term"
+    assert {e["model"] for e in evals} == {iirc.active_model().id}
     assert {e["via"] for e in evals} == {"prompt", "failure"}
     # the prompt's excerpt, in the session's own file, never in the log
     kept = [json.loads(line) for f in sorted((tmp_path / "st" / "dokidlc-iirc" / "prompts").glob("*.jsonl")) for line in f.read_text().splitlines()]
@@ -2060,7 +2061,8 @@ def _tune_fixture(tmp_path, monkeypatch):
         {"ts": "2026-10-08T10:00:00Z", "session": "elsewhere", "repo": "/other", "cmd": "recall", "pages": ["a.md"], "via": "prompt"},
     ])
     _jsonl(st / "prompts" / "s1.jsonl", [{"ts": "2026-10-08T10:00:05Z", "prompt_hash": iirc.prompt_hash(first), "excerpt": first, "recall_id": "r1"}])
-    cand = {"ts": "2026-10-08T10:00:05Z", "session": "s1", "repo": r, "cmd": "candidate", "recall_id": "r1", "via": "prompt", "store": "project", "kind": "finding"}
+    cand = {"ts": "2026-10-08T10:00:05Z", "session": "s1", "repo": r, "cmd": "candidate", "model": iirc.active_model().id, "recall_id": "r1", "via": "prompt",
+            "store": "project", "kind": "finding"}
     _jsonl(st / "eval-2026-10.jsonl", [
         {**cand, "rank": 0, "page": "a.md", "distance": 0.25, "paths": ["semantic"], "rare_terms": [], "head_terms": [], "rule": "meaning", "verdict": "passed"},
         {**cand, "rank": 1, "page": "b.md", "distance": 0.30, "paths": ["semantic", "v1.2"], "rare_terms": ["v1.2"], "head_terms": [], "rule": "meaning+term", "verdict": "passed"},
@@ -2166,7 +2168,7 @@ def _sweep_fixture(tmp_path, monkeypatch, pairs):
     """Eval rows and judgments for (page, distance, label) pairs, all semantic only, in one recall."""
     st = _tune_fixture(tmp_path, monkeypatch)
     r = str((tmp_path / "repo").resolve())
-    rows = [{"session": "s5", "repo": r, "cmd": "candidate", "recall_id": "r5", "rank": i, "page": p, "distance": d,
+    rows = [{"session": "s5", "repo": r, "cmd": "candidate", "model": iirc.active_model().id, "recall_id": "r5", "rank": i, "page": p, "distance": d,
              "paths": ["semantic"], "rare_terms": [], "head_terms": []} for i, (p, d, _) in enumerate(pairs)]
     _jsonl(st / "eval-2026-09.jsonl", rows)
     _jsonl(st / "tune" / "judgments.jsonl", [{"repo": r, "session": "s5", "recall": "r5", "page": p, "label": label} for p, _, label in pairs]
@@ -2838,8 +2840,9 @@ def test_audit_hub_skips_pairs_the_gate_now_refuses(tmp_path, monkeypatch, capsy
     evals = tmp_path / "st" / "dokidlc-iirc" / "eval-2026-10.jsonl"
 
     def rows(rare):
-        _jsonl(evals, [{"cmd": "candidate", "repo": str(tmp_path.resolve()), "session": "s", "recall_id": f"r{i}", "via": "failure", "rank": 1,
-                        "page": "hub.md", "distance": 0.0, "paths": ["semantic"], "rare_terms": rare, "head_terms": []} for i in range(6)])
+        _jsonl(evals, [{"cmd": "candidate", "model": iirc.active_model().id, "repo": str(tmp_path.resolve()), "session": "s", "recall_id": f"r{i}",
+                        "via": "failure", "rank": 1, "page": "hub.md", "distance": 0.0, "paths": ["semantic"], "rare_terms": rare, "head_terms": []}
+                       for i in range(6)])
     rows([])   # meaning alone: the failure gate refuses it
     iirc.main(["audit-page-findability", "hub.md"])
     assert "hub.md: hub: " not in capsys.readouterr().out
@@ -4768,3 +4771,28 @@ def test_set_search_backend_target_flags(tmp_path, monkeypatch, capsys):
     iirc.main(["set-search-backend", "--substring"])
     assert iirc.read_config()["semantic"] is False and toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n'
     toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_sweep_uses_only_the_active_models_rows(tmp_path, monkeypatch, capsys):
+    """A row from another model, or from before rows named their model, is on another distance scale: the sweep leaves it out."""
+    _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.5, "noise"), ("p4.md", 0.5, "relevant")])
+    path = tmp_path / "st" / "dokidlc-iirc" / "eval-2026-09.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[2]["model"] = "qwen3-embedding:0.6b"; del rows[3]["model"]
+    _jsonl(path, rows)
+    iirc.main(["tune-suggestions", "evaluate-suggestion-thresholds"])
+    out = capsys.readouterr().out
+    assert "judged pairs with a distance: 2 (1 relevant, 1 noise)" in out and "2 from another model" in out
+
+
+def test_audit_hub_skips_other_models_rows(tmp_path, monkeypatch, capsys):
+    """hub.md's six noise judgments have rows the gate passes; from another model, or with no model, they do not count."""
+    _audit_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(iirc, "page_vectors", lambda: {})
+    evals = tmp_path / "st" / "dokidlc-iirc" / "eval-2026-10.jsonl"
+    for model, hub in (("qwen3-embedding:0.6b", False), (None, False), (iirc.active_model().id, True)):
+        _jsonl(evals, [{"cmd": "candidate", "repo": str(tmp_path.resolve()), "session": "s", "recall_id": f"r{i}", "via": "failure", "rank": 1,
+                        "page": "hub.md", "distance": 0.0, "paths": ["semantic"], "rare_terms": ["axolotl_v2"], "head_terms": [],
+                        **({"model": model} if model else {})} for i in range(6)])
+        iirc.main(["audit-page-findability", "hub.md"])
+        assert ("hub.md: hub: noise in 6 of 8 tune judgments (75%), relevant in 2" in capsys.readouterr().out) is hub, model

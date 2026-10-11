@@ -1594,7 +1594,7 @@ def run_recall(query: str, via: str, event: dict, failed: tuple[str, str] | None
             # the command as the excerpt and the error beside it, so tune can judge the recall after the transcript is gone
             keep_prompt(redact(failed[0]), recall_id=recall_id, error=clean(redact(failed[1]), 300))
         eval_event([{
-            "cmd": "candidate", "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
+            "cmd": "candidate", "model": active_model().id, "recall_id": recall_id, "via": via, "rank": r["rank"], "store": row_store(r), "page": r["filename"],
             "distance": r.get("distance") if isinstance(r.get("distance"), (int, float)) else None,
             "paths": r.get("via") or [], "rare_terms": r.get("rare_terms") or [], "head_terms": r.get("head_terms") or [],
             "rule": r["rule"], "verdict": r["verdict"], "kind": (r.get("fm") or {}).get("kind"),
@@ -4509,7 +4509,8 @@ def cmd_tune_sweep_judged() -> None:
     """The judged pairs of recent sessions, through the gate at their logged distances."""
     evals = eval_rows()
     by_pair = {(c.get("session"), rid, base(c.get("page"))): c for rid, rows in evals.items() for c in rows}
-    pairs, unsure, other_repo, no_row, no_distance = [], 0, 0, 0, 0
+    pairs, unsure, other_repo, no_row, other_model, no_distance = [], 0, 0, 0, 0, 0
+    model = active_model().id
     for (repo, session, key, page), j in judgments().items():
         if repo != str(ROOT):
             other_repo += 1   # judgments.jsonl is one file for every repository on this machine
@@ -4521,6 +4522,10 @@ def cmd_tune_sweep_judged() -> None:
         if cand is None:
             no_row += 1
             continue
+        # each model has its own distance scale; a row with no model predates rows naming theirs
+        if cand.get("model") != model:
+            other_model += 1
+            continue
         # a pair with no distance passes or fails on terms alone, so no knob moves it
         if not isinstance(cand.get("distance"), (int, float)) or "semantic" not in (cand.get("paths") or []):
             no_distance += 1
@@ -4529,7 +4534,7 @@ def cmd_tune_sweep_judged() -> None:
     rel = sum(r for _, r in pairs)
     print(f"judged pairs with a distance: {len(pairs)} ({rel} relevant, {len(pairs) - rel} noise)")
     print(f"left out: {unsure} unsure; {no_row} with no candidate row, from a suggestion line older than eval rows or a page outside the "
-          f"{EVAL_CANDIDATES} logged candidates; {no_distance} with no distance, which no threshold moves; {other_repo} from other repositories")
+          f"{EVAL_CANDIDATES} logged candidates; {other_model} from another model; {no_distance} with no distance, which no threshold moves; {other_repo} from other repositories")
     sweep_report(len(pairs), lambda k: sweep_counts(pairs, k))
 
 
@@ -4566,7 +4571,7 @@ def own_title_skip(vectors: dict) -> str | None:
 
 
 def candidate_row(judgment: dict, evals: dict[str, list[dict]]) -> dict | None:
-    """The logged candidate row of the judged pair; None before eval rows began on 2026-10-09, or once they age out."""
+    """The logged candidate row of the judged pair, of any model; None before eval rows began on 2026-10-09, or once they age out."""
     return next((r for r in evals.get(str(judgment.get("recall")), [])
                  if r.get("session") == judgment.get("session") and base(r.get("page")) == base(judgment.get("page"))), None)
 
@@ -4596,12 +4601,14 @@ def audit_findings(pages: list[tuple[Store, Path]]) -> tuple[list[dict], str | N
     judged: dict[str, list[dict]] = {}
     judged_all = judgments()
     evals = eval_rows() if judged_all else {}
+    model = active_model().id
     for (repo, _, _, page), j in judged_all.items():
         if repo != str(ROOT) or j.get("label") not in ("relevant", "noise"):
             continue
         row = candidate_row(j, evals)
-        # a suggestion the hook no longer makes says nothing about the page as search shows it now; a pair with no row counts
-        if row is None or row_passes(row, RECALL, semantic_enabled()):
+        # a suggestion the hook no longer makes says nothing about the page as search shows it now; a pair with no row counts.
+        # Another model's search made the suggestion, or one from before rows named their model: it says nothing about this one's.
+        if row is None or (row.get("model") == model and row_passes(row, RECALL, semantic_enabled())):
             judged.setdefault(page, []).append({**j, "suggested": suggested_at(j, row)})
     findings: list[dict] = []
     for store, path in pages:
