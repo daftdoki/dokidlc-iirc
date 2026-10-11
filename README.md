@@ -108,6 +108,15 @@ command when not:
 ● iirc: [76] pages · [2/5] used · [12] reads · [4] writes
 ```
 
+Run `/iirc run-maintenance` about once a week while you use iirc; iirc
+tells you when it is due, in the session-start line and the line under
+the prompt. It is the only upkeep command you need. It commits and
+syncs the stores, checks the pages, and then the agent walks you through
+what is left, each change on your yes and each change a commit of its
+own. It prints the command that undoes the run. With `--unattended`
+(yolo mode) the agent asks once, then decides each change itself; it
+still leaves check approvals and URL checks to you.
+
 Ask in words and the agent searches. "Do you remember anything about
 installing this on a mac?" runs:
 
@@ -148,8 +157,8 @@ makes the agent write a page. A plain `/iirc` draws a short card,
   contacted only by `iirc find-suspect-pages --network`, which asks first.
 - The guard refuses a raw read of a page by pattern, which is a
   convention, not a boundary.
-- Two near-duplicate pages make search name the wrong one; `iirc doctor`
-  names each pair.
+- Two near-duplicate pages make search name the wrong one;
+  `/iirc run-maintenance` names each pair and merges or links it on your yes.
 - The plugin has to be installed once per machine. `.claude/settings.json`
   can enable it for every clone, but cannot install it.
 

@@ -1,6 +1,6 @@
 ---
 name: iirc
-description: "What past sessions learned in this repository: pages in .iirc/ or the stores .claude/iirc.toml names, that past sessions wrote, searched and maintained with the iirc command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, to set iirc up, and when the session-start line offers a migration from the memory plugin."
+description: "What past sessions learned in this repository: pages in .iirc/ or the stores .claude/iirc.toml names, that past sessions wrote, searched and maintained with the iirc command. Use it before you install, configure, debug, or design anything here, when the creator says remember, did we, or last time, after a fix took more than one attempt, when a page is marked suspect or found wrong, to set iirc up, and when the session-start line offers a migration from the memory plugin or says maintenance is due."
 ---
 
 # IIRC
@@ -35,6 +35,7 @@ iirc show-suggestion-thresholds                   the suggestion gate's distance
 iirc tune-suggestions STEP                        gather-suggestion-data, record-relevance-judgments, evaluate-suggestion-thresholds,
                                                   or mark-session-tuned: tune the suggestions and propose fixes; see references/tune.md
 iirc sync                                         commit, pull, and push the remote stores
+iirc run-maintenance                              the weekly upkeep: commit, sync, check, and list what is left; see references/maintenance.md
 ```
 
 Write a page, body on stdin. The body carries the finding and its
@@ -118,6 +119,13 @@ match": `references/search.md`.
 When the creator says tune, or runs `/iirc tune-suggestions`, follow
 `references/tune.md`.
 
+## Maintenance
+
+When the session-start line says `Maintenance is due`, tell the
+creator the reasons it names and suggest `/iirc run-maintenance`. When
+they run it, with or without `--unattended`, or say yes, follow
+`references/maintenance.md`.
+
 ## When to write
 
 Write at these moments, without being asked:
@@ -142,8 +150,8 @@ Four rules keep the field worth searching:
 2. One finding per page, so a wrong page can be deleted without losing a
    right one. One topic, under 8KB. A field is too large when the
    session-start line counts near-duplicate pairs or reports a slow
-   start scan; the page count is information. For each pair `iirc doctor`
-   names, merge the two pages when they hold one finding. When they hold
+   start scan; the page count is information. For each pair
+   `iirc run-maintenance` or `iirc doctor` names, merge the two pages when they hold one finding. When they hold
    two findings of different kinds, such as a decision and the procedure
    that carries it out, keep both and link one to the other with
    `[[name]]`; the pair then stops counting.

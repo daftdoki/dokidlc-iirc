@@ -121,11 +121,14 @@ logs a `start` row. The agent gets one line, 262 bytes here:
 iirc: 97 pages, semantic via 127.0.0.1:11434. Topics: claude-code 36, plugin 25, questlog 20, decisions 19. A hook names matching pages when the creator prompts; read one whose summary bears on the task. `iirc search QUERY` before an install, a fix, or a design.
 ```
 
-Warnings make it longer: suspect pages, store changes not committed or
-not pushed, near-duplicate pairs (at the model's duplicate distance or
-closer, 0.07 for nomic, unless the pair has different kinds and one
-links the other with `[[name]]`), a start scan past 5 seconds, and
-suggestion lines that timed out in the last 7 days. After
+Warnings make it longer: store changes not committed, a start scan
+past 5 seconds, and one sentence when maintenance is due,
+`Maintenance is due (REASONS); run /iirc run-maintenance.` The reasons
+are 7 days and 5 sessions since the last run, suspect pages, store
+commits not pushed, near-duplicate pairs (at the model's duplicate
+distance or closer, 0.07 for nomic, unless the pair has different kinds
+and one links the other with `[[name]]`), suggestion lines that timed
+out in the last 7 days, and 10 sessions waiting to be judged. After
 a compaction in a session that wrote nothing, it adds:
 
 ```

@@ -87,7 +87,7 @@ Beside Claude Code's own hint, one line sums up iirc for the session:
 | `[4] writes` | different pages this session wrote |
 | `· [2] timed out` | shown only when a suggestion line this session ran past the hook's 5-second limit and Claude Code killed it |
 | `· [keyword] mode` | shown only when search is not semantic: no embedding host, or the string fallback chosen at setup |
-| `· run iirc find-suspect-pages` | shown when the circle is yellow or red: the command that clears it |
+| `· run /iirc run-maintenance` | shown when the circle is yellow or red: the command that clears it; setup and config errors name `iirc doctor --fix` |
 
 The line updates after each `iirc read`, `read-matching-pages`, `write`, `delete`, `sync`,
 `migrate`, `set-search-backend`, `init`, and `doctor`, and after each suggestion line. A status
@@ -122,9 +122,9 @@ A plain `/iirc` draws a short card in place of its output row:
 - STATUS: a chip, `✔ all good`, `▲ needs a look`, or `✖` and the red
   state's name, with the command that fixes it, in green, yellow, or red
 - TRUST: the number of suspect pages, whose cited file changed since
-  they cited it, and up to three by name, with `iirc find-suspect-pages` as the fix
+  they cited it, and up to three by name, with `/iirc run-maintenance` as the fix
 - STORES: each store's pages, then `clean` or its uncommitted changes
-  and unpushed commits, with `iirc sync` as the fix for unpushed ones
+  and unpushed commits, with `/iirc run-maintenance` as the fix for unpushed ones
 - the counts, under STORE (pages) and THIS SESSION (used, reads, and
   writes)
 - SUGGESTION HIT RATE, as on the short card
@@ -145,7 +145,8 @@ draw the two cards with sample numbers.
 - SETTINGS: the line under the prompt, the number of suggested pages,
   and the search mode, each with its command and current value. `set-search-backend`
   goes to the skill, which asks which embedding model and where it runs
-- MAINTENANCE and LOOK UP: the iirc commands `/iirc` runs for you
+- MAINTENANCE and LOOK UP: first `run-maintenance`, the only thing you
+  need to run, about weekly, which goes to the skill. Then the iirc commands `/iirc` runs for you
   directly, printing what they print: `doctor`, `doctor --fix`, `find-suspect-pages`,
   `sync`, `show-page-stores`, `summarize-page-usage`, `rebuild-search-index`, `estimate-context-tokens`, `show-suggestion-thresholds`, `search QUERY`, `show-page-topics`, and
   `read PAGE`. `audit-page-findability` and `tune-suggestions` are maintenance too, but they go to the

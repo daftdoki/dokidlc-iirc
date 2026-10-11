@@ -9,18 +9,52 @@ a `/iirc` command does the same job, this page names it.
 
 ## Day to day
 
-Mostly you do nothing. The suggestion hook names matching pages under your prompt,
+Mostly you do nothing. Run `/iirc run-maintenance` about once a week
+while you use iirc; iirc tells you when it is due. It is the only upkeep
+command you need ([Run maintenance](#run-maintenance)).
+
+The suggestion hook names matching pages under your prompt,
 and a line under the prompt sums up the session; [UI.md](UI.md)
 describes the row, the line, and the cards. The row shows you the list
 the agent got. When the circle on the line turns yellow or red, the line
-ends with the command that clears it, such as `· run iirc find-suspect-pages`; ask
-the agent to run it, or type it after `/iirc`. For anything else, ask in
+ends with the command that clears it, such as `· run /iirc run-maintenance`
+or `· run iirc doctor --fix`; ask the agent to run it, or type it after
+`/iirc`. For anything else, ask in
 words: "what do we know about ollama hangs?", "remember that...",
 "what's out of date?". To read a page yourself, click its name, run
 `/iirc reader PAGE` to open it in the reader, or `/iirc show PAGE` for a
 card in the transcript; your reads do not count as the agent's.
 
 ## Tasks
+
+### Run maintenance
+
+Run it about once a week while you use iirc; iirc tells you when it is
+due. Type `/iirc run-maintenance`, or say yes when the agent suggests
+it. It is due after 7 days and at least 5 sessions since the last run,
+or sooner when a page is suspect, a store commit is not pushed, a
+suggestion lookup timed out in the last 7 days, two pages are
+near-duplicates, or 10 sessions wait to be judged for tuning. The
+session-start line then says `Maintenance is due (REASONS)`, the line
+under the prompt ends with `· run /iirc run-maintenance`, and
+`iirc doctor` ends with `run-maintenance is due: REASONS`.
+
+The agent runs `iirc run-maintenance`. It commits each store's loose
+files under the store's path, so the run starts from a commit, and
+prints that starting commit for each store with the command that undoes
+the run. It then syncs the remote stores, checks the setup, embeds pages
+with no vectors, and lists what is left: setup failures, checks not
+approved on this machine, suspect pages, near-duplicate pairs, audit
+findings, a URL-ref check when none ran in 30 days, and sessions waiting
+to be judged. It changes no page's text. The agent walks you through
+each item, and each change is a commit of its own, made on your yes.
+The summary repeats the undo command.
+
+`/iirc run-maintenance --unattended`, yolo mode, asks one yes at the
+start, then fixes the setup, settles suspect pages, near-duplicates, and
+audit findings, and runs a tuning pass when 10 sessions wait, all by the
+agent's own judgement. It never approves a check command or contacts a
+URL; the summary names those steps and the commands to run them later.
 
 ### Set up a machine
 
@@ -95,8 +129,8 @@ is suspect when a file it cites changed since it cited it, or when its
 check command now fails. For each one, the agent reads the page and
 the diff, then verifies, rewrites, or deletes the page in the same turn.
 `/iirc find-suspect-pages` prints the same list, and `/iirc find-suspect-pages --all` adds the
-clean pages. Ask for a doubt pass after a `git pull` and when the line
-under the prompt says `· run iirc find-suspect-pages`.
+clean pages. Ask for a doubt pass after a `git pull`. `/iirc run-maintenance`
+lists suspect pages too, and the line under the prompt names it when a page turns suspect.
 
 Two cases need your yes. A check command that arrived with a clone is
 not approved on this machine, so `find-suspect-pages` lists it and does not run it.
@@ -110,8 +144,9 @@ is set, and only you set it.
 ### Merge near-duplicates
 
 When two pages sit at the model's duplicate distance or closer, the
-session-start line counts the pair and the circle turns yellow with
-`· run iirc doctor`. `/iirc doctor` names each pair, and also notes
+session-start line counts the pair among the reasons maintenance is due,
+and the circle turns yellow with `· run /iirc run-maintenance`.
+`/iirc run-maintenance` and `/iirc doctor` name each pair. Doctor also notes
 similar pairs up to the model's near-duplicate distance:
 
 | Model | Duplicate: the line turns yellow | Near-duplicate: doctor notes it |
@@ -198,6 +233,7 @@ The `command.run` handler in
 | `/iirc summary-line-visibility on`, `/iirc summary-line-visibility off` | Shows or hides that line, on this machine. |
 | `/iirc max-suggested-pages` | How many pages a suggestion line names at most. |
 | `/iirc max-suggested-pages N` | Sets that number, 1 to 10, on this machine. |
+| `/iirc run-maintenance`, `/iirc run-maintenance --unattended` | Goes to the skill: the only upkeep command, about once a week. See [Run maintenance](#run-maintenance). |
 | `/iirc doctor`, `/iirc doctor --fix` | The setup checks as a card; `--fix` installs or repairs what fails, then rebuilds the index. |
 | `/iirc find-suspect-pages`, `/iirc find-suspect-pages --all` | Pages with evidence they may be wrong; `--all` lists clean pages too. |
 | `/iirc sync` | Commits, pulls, and pushes every remote store. |
