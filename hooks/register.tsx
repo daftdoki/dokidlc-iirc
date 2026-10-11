@@ -247,15 +247,13 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
     .filter(s => s && !BRIEF_QUIET.test(s))
   const fix = isHostDown ? (/`(iirc [^`]+)`/.exec(m[2])?.[1] ?? 'iirc doctor') : WARNING_FIX.find(([re]) => warnings.some(w => re.test(w)))?.[1]
   const level = isHostDown || warnings.length > 0 ? 'warn' : 'ok'
-  // each warning with the command that clears it, setup errors first, as WARNING_FIX orders them; a warning no command clears comes last
-  const rank = (w: string) => { const k = WARNING_FIX.findIndex(([re]) => re.test(w)); return k < 0 ? WARNING_FIX.length : k }
-  // a warning that names no command, such as the start scan's, is the model's to raise: it draws no action
-  const problems: Problem[] = [...warnings].sort((a, b) => rank(a) - rank(b)).flatMap(w => {
+  // each warning with the command that clears it; a warning that names no command, such as the start scan's, is the model's to raise: it draws no action
+  const problems: Problem[] = warnings.flatMap(w => {
     const f = fixFor(w)
     return f ? [{ level: 'warn' as const, fix: f, why: reason(w) }] : []
   })
   // the parentheses say why search fell back to terms: the part before the command
-  if (isHostDown) problems.unshift({ level: 'warn', fix: fix!, why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
+  if (isHostDown) problems.push({ level: 'warn', fix: fix!, why: reason(/\(([^)]*)\)/.exec(m[2])?.[1] ?? m[2]) })
   return { status: { level, pages: Number(m[1]), mode, note: null, ...(fix ? { fix } : {}), problems }, warnings }
 }
 
@@ -282,9 +280,10 @@ function reason(sentence: string): string {
   return /^[A-Z][a-z]/.test(why) ? why[0].toLowerCase() + why.slice(1) : why
 }
 
-/** The brief's status, turned yellow when a recall this session ran past the hook's time limit. */
+/** The brief's status, turned yellow by a problem this session found, such as a recall that ran past the hook's time limit. */
 export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
-  return s.level === 'ok' && c.timeouts > 0 ? { ...s, level: 'warn', fix: MAINTAIN } : s
+  const first = actions(s, c)[0]
+  return s.level === 'ok' && first ? { ...s, level: first.level, fix: first.fix } : s
 }
 
 /** One part of the summary line: its text and how it is drawn. */
@@ -314,16 +313,28 @@ export function statusParts(s: IircStatus, c: SessionCounts): LinePart[] {
   return out
 }
 
-/** The summary line as plain text, for the text help; the band draws the same parts after its circle and accent bar. */
-export function statusText(s: IircStatus, c: SessionCounts): string {
-  return statusParts(s, c).map(p => p.text).join('')
+/** A line's parts as plain text. */
+function plain(parts: LinePart[]): string {
+  return parts.map(p => p.text).join('')
 }
 
-/** What the person needs to do, most severe first: the brief's problems, then this session's timed-out recalls. */
+/** The summary line as plain text, for the text help; the band draws the same parts after its circle and accent bar. */
+export function statusText(s: IircStatus, c: SessionCounts): string {
+  return plain(statusParts(s, c))
+}
+
+/**
+ * What the person needs to do, most severe first: errors, then warnings in WARNING_FIX's order of their
+ * commands (setup before upkeep), then the rest in the brief's order. This session's timed-out recalls join here.
+ */
 export function actions(s: IircStatus | null, c: SessionCounts): Problem[] {
   const out = [...(s?.problems ?? [])]
   if (c.timeouts > 0) out.push({ level: 'warn', fix: MAINTAIN, why: `${c.timeouts} suggestion ${c.timeouts === 1 ? 'lookup' : 'lookups'} timed out this session` })
-  return out.sort((a, b) => (a.level === b.level ? 0 : a.level === 'error' ? -1 : 1))
+  const rank = (p: Problem) => {
+    const k = WARNING_FIX.findIndex(([, fix]) => fix === p.fix)
+    return (p.level === 'error' ? 0 : WARNING_FIX.length + 1) + (k < 0 ? WARNING_FIX.length : k)
+  }
+  return out.sort((a, b) => rank(a) - rank(b))
 }
 
 /** The line under the prompt as its parts: a mark, the command, why, and how many more; none when all is well. */
@@ -347,7 +358,7 @@ export function actionParts(s: IircStatus | null, c: SessionCounts): LinePart[] 
 
 /** The line under the prompt as plain text, empty when all is well. */
 export function actionText(s: IircStatus | null, c: SessionCounts): string {
-  return actionParts(s, c).map(p => p.text).join('')
+  return plain(actionParts(s, c))
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
