@@ -2,8 +2,11 @@
 
 Follow this when the creator runs `/iirc run-maintenance` or
 `/iirc run-maintenance --unattended`, or says yes after you suggested
-it. `iirc run-maintenance` does the safe part on its own and lists the
-rest; you then work through that list. Make each change with
+it. `iirc run-maintenance` does the safe part on its own, before any
+yes in either mode: it commits each store's loose files, pulls and
+pushes each remote store, and runs the page checks already approved on
+this machine. It changes no page's text and lists the rest; you then
+work through that list. Make each change with
 `iirc write`, `iirc delete`, or `iirc verify`, so each change is a
 commit of its own.
 
@@ -18,6 +21,9 @@ Skip this step in the plain form.
 Before you run anything, tell the creator in a few lines what the
 unattended run does without asking:
 
+- `iirc run-maintenance` itself: commit each store's loose files, pull
+  and push each remote store, and run the page checks already approved
+  on this machine
 - `iirc doctor --fix` for setup failures, which may install
   prerequisites such as memoryfield-tool or ollama
 - verify, rewrite, or delete each suspect page, by your judgement of
