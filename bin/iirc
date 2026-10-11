@@ -1295,6 +1295,29 @@ def table_of(line: str, word: str) -> str | None:
     return None if m is None else (m[1] or m[2] or "")
 
 
+def set_key_line(lines: list[str], start: int, end: int, key: str, entry: str) -> bool:
+    """Replace the line of lines[start:end] that sets KEY with ENTRY, keeping its comment. False when no line there sets KEY."""
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=\s*[^#]*?(\s*#.*)?$")
+    at = next((i for i in range(start, end) if key_re.match(lines[i])), None)
+    if at is None:
+        return False
+    lines[at] = entry + (key_re.match(lines[at])[1] or "")
+    return True
+
+
+def write_checked_config(new: str, landed, missed: str, command: str) -> Path:
+    """Write NEW as .claude/iirc.toml once it reads back and landed(parsed) is true; else die, naming MISSED, with nothing written."""
+    try:
+        if not landed(tomllib.loads(new)):
+            raise ConfigError(missed)
+    except (tomllib.TOMLDecodeError, ConfigError) as e:
+        die(f"{command}: {STORE_CONFIG} would not read back, so nothing was written: {e}")
+    path = ROOT / STORE_CONFIG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new)
+    return path
+
+
 def set_knob_text(text: str, table: str, name: str, value: float) -> str:
     """The config text with one threshold set in its [suggestions.TABLE] table. Edits lines, so every other line and comment stays."""
     entry = f"{name} = {value:g}"
@@ -1304,11 +1327,7 @@ def set_knob_text(text: str, table: str, name: str, value: float) -> str:
         body = text if not text or text.endswith("\n") else text + "\n"
         return body + ("\n" if body.strip() else "") + f"[{table_header(table)}]\n{entry}\n"
     end = next((i for i in range(head + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
-    key_re = re.compile(rf"^\s*{re.escape(name)}\s*=\s*[^#]*?(\s*#.*)?$")
-    at = next((i for i in range(head + 1, end) if key_re.match(lines[i])), None)
-    if at is not None:
-        lines[at] = entry + (key_re.match(lines[at])[1] or "")
-    else:
+    if not set_key_line(lines, head + 1, end, name, entry):
         last = max([i for i in range(head, end) if lines[i].strip()])   # after the table's last line, before its blank lines
         lines.insert(last + 1, entry)
     return "\n".join(lines) + "\n"
@@ -1328,16 +1347,9 @@ def knobs_set(name: str, value: float) -> None:
         first = "both" if name == "semantic_only" else "semantic_only"
         die(f"both must be at least semantic_only; set {first} first (now semantic_only {knobs['semantic_only']:g}, both {knobs['both']:g})")
     path = ROOT / STORE_CONFIG
-    old = path.read_text() if path.is_file() else ""
     table = recall_table()
-    new = set_knob_text(old, table, name, value)
-    try:
-        if load_knobs(tomllib.loads(new))[name] != value:
-            raise ConfigError(f"{STORE_CONFIG}: {name} did not land in [{table_header(table)}]")
-    except (tomllib.TOMLDecodeError, ConfigError) as e:
-        die(f"set-suggestion-threshold: {STORE_CONFIG} would not read back, so nothing was written: {e}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(new)
+    new = set_knob_text(path.read_text() if path.is_file() else "", table, name, value)
+    write_checked_config(new, lambda cfg: load_knobs(cfg)[name] == value, f"{name} did not land in [{table_header(table)}]", "set-suggestion-threshold")
     print(f"{name} = {value:g} in [{table_header(table)}] of {path}; commit it, it is the repository's config")
 
 
@@ -3028,17 +3040,14 @@ def set_top_level_text(text: str, key: str, value: str) -> str:
     entry = f"{key} = {toml_value(value)}"
     lines = text.splitlines()
     head = next((i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines))
-    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=\s*[^#]*?(\s*#.*)?$")
-    at = next((i for i in range(head) if key_re.match(lines[i])), None)
-    keys = [i for i in range(head) if lines[i].strip() and not lines[i].lstrip().startswith("#")]
-    if at is not None:
-        lines[at] = entry + (key_re.match(lines[at])[1] or "")
-    elif keys:
-        lines.insert(keys[-1] + 1, entry)   # after the last top-level key
-    elif head < len(lines):
-        lines[head:head] = [entry, ""]
-    else:
-        lines.append(entry)
+    if not set_key_line(lines, 0, head, key, entry):
+        keys = [i for i in range(head) if lines[i].strip() and not lines[i].lstrip().startswith("#")]
+        if keys:
+            lines.insert(keys[-1] + 1, entry)   # after the last top-level key
+        elif head < len(lines):
+            lines[head:head] = [entry, ""]
+        else:
+            lines.append(entry)
     return "\n".join(lines) + "\n"
 
 
@@ -3055,14 +3064,6 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
         repository = backend != "substring" and (args.repository or (not args.machine and iirc_installed()))
     except ConfigError as e:
         die(f"set-search-backend: {e}; fix it, or choose with --repository or --machine. Nothing was written.")
-    toml = ROOT / STORE_CONFIG
-    if repository:
-        new = set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model)
-        try:
-            if tomllib.loads(new).get("embedding_model") != model:
-                raise ConfigError("embedding_model did not land above the first table")
-        except (tomllib.TOMLDecodeError, ConfigError) as e:
-            die(f"set-search-backend: {STORE_CONFIG} would not read back, so nothing was written: {e}")
     values = dict(read_config())   # keep keys setup does not ask about
     if not repository:
         values["semantic"] = backend != "substring"   # string search is the machine's choice, never a repository's
@@ -3078,32 +3079,31 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
                 "onnxruntime may have no wheel for this machine; `iirc set-search-backend --substring` is the fallback.")
     if repository:
         # the model goes to the repository; where it runs stays the machine's, and so does the machine's default model
+        toml = ROOT / STORE_CONFIG
+        write_checked_config(set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model),
+                             lambda cfg: cfg.get("embedding_model") == model, "embedding_model did not land above the first table", "set-search-backend")
         if backend == "openai":
             values["embedding"] = {**embedding_config(), "url": host}
+        written = f"the model is embedding_model in {toml}, for this repository (commit it), and where it runs is in {config_file()}, for this machine"
+        whose = "This repository's pages are"
     else:
         values["embedding"] = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
+        written = f"written as the machine default in {config_file()}"
+        whose = f"The pages of each repository that names no embedding_model in its {STORE_CONFIG} are"
     if backend == "ollama":
         values["embedding_host"] = host
-    path = write_config_file(values)
-    if repository:
-        toml.parent.mkdir(parents=True, exist_ok=True)
-        toml.write_text(new)
+    write_config_file(values)
     set_root(ROOT)   # the model may have changed, and with it the thresholds
     global _RESOLVED
     _RESOLVED = None
     where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
-    if repository:
-        print(f"semantic search with {model} through {where}; the model is embedding_model in {toml}, for this repository (commit it), "
-              f"and where it runs is in {path}, for this machine")
-        if not semantic_enabled():
-            print("This machine uses string search, so no repository's model is used here until "
-                  "`iirc set-search-backend --machine` with --local, --host URL, --openai URL, or --cpu turns semantic search on.")
-        else:
-            print("This repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
+    print(f"semantic search with {model} through {where}; {written}")
+    if not semantic_enabled():
+        # only a repository target leaves the machine on string search
+        print("This machine uses string search, so no repository's model is used here until "
+              "`iirc set-search-backend --machine` with --local, --host URL, --openai URL, or --cpu turns semantic search on.")
     else:
-        print(f"semantic search with {model} through {where}; written as the machine default in {path}")
-        print(f"Each repository that names no embedding_model in its {STORE_CONFIG} embeds its pages with this model on its next "
-              "`iirc rebuild-search-index`, or by the first search that finds them missing.")
+        print(f"{whose} embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
     if backend == "onnx":
         return
     if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
