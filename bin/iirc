@@ -31,7 +31,7 @@ Usage:
   iirc set-suggestion-threshold NAME VALUE  write one into .claude/iirc.toml
   iirc tune-suggestions STEP                gather-suggestion-data, record-relevance-judgments,
                                             evaluate-suggestion-thresholds, or mark-session-tuned
-  iirc set-search-backend                   the embedding model and where it runs, or string search; once per machine
+  iirc set-search-backend                   the embedding model, for this repository or the machine, and where it runs; or string search
   iirc init                                 create .iirc/ and the CLAUDE.md paragraph
   iirc migrate                              move a repository and this machine from the memory plugin's layout
   iirc sync                                 commit, pull, and push every remote store
@@ -2974,12 +2974,55 @@ def setup_choice(args: argparse.Namespace) -> tuple[str, str | None, str | None]
     return "ollama", host, models[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(models) else models[0]
 
 
+def iirc_installed() -> bool:
+    """True when this repository's .claude/settings.json or .claude/settings.local.json enables an iirc@ plugin."""
+    for name in ("settings.json", "settings.local.json"):
+        try:
+            plugins = json.loads((ROOT / ".claude" / name).read_text()).get("enabledPlugins")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(plugins, dict) and any(k.startswith("iirc@") and v is True for k, v in plugins.items()):
+            return True
+    return False
+
+
+def set_top_level_text(text: str, key: str, value: str) -> str:
+    """The config text with one top-level key set above the first [table] header. Edits lines, so every other line and comment stays."""
+    entry = f"{key} = {toml_value(value)}"
+    lines = text.splitlines()
+    head = next((i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines))
+    key_re = re.compile(rf"^\s*{re.escape(key)}\s*=\s*[^#]*?(\s*#.*)?$")
+    at = next((i for i in range(head) if key_re.match(lines[i])), None)
+    keys = [i for i in range(head) if lines[i].strip() and not lines[i].lstrip().startswith("#")]
+    if at is not None:
+        lines[at] = entry + (key_re.match(lines[at])[1] or "")
+    elif keys:
+        lines.insert(keys[-1] + 1, entry)   # after the last top-level key
+    elif head < len(lines):
+        lines[head:head] = [entry, ""]
+    else:
+        lines.append(entry)
+    return "\n".join(lines) + "\n"
+
+
 def cmd_set_search_backend(args: argparse.Namespace) -> None:
-    """Choose how search runs on this machine: an ollama model, an OpenAI-compatible host, this CPU, or substring."""
+    """Choose how search runs: the embedding model, for this repository where it installs iirc and else as the machine default,
+    and where the model runs on this machine (an ollama host, an OpenAI-compatible host, or this CPU); or substring, on this machine."""
     backend, host, model = setup_choice(args)
+    if backend == "substring" and args.repository:
+        die("string search is the fallback for a machine that cannot run embeddings, and it names no model, so it is set on the machine; drop --repository")
     if model and iirc_embed.MODELS.get(model, iirc_embed.MODELS["all-minilm-l6-v2"]).backend != backend:
         die(f"{model} is not a model for this backend; the {backend} models are "
             + ", ".join(m.id for m in iirc_embed.MODELS.values() if m.backend == backend))
+    repository = backend != "substring" and (args.repository or (not args.machine and iirc_installed()))
+    toml = ROOT / STORE_CONFIG
+    if repository:
+        new = set_top_level_text(toml.read_text() if toml.is_file() else "", "embedding_model", model)
+        try:
+            if tomllib.loads(new).get("embedding_model") != model:
+                raise ConfigError("embedding_model did not land above the first table")
+        except (tomllib.TOMLDecodeError, ConfigError) as e:
+            die(f"set-search-backend: {STORE_CONFIG} would not read back, so nothing was written: {e}")
     values = {**read_config(), "semantic": backend != "substring"}   # keep keys setup does not ask about
     if backend == "substring":
         path = write_config_file(values)
@@ -2991,16 +3034,29 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
         if not ok:
             die(f"bin/iirc-cpu could not run the model, so nothing was written to the setup file: {out[-500:]}\n"
                 "onnxruntime may have no wheel for this machine; `iirc set-search-backend --substring` is the fallback.")
-    embedding = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
-    values["embedding"] = embedding
+    if repository:
+        # the model goes to the repository; where it runs stays the machine's, and so does the machine's default model
+        if backend == "openai":
+            values["embedding"] = {**(values.get("embedding") or {}), "url": host}
+    else:
+        values["embedding"] = {"backend": backend, "model": model, **({"url": host} if backend == "openai" else {})}
     if backend == "ollama":
         values["embedding_host"] = host
     path = write_config_file(values)
+    if repository:
+        toml.parent.mkdir(parents=True, exist_ok=True)
+        toml.write_text(new)
     global _RESOLVED
     _RESOLVED = None
     where = {"ollama": f"ollama at {host}", "openai": f"the OpenAI-compatible host {host}", "onnx": "this CPU"}[backend]
-    print(f"semantic search with {model} through {where}; written to {path}")
-    print("Each repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
+    if repository:
+        print(f"semantic search with {model} through {where}; the model is embedding_model in {toml}, for this repository (commit it), "
+              f"and where it runs is in {path}, for this machine")
+        print("This repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
+    else:
+        print(f"semantic search with {model} through {where}; written as the machine default in {path}")
+        print(f"Each repository that names no embedding_model in its {STORE_CONFIG} embeds its pages with this model on its next "
+              "`iirc rebuild-search-index`, or by the first search that finds them missing.")
     if backend == "onnx":
         return
     if backend == "ollama" and os.environ.get("OLLAMA_HOST"):
@@ -4938,7 +4994,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
     p.set_defaults(func=cmd_doctor, runs_with_bad_config=True, skips_format_check=True)
 
-    p = sub.add_parser("set-search-backend", help="the embedding model and where it runs, or substring search; prompts if no flags")
+    p = sub.add_parser("set-search-backend", help="the embedding model, for this repository or the machine, and where it runs; or substring search; prompts if no flags")
     p.add_argument("--substring", action="store_true", help="string search: exact text only; the fallback where no embedding model can run")
     p.add_argument("--semantic", action="store_true", help="semantic search through ollama, the default; needs --local or --host")
     p.add_argument("--local", action="store_true", help="embeddings from ollama on this machine")
@@ -4947,6 +5003,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--cpu", action="store_true", help="embeddings on this CPU: all-minilm-l6-v2 through onnxruntime; fetches its files")
     p.add_argument("--model", choices=[m.id for m in iirc_embed.MODELS.values() if m.backend != "onnx"],
                    help="the model for --local, --host, or --openai; ollama defaults to qwen3-embedding:0.6b, --openai to qwen3-embedding")
+    target = p.add_mutually_exclusive_group()
+    target.add_argument("--repository", action="store_true",
+                        help="set the model in this repository's .claude/iirc.toml; the default where .claude/settings.json or settings.local.json enables iirc")
+    target.add_argument("--machine", action="store_true", help="set the model as this machine's default; the default elsewhere, and always for --substring")
     p.set_defaults(func=cmd_set_search_backend, runs_with_bad_config=True, skips_format_check=True)
 
     p = sub.add_parser("show-page-topics", help="every topic with its page count, computed from the pages")

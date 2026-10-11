@@ -4710,3 +4710,61 @@ def test_unknown_repository_model_is_a_config_error(tmp_path):
     assert all(m in iirc.CONFIG_ERROR for m in iirc.iirc_embed.MODELS)
     assert iirc.active_model().id == "nomic-embed-text" and not iirc.knob_error_only()
     (tmp_path / ".claude" / "iirc.toml").unlink(); iirc.set_root(tmp_path)
+
+
+def _backend_repo(tmp_path, monkeypatch, settings: dict | None, name: str = "settings.json"):
+    """A repository whose .claude/NAME holds these settings (None: no settings file), on a machine whose default is nomic."""
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path)); monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    monkeypatch.setattr(iirc, "host_answers", lambda base, timeout=2.0, fresh=False, no_route=False: False)
+    (tmp_path / ".claude").mkdir(exist_ok=True)
+    if settings is not None:
+        (tmp_path / ".claude" / name).write_text(json.dumps(settings))
+    iirc.write_config_file({"semantic": True, "embedding_host": "http://frame:11434", "embedding": {"backend": "ollama", "model": "nomic-embed-text"}})
+    return tmp_path / ".claude" / "iirc.toml"
+
+
+def test_set_search_backend_sets_the_repository_model(tmp_path, monkeypatch, capsys):
+    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+    toml.write_text('# stores\nshow_hooks = true\n\n[stores.project]\nkind = "project"\n')
+    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
+    assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "qwen3-embedding:0.6b"\n\n[stores.project]\nkind = "project"\n'
+    assert iirc.read_config() == {"semantic": True, "embedding_host": "http://127.0.0.1:11434",
+                                  "embedding": {"backend": "ollama", "model": "nomic-embed-text"}}   # where it runs; the default stays
+    out = capsys.readouterr().out
+    assert f"embedding_model in {toml}" in out and iirc.active_model().id == "qwen3-embedding:0.6b"
+    iirc.main(["set-search-backend", "--openai", "https://llm.example.net/v1"])
+    assert toml.read_text() == '# stores\nshow_hooks = true\nembedding_model = "qwen3-embedding"\n\n[stores.project]\nkind = "project"\n'
+    assert iirc.read_config()["embedding"] == {"backend": "ollama", "model": "nomic-embed-text", "url": "https://llm.example.net"}
+    toml.write_text('[stores.project]  # the pages\nkind = "project"\n')   # no top-level key yet: one goes above the first table
+    iirc.main(["set-search-backend", "--host", "frame:11434", "--model", "embeddinggemma"])
+    assert toml.read_text() == 'embedding_model = "embeddinggemma"\n\n[stores.project]  # the pages\nkind = "project"\n'
+    assert iirc.read_config()["embedding_host"] == "http://frame:11434"
+    toml.unlink(); iirc.set_root(tmp_path)
+
+
+def test_set_search_backend_sets_the_machine_default(tmp_path, monkeypatch, capsys):
+    for settings in (None, {"enabledPlugins": {"iirc@dokidlc": False, "other@dokidlc": True}}):
+        toml = _backend_repo(tmp_path, monkeypatch, settings)
+        iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])
+        assert not toml.exists() and iirc.read_config()["embedding"] == {"backend": "ollama", "model": "qwen3-embedding:0.6b"}
+        assert f"the machine default in {iirc.config_file()}" in capsys.readouterr().out
+
+
+def test_set_search_backend_target_flags(tmp_path, monkeypatch, capsys):
+    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}}, name="settings.local.json")
+    iirc.main(["set-search-backend", "--local", "--model", "embeddinggemma", "--machine"])
+    assert not toml.exists() and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
+    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b"])   # settings.local.json installs it too
+    assert toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n' and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
+    toml.unlink(); (tmp_path / ".claude" / "settings.local.json").unlink()
+    iirc.main(["set-search-backend", "--local", "--model", "qwen3-embedding:0.6b", "--repository"])
+    assert toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n' and iirc.read_config()["embedding"]["model"] == "embeddinggemma"
+    capsys.readouterr()
+    with pytest.raises(SystemExit):
+        iirc.main(["set-search-backend", "--local", "--repository", "--machine"])
+    with pytest.raises(SystemExit):
+        iirc.main(["set-search-backend", "--substring", "--repository"])
+    assert "string search" in capsys.readouterr().err and iirc.read_config()["semantic"] is True
+    iirc.main(["set-search-backend", "--substring"])
+    assert iirc.read_config()["semantic"] is False and toml.read_text() == 'embedding_model = "qwen3-embedding:0.6b"\n'
+    toml.unlink(); iirc.set_root(tmp_path)
