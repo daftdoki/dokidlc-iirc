@@ -922,3 +922,71 @@ test('/iirc demo doctor draws the doctor card from sample checks and never runs 
   expect(await card.find({ text: 'NOTES' })).toBeDefined()
   expect(await card.find({ text: 'a real failure on this machine' })).toBeUndefined()
 })
+
+// a session with real numbers and twelve page names for the demo, for the tests of how the demo ends
+function demoFixture(on: On, placed: () => boolean) {
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const names = Array.from({ length: 12 }, (_, i) => `page-${i}.md`)
+  on('session.id', () => ({ value: 's1' }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.open', () => ({ value: placed() ? { isPlaced: true } : { isPlaced: false, reason: 'the terminal is too narrow' } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('process.run', ($, e) => {
+    if (e.argv[0] === 'ls') return ran(['index.md', ...names].join('\n'))
+    if (e.argv.includes('show')) {
+      const name = e.argv[e.argv.length - 1]
+      return ran(JSON.stringify({ store: 'project', name, label: name, path: `/repo/.iirc/${name}`, body: 'b', fm: { title: name }, links: [], signals: [] }))
+    }
+    if (e.argv.includes('--health')) return ran(JSON.stringify({ suspect: [], stores: [] }))
+    if (e.argv.includes('summarize-session-usage')) {
+      return ran(JSON.stringify({ read: ['a.md'], written: [], suggested: ['a.md', 'noisy.md'], used: ['a.md'], missed: [['noisy.md', 4]], match: { all: 62, read: 75, unread: 49 } }))
+    }
+    return ran(BRIEF)
+  })
+}
+
+const readerPane = ($: Engine, requestId = 'iirc') => $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId,
+  props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } })
+
+test('q in the demo reader drops the demo: a page opened later shows the real session a tab away', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  demoFixture(on, () => true)
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'tq1' })
+  await clock.settle()
+  await $.command.run({ command: 'iirc', args: 'reader demo' })
+  await clock.settle()
+  const pane = await readerPane($)
+  expect(await pane.find({ key: 'open-s-page-0.md' })).toBeDefined()
+  await pane.press({ key: 'key-q' })
+  const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+  const card = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'card-after-q',
+    props: { command: 'iirc', args: 'status', text, isErrored: false } })
+  await card.press({ key: 'card-m-noisy.md' })
+  await clock.settle()
+  // the same Pane mount: Claude Code draws the reopened pane into it
+  await pane.press({ key: 'tab-session' })
+  expect(await pane.find({ key: 'open-s-page-0.md' })).toBeUndefined()
+  expect(await pane.find({ key: 'open-s-noisy.md' })).toBeDefined()
+})
+
+test('a demo reader that Claude Code did not place leaves no demo behind', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  let placed = false
+  demoFixture(on, () => placed)
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'tp1' })
+  await clock.settle()
+  await $.command.run({ command: 'iirc', args: 'reader demo' })
+  await clock.settle()
+  placed = true
+  const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+  const card = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'card-unplaced',
+    props: { command: 'iirc', args: 'status', text, isErrored: false } })
+  await card.press({ key: 'card-m-noisy.md' })
+  await clock.settle()
+  const pane = await readerPane($)
+  await pane.press({ key: 'tab-session' })
+  expect(await pane.find({ key: 'open-s-page-0.md' })).toBeUndefined()
+  expect(await pane.find({ key: 'open-s-noisy.md' })).toBeDefined()
+})

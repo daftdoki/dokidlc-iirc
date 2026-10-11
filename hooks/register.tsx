@@ -495,7 +495,9 @@ async function openSession($: EngineInterface, isDemo = false) {
   await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
-  await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
+  const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
+  // an unplaced pane never closes, so nothing else would drop the demo
+  if (!opened.isPlaced) await update($, demoSession, () => null)
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const v = await sessionView($)
   const first = sessionStops(v.pages, v.counts, v.health)[0]
@@ -855,12 +857,9 @@ export const register: Register = on => {
     // the window itself stays at row 0, and goes back there if Claude Code moved it on its own to show the focus
     return next({ ...e, offset: 0 })
   })
-  // a closed pane starts at the Session tab next time, with no stale page or way back
+  // a pane Claude Code closes resets the same way as q, which goes through closePane
   on('ui.close', async ($, e, next) => {
-    if (e.id === PANE) {
-      await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
-      await update($, demoSession, () => null)
-    }
+    if (e.id === PANE) await resetReader($)
     return next(e)
   })
 
@@ -1386,7 +1385,19 @@ function runKey($: EngineInterface, act: (typeof KEYS)[number][3]) {
   if (act === 'session') return update($, reader, x => ({ ...x, tab: 'session' as const }))
   if (act === 'page') return update($, reader, x => (x.page || x.loading ? { ...x, tab: 'page' as const } : x))
   if (act === 'closeTab') return update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
+  return closePane($)
+}
+
+/** Reset the reader and drop the demo, then close the pane: the plugin's own $.ui.close does not reach its ui.close hook. */
+async function closePane($: EngineInterface) {
+  await resetReader($)
   return $.ui.close({ id: PANE }).catch(() => undefined)
+}
+
+/** A closed reader starts at the Session tab next time, with no stale page, no way back, and no demo. */
+async function resetReader($: EngineInterface) {
+  await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
+  await update($, demoSession, () => null)
 }
 
 /** The pane's fixed header: its tabs as chips with the iirc mark, the gradient rule, and the keys. */
