@@ -3033,7 +3033,9 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
                 raise ConfigError("embedding_model did not land above the first table")
         except (tomllib.TOMLDecodeError, ConfigError) as e:
             die(f"set-search-backend: {STORE_CONFIG} would not read back, so nothing was written: {e}")
-    values = {**read_config(), "semantic": backend != "substring"}   # keep keys setup does not ask about
+    values = dict(read_config())   # keep keys setup does not ask about
+    if not repository:
+        values["semantic"] = backend != "substring"   # string search is the machine's choice, never a repository's
     if backend == "substring":
         path = write_config_file(values)
         print(f"string search (fallback); written to {path}. `iirc set-search-backend` switches to semantic search.")
@@ -3063,7 +3065,11 @@ def cmd_set_search_backend(args: argparse.Namespace) -> None:
     if repository:
         print(f"semantic search with {model} through {where}; the model is embedding_model in {toml}, for this repository (commit it), "
               f"and where it runs is in {path}, for this machine")
-        print("This repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
+        if not semantic_enabled():
+            print("This machine uses string search, so no repository's model is used here until "
+                  "`iirc set-search-backend --machine` with --local, --host URL, --openai URL, or --cpu turns semantic search on.")
+        else:
+            print("This repository's pages are embedded with this model on its next `iirc rebuild-search-index`, or by the first search that finds them missing.")
     else:
         print(f"semantic search with {model} through {where}; written as the machine default in {path}")
         print(f"Each repository that names no embedding_model in its {STORE_CONFIG} embeds its pages with this model on its next "

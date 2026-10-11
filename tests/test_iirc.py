@@ -4782,6 +4782,18 @@ def test_set_search_backend_target_flags(tmp_path, monkeypatch, capsys):
     toml.unlink(); iirc.set_root(tmp_path)
 
 
+
+def test_repository_target_leaves_the_machines_string_search(tmp_path, monkeypatch, capsys):
+    """String search is the machine's choice: a repository's model leaves it, and the output names the command that changes it."""
+    toml = _backend_repo(tmp_path, monkeypatch, {"enabledPlugins": {"iirc@dokidlc": True}})
+    iirc.write_config_file({**iirc.read_config(), "semantic": False})
+    for flags in (["--local", "--model", "qwen3-embedding:0.6b"], ["--openai", "https://llm.example.net/v1"]):
+        iirc.main(["set-search-backend", *flags])
+        assert iirc.read_config()["semantic"] is False and "embedding_model" in toml.read_text()
+        out = capsys.readouterr().out
+        assert "This machine uses string search" in out and "`iirc set-search-backend --machine`" in out, out
+    toml.unlink(); iirc.set_root(tmp_path)
+
 def test_sweep_uses_only_the_active_models_rows(tmp_path, monkeypatch, capsys):
     """A row from another model, or from before rows named their model, is on another distance scale: the sweep leaves it out."""
     _sweep_fixture(tmp_path, monkeypatch, [("p1.md", 0.25, "relevant"), ("p2.md", 0.33, "noise"), ("p3.md", 0.5, "noise"), ("p4.md", 0.5, "relevant")])
