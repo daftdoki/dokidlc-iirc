@@ -3898,7 +3898,7 @@ def test_maintenance_due_after_a_week_and_five_sessions(tmp_path, monkeypatch):
     _project(tmp_path, monkeypatch)
     assert iirc.maintenance_due() == []                                 # never run, no sessions yet
     _log([("start", f"s{i}", 1) for i in range(5)])
-    assert iirc.maintenance_due() == ["never run in this repository, 5 sessions"]
+    assert iirc.maintenance_due() == ["no run in the last 30 days, 5 sessions"]
     _log([("maintenance", "m", 8)])                                     # a week ago: the five sessions came after
     assert iirc.maintenance_due() == ["8 days and 5 sessions since the last run"]
     _log([("maintenance", "m", 2)])
@@ -3921,7 +3921,7 @@ def test_maintenance_due_sooner_for_each_reason(tmp_path, monkeypatch):
     _waiting(9)
     assert iirc.maintenance_due() == []
     _waiting(10)
-    assert iirc.maintenance_due() == ["10 sessions waiting to be judged for tuning"]
+    assert iirc.maintenance_due() == ["10 or more sessions waiting to be judged for tuning"]
     _log([("tuned", f"w{i}", 0, {"tuned": f"w{i}"}) for i in range(10)])
     assert iirc.maintenance_due() == []
     _log([("timeout", "s1", 3), ("timeout", "s2", 9)])                  # the second is past the 7 days
@@ -4044,7 +4044,7 @@ def test_brief_says_maintenance_is_due_in_one_sentence(tmp_path, monkeypatch, ca
     (tmp_path / "docs" / "a.md").write_text("two\n"); _git(tmp_path, "commit", "-qam", "change")
     iirc.main(["doctor", "--brief"])
     out = capsys.readouterr().out
-    assert ("Maintenance is due (never run in this repository, 5 sessions; 1 suspect page (cites.md); "
+    assert ("Maintenance is due (no run in the last 30 days, 5 sessions; 1 suspect page (cites.md); "
             "1 suggestion lookup timed out in the last 7 days); run /iirc run-maintenance.") in out
     assert "suspect:" not in out and "iirc doctor names the cause" not in out
 
@@ -4072,3 +4072,25 @@ def test_run_maintenance_leaves_a_store_it_could_not_commit_first(tmp_path, monk
     out = capsys.readouterr().out
     assert out.splitlines()[0].startswith("Starting commits:")
     assert "store project was not committed before the run (a merge or rebase is in progress)" in out[out.index("Left to decide:"):]
+
+
+def test_maintenance_due_reads_only_its_window_of_the_log(tmp_path, monkeypatch):
+    """The brief's due check reads the last 30 days: a rotated month before that is never opened."""
+    _project(tmp_path, monkeypatch)
+    _log([("start", f"s{i}", 1) for i in range(5)])
+    old = iirc.state_dir() / "log-2020-01.jsonl"
+    (iirc.state_dir() / "log.jsonl").rename(old)                         # rows dated today, in a file of an old month
+    assert iirc.maintenance_due() == []
+    assert len(iirc.read_log()) == 5                                     # the unbounded read still sees them
+
+
+def test_untuned_sessions_stops_at_its_limit(tmp_path, monkeypatch):
+    _project(tmp_path, monkeypatch)
+    _waiting(15)
+    calls = []
+    real = iirc.tuning_window
+    monkeypatch.setattr(iirc, "tuning_window", lambda rows: calls.append(1) or real(rows))
+    sessions = iirc.repo_sessions()
+    assert len(iirc.untuned_sessions(sessions)) == 15 and len(calls) == 15   # once per session, not per row
+    calls.clear()
+    assert len(iirc.untuned_sessions(sessions, limit=10)) == 10 and len(calls) == 10

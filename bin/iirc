@@ -831,7 +831,12 @@ def read_log(days: int | None = None, session: str | None = None) -> list[dict]:
     cutoff = None
     if days is not None:
         cutoff = datetime.now(UTC).timestamp() - days * 86400
-    lines = [line for path in sorted(state_dir().glob("log*.jsonl")) for line in path.read_text().splitlines()]
+    paths = sorted(state_dir().glob("log*.jsonl"))
+    if cutoff is not None:
+        # a rotated month that ended before the cutoff holds no row worth reading
+        first = f"{datetime.fromtimestamp(cutoff, UTC):%Y-%m}"
+        paths = [p for p in paths if not re.fullmatch(r"log-\d{4}-\d{2}\.jsonl", p.name) or p.name[4:11] >= first]
+    lines = [line for path in paths for line in path.read_text().splitlines()]
     for line in lines:
         try:
             row = json.loads(line)
@@ -4025,15 +4030,24 @@ def repo_sessions(rows: list[dict] | None = None) -> dict[str, list[dict]]:
     return out
 
 
-def untuned_sessions(sessions: dict[str, list[dict]], days: int | None = None) -> list[str]:
-    """Sessions gather-suggestion-data would gather: suggestion lines, not tuned, not a recording, a transcript or prompts file left."""
+def untuned_sessions(sessions: dict[str, list[dict]], days: int | None = None, limit: int | None = None) -> list[str]:
+    """Sessions gather-suggestion-data would gather: suggestion lines, not tuned, not a recording, a transcript or prompts file left.
+    With a limit, it stops once it has found that many."""
     skip = {r.get("tuned") for rows in sessions.values() for r in rows if r["cmd"] == "tuned"}
     # a recording's prompts are a script, not work
     skip |= {s for s, rows in sessions.items() if any(r["cmd"] in ("start", "session") and r.get("recording") for r in rows)}
     cutoff = time.time() - days * 86400 if days is not None else -math.inf
-    return [s for s, rows in sessions.items() if s not in skip
-            and any(work_recall(r, tuning_window(rows)) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
-            and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())]
+    found = []
+    for s, rows in sessions.items():
+        if s in skip:
+            continue
+        window = tuning_window(rows)
+        if (any(work_recall(r, window) and (parse_ts(r["ts"]) or 0) >= cutoff for r in rows)
+                and (transcript_for(s, rows) or (state_dir() / "prompts" / f"{safe_name(s)}.jsonl").is_file())):
+            found.append(s)
+            if limit is not None and len(found) >= limit:
+                break
+    return found
 
 
 def cmd_tune_gather(args: argparse.Namespace) -> None:
@@ -4398,6 +4412,7 @@ MAINTENANCE_SESSIONS = 5    # a week with fewer sessions than this changed too l
 WAITING_SESSIONS = 10       # sessions waiting to be judged before a tuning pass, which is long, is worth offering
 NETWORK_CHECK_DAYS = 30     # URL refs change slowly, and the check contacts every one: offer it about once a month
 TIMEOUT_DAYS = 7            # the window doctor counts suggestion lookups that timed out in
+DUE_WINDOW_DAYS = 30        # the log the due check reads: past the 7-day rule, and short enough for the session start
 
 
 def plural(n: int, word: str, many: str | None = None) -> str:
@@ -4408,14 +4423,14 @@ def maintenance_due(suspects: list[str] = (), ahead: int = 0, close: int = 0) ->
     """Why run-maintenance is due, or []. The caller passes the counts it has already made; the rest
     comes from one read of the log. No network, no host probe: the session-start brief calls it."""
     now = time.time()
-    rows = [r for r in read_log() if r.get("repo") == str(ROOT)]
+    rows = [r for r in read_log(days=DUE_WINDOW_DAYS) if r.get("repo") == str(ROOT)]
     at = lambda r: parse_ts(r.get("ts")) or 0
     reasons = []
     last = max((at(r) for r in rows if r["cmd"] == "maintenance"), default=None)
     since = {r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}
     if len(since) >= MAINTENANCE_SESSIONS:
         if last is None:
-            reasons.append(f"never run in this repository, {plural(len(since), 'session')}")
+            reasons.append(f"no run in the last {DUE_WINDOW_DAYS} days, {plural(len(since), 'session')}")
         elif now - last >= MAINTENANCE_DAYS * 86400:
             reasons.append(f"{plural(int((now - last) // 86400), 'day')} and {plural(len(since), 'session')} since the last run")
     if suspects:
@@ -4427,9 +4442,8 @@ def maintenance_due(suspects: list[str] = (), ahead: int = 0, close: int = 0) ->
         reasons.append(f"{plural(timeouts, 'suggestion lookup')} timed out in the last {TIMEOUT_DAYS} days")
     if close:
         reasons.append(f"{plural(close, 'near-duplicate pair')}")
-    waiting = len(untuned_sessions(repo_sessions(rows)))
-    if waiting >= WAITING_SESSIONS:
-        reasons.append(f"{waiting} sessions waiting to be judged for tuning")
+    if len(untuned_sessions(repo_sessions(rows), limit=WAITING_SESSIONS)) >= WAITING_SESSIONS:
+        reasons.append(f"{WAITING_SESSIONS} or more sessions waiting to be judged for tuning")
     return reasons
 
 
