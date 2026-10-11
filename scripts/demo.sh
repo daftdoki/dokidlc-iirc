@@ -7,6 +7,8 @@
 # One prompt is sent, so recall suggests pages under it, and is interrupted; the
 # rest is iirc's own commands, which never call the model. Needs vhs and runs as
 # you, logged in. Local only, like scripts/screenshots.sh.
+# CLAUDE_CODE_DISABLE_ADVISOR_TOOL keeps the "Advisor Tool (experimental) is on"
+# notice off the screen above the prompt.
 set -eu
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -24,7 +26,7 @@ Set Width 1600
 Set Height 1000
 Set TypingSpeed 45ms
 Hide
-Type "cd $repo && env -u CLAUDE_CODE_CHILD_SESSION IIRC_RECORDING=1 claude --disallowedTools Bash"
+Type "cd $repo && env -u CLAUDE_CODE_CHILD_SESSION IIRC_RECORDING=1 CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude --disallowedTools Bash"
 Enter
 Sleep 8s
 Type "/clear"
