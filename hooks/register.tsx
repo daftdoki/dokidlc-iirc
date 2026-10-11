@@ -307,6 +307,8 @@ const PULSE = ['◐', '◓', '◑', '◒'] as const
 // the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
 // both in the line itself, as before
 const BAND_CONTEXT = true
+// a click on the band's line opens the iirc pane, as /iirc reader does; false leaves it plain text
+const BAND_PRESS = true
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
@@ -1081,7 +1083,7 @@ export const register: Register = on => {
       <Text key="circle" color={LEVEL_COLOR[bandLevel(s, c)]}>{`${frame === null ? '●' : PULSE[frame]} `}</Text>,
       accentBar($, e, 'bar'),
       ...line.map(span),
-    ], context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined)
+    ], context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined, BAND_PRESS ? () => void openSession($).catch(() => {}) : undefined)
   })
 
   // Under the prompt, beside the engine's hint: a line only when the person needs to act.
@@ -1580,12 +1582,16 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
  * What the engine drew, with one line of iirc's under it, in a keyed Box. The line is one Text of inline spans,
  * so it wraps as one run of prose: in a row Box each span would take a column of its own and wrap inside it.
  */
-function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[], right?: RenderChildren[]) {
-  const { Box, Text } = $.ui.resolve(e)
-  // the right end, when there is one, sits at the row's end: the line takes the room left of it
+function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[], right?: RenderChildren[], onPress?: () => void) {
+  const { Box, Button, Text } = $.ui.resolve(e)
+  // the right end, when there is one, sits at the row's end: the line takes the room left of it. A pressable
+  // line is a Button of the same spans: a Button holds Text and strings only, and needs a key, as its text changes
+  const line = onPress
+    ? <Button key="iirc-open" plain label="open the iirc pane" onPress={onPress}>{spans}</Button>
+    : <Text>{spans}</Text>
   const row = (
     <Box key={key} flexDirection="row">
-      <Box flexGrow={1} flexShrink={1}><Text>{spans}</Text></Box>
+      <Box flexGrow={1} flexShrink={1}>{line}</Box>
       {right && <Box flexShrink={0}><Text>{right}</Text></Box>}
     </Box>
   )

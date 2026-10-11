@@ -1220,6 +1220,20 @@ test('over an empty engine band, the band is our one row and nothing else', asyn
   expect(parts(root).map(([t]) => t).join('')).toBe('● ▍iirc status  110 pages')
 })
 
+test('a press on the band opens the iirc pane', async ($: Engine, on: On) => {
+  engine(on)
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  const opened: string[] = []
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.open', ($, e) => (opened.push(e.id), { value: { isPlaced: true } }))
+  on('process.run', ($, e) => (e.argv.includes('--health') ? ran(JSON.stringify({ suspect: [], stores: [] })) : ran(OK_BRIEF)))
+  await hookRow($, 'SessionStart', OK_BRIEF, 'hb1')
+  const band = await bandRow($)
+  expect(await band.find({ key: 'iirc-open' })).toBeDefined()
+  await band.press({ key: 'iirc-open' })
+  expect(opened).toEqual(['iirc'])
+})
+
 test('the band\'s right end: the model or string search, then the page count, dropped first at a narrow width', async ($: Engine, on: On) => {
   engine(on)
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -1326,7 +1340,8 @@ test('the line under the prompt and the summary line are each one Text of spans,
     return columns.length > 0 && columns.every(col => {
       const kids = (col as Node).children ?? []
       const text = (kids[0] ?? {}) as Node
-      return kids.length === 1 && text.type === 'Text' && !!text.children?.length && text.children.every(c => !!c && typeof c === 'object' && (c as Node).type === 'Text')
+      // the band's line is a Button of spans, so a click opens the pane
+      return kids.length === 1 && (text.type === 'Text' || text.type === 'Button') && !!text.children?.length && text.children.every(c => !!c && typeof c === 'object' && (c as Node).type === 'Text')
     })
   }
   const todo = await (await hintRow($)).find({ key: 'iirc-todo' })
