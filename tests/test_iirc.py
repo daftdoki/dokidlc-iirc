@@ -5188,3 +5188,10 @@ def test_doctor_fix_pulls_only_on_the_local_host(tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(iirc, "LOCAL_OLLAMA", host.url)
         _doctor(["doctor", "--fix"], capsys)
         assert calls.read_text() == "ollama pull nomic-embed-text\n"
+
+
+def test_timeout_span_follows_the_window():
+    # the words come from the window, so the two cannot disagree
+    assert iirc.timeout_span(7) == "this week"
+    assert iirc.timeout_span(3) == "in the last 3 days"
+    assert iirc.TIMEOUT_SPAN == iirc.timeout_span(iirc.TIMEOUT_DAYS)

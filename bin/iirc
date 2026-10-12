@@ -5106,8 +5106,16 @@ MAINTENANCE_SESSIONS = 5    # a week with fewer sessions than this changed too l
 WAITING_SESSIONS = 10       # sessions waiting to be judged before a tuning pass, which is long, is worth offering
 NETWORK_CHECK_DAYS = 30     # URL refs change slowly, and the check contacts every one: offer it about once a month
 TIMEOUT_DAYS = 7            # the window doctor counts suggestion lookups that timed out in, from the last run at the earliest
-TIMEOUT_SPAN = "this week"  # the words for TIMEOUT_DAYS, counted from the last run at the earliest
+
 DUE_WINDOW_DAYS = 30        # the log the due check reads: past the 7-day rule, and short enough for the session start
+
+
+def timeout_span(days: int) -> str:
+    """The words for the timeout window of `days`, counted from the last run at the earliest."""
+    return "this week" if days == 7 else f"in the last {days} days"
+
+
+TIMEOUT_SPAN = timeout_span(TIMEOUT_DAYS)
 
 
 def plural(n: int, word: str, many: str | None = None) -> str:
