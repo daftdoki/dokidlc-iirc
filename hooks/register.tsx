@@ -538,8 +538,7 @@ async function openPage($: EngineInterface, ref: string, isBack = false) {
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
   // a name in the tree or a card opens the pane; inside the pane this only retitles it
-  const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
-  if (!opened.isPlaced) $.ui.toast(`iirc: the reader is waiting: ${opened.reason}; /iirc reader opens it`)
+  sayIfWaiting($, await $.ui.open({ id: PANE, title: 'iirc reader', focus: true }))
   // while the page loads, the ring stays off the keys row too, where Enter would close the tab or the reader
   await $.ui.focus({ requestId: PANE, key: 'tab-page' }).catch(() => undefined)
   let page: ShownPage | null = null
@@ -651,19 +650,29 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
   await $.ui.focus({ requestId: PANE, key: key.startsWith('para-') ? 'tab-page' : key }).catch(() => undefined)
 }
 
+/**
+ * A toast when Claude Code holds the pane back: an open from a click counts as the plugin's own, and waits undrawn
+ * below 144 columns (110 once the person opened the pane by hand); the reason says the floor and the width now.
+ */
+function sayIfWaiting($: EngineInterface, opened: { isPlaced: boolean; reason?: unknown }) {
+  if (!opened.isPlaced) $.ui.toast(`iirc: the reader is waiting: ${String(opened.reason)}; /iirc reader opens it`)
+}
+
 /** The Session tab, with its numbers fresh. */
 async function openSession($: EngineInterface, isDemo = false) {
+  // open before any await: an open is the person's only while their press or command is still running, and
+  // doctor --health may take seconds; the pane redraws as the state below and the numbers land
+  const opening = $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   if (isDemo) await loadDemoSession($)
   else await update($, demoSession, () => null)
   // `/iirc reader` starts fresh: the session tab, and no page tab left from before
   await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
-  // open before the numbers refresh: an open is the person's only while their press or command is still running,
-  // and doctor --health may take seconds; the pane redraws when the numbers land
-  const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
+  const opened = await opening
   // an unplaced pane never closes, so nothing else would drop the demo
   if (!opened.isPlaced) await update($, demoSession, () => null)
+  sayIfWaiting($, opened)
   if (!isDemo) {
     refreshCounts($)
     await refreshHealth($)

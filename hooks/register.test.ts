@@ -1211,6 +1211,27 @@ test('over an empty engine band, the band is our one row and nothing else', asyn
   expect(parts(root).map(([t]) => t).join('')).toBe('● ▍iirc status  110 pages')
 })
 
+// Claude Code seats a pane a click opens only from 144 columns (110 once the person opened that id by hand);
+// below that the open waits undrawn, so the press says so, as a suggested page's click does
+const WAITING = 'unasked below 144 columns (129 now): placed when the person opens it, or when the terminal widens'
+for (const isPlaced of [false, true]) {
+  test(`a press on the band ${isPlaced ? 'opens the pane and toasts nothing' : 'says why the pane waits, and how to open it'}`, async ($: Engine, on: On) => {
+    engine(on)
+    const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    const toast: string[] = []
+    const ids: string[] = []
+    on('ui.toast', ($, e) => (toast.push(e.text), { value: undefined }))
+    on('ui.open', ($, e) => (ids.push(e.id), { value: isPlaced ? { isPlaced: true } : { isPlaced: false, reason: WAITING } }))
+    on('process.run', ($, e) => (e.argv.includes('--health') ? ran(JSON.stringify({ suspect: [], stores: [] })) : ran(OK_BRIEF)))
+    await hookRow($, 'SessionStart', OK_BRIEF, `hw-${isPlaced}`)
+    await (await bandRow($)).press({ key: 'iirc-open' })
+    await new Promise(r => setTimeout(r, 20))
+    // the pane /iirc reader opens, so the 110-column floor applies once the person has opened it by hand
+    expect(ids).toEqual(['iirc'])
+    expect(toast).toEqual(isPlaced ? [] : [`iirc: the reader is waiting: ${WAITING}; /iirc reader opens it`])
+  })
+}
+
 test('a press on the band opens the iirc pane at once, and i presses it once the band has the focus', async ($: Engine, on: On) => {
   engine(on)
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
