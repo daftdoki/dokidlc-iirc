@@ -90,7 +90,7 @@ A counter at zero is left out, and a counter that rose shows its number
 bright with a dim `+N` for four seconds. When the terminal is too narrow
 for both, the right end goes and the line itself shows the page count
 until the session does something, and `string search` when it applies.
-A click on the line opens the iirc pane, as `/iirc reader` does. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
+A click on the line opens the iirc pane, as `/iirc reader` does; a terminal reports clicks only in fullscreen, so ctrl+x tab, then i, does the same anywhere. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
 `migrate`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`,
 `prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line.
 

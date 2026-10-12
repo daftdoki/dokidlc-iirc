@@ -1211,18 +1211,26 @@ test('over an empty engine band, the band is our one row and nothing else', asyn
   expect(parts(root).map(([t]) => t).join('')).toBe('● ▍iirc status  110 pages')
 })
 
-test('a press on the band opens the iirc pane', async ($: Engine, on: On) => {
+test('a press on the band opens the iirc pane at once, and i presses it once the band has the focus', async ($: Engine, on: On) => {
   engine(on)
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-  const opened: string[] = []
+  const order: string[] = []
   on('ui.toast', () => ({ value: undefined }))
-  on('ui.open', ($, e) => (opened.push(e.id), { value: { isPlaced: true } }))
-  on('process.run', ($, e) => (e.argv.includes('--health') ? ran(JSON.stringify({ suspect: [], stores: [] })) : ran(OK_BRIEF)))
+  on('ui.open', ($, e) => (order.push(`open ${e.id}`), { value: { isPlaced: true } }))
+  on('process.run', ($, e) => {
+    if (e.argv.includes('--health')) return (order.push('health'), ran(JSON.stringify({ suspect: [], stores: [] })))
+    return ran(OK_BRIEF)
+  })
   await hookRow($, 'SessionStart', OK_BRIEF, 'hb1')
   const band = await bandRow($)
-  expect(await band.find({ key: 'iirc-open' })).toBeDefined()
+  const button = (await band.find({ key: 'iirc-open' })) as { type?: string; props?: Record<string, unknown> }
+  expect(button.type).toBe('Button')
+  expect(button.props?.hotkey).toBe('i')                       // ctrl+x tab, then i, where a click does not reach the band
+  // the open comes first, while the press is still the person's: an open after a slow doctor --health may count as unasked
   await band.press({ key: 'iirc-open' })
-  expect(opened).toEqual(['iirc'])
+  expect(order[0]).toBe('open iirc')
+  // a narrow band keeps the Button
+  expect(((await (await bandRow($, false, 20)).find({ key: 'iirc-open' })) as { type?: string }).type).toBe('Button')
 })
 
 test('the band\'s right end: the model or string search, then the page count, dropped first at a narrow width', async ($: Engine, on: On) => {

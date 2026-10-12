@@ -301,7 +301,8 @@ const BAND_FLASH_MS = 4000
 // the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
 // both in the line itself, as before
 const BAND_CONTEXT = true
-// a click on the band's line opens the iirc pane, as /iirc reader does; false leaves it plain text
+// a click on the band's line opens the iirc pane, as /iirc reader does, and so does i once the band has the
+// focus (ctrl+x tab): a terminal on the main screen reports no clicks; false leaves it plain text
 const BAND_PRESS = true
 
 /** One part of the summary line: its text and how it is drawn. */
@@ -653,18 +654,20 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 /** The Session tab, with its numbers fresh. */
 async function openSession($: EngineInterface, isDemo = false) {
   if (isDemo) await loadDemoSession($)
-  else {
-    await update($, demoSession, () => null)
-    refreshCounts($)
-    await refreshHealth($)
-  }
+  else await update($, demoSession, () => null)
   // `/iirc reader` starts fresh: the session tab, and no page tab left from before
   await update($, reader, () => ({ page: null, history: [], error: null, loading: null, tab: 'session' as const }))
   // the pane opens at its top, the counts first; j brings the first page name into view
   await update($, cursor, x => ({ ...x, session: 0, sessionTop: 0 }))
+  // open before the numbers refresh: an open is the person's only while their press or command is still running,
+  // and doctor --health may take seconds; the pane redraws when the numbers land
   const opened = await $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   // an unplaced pane never closes, so nothing else would drop the demo
   if (!opened.isPlaced) await update($, demoSession, () => null)
+  if (!isDemo) {
+    refreshCounts($)
+    await refreshHealth($)
+  }
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const v = await sessionView($)
   const first = sessionStops(v.pages, v.counts, v.health)[0]
@@ -1062,7 +1065,13 @@ export const register: Register = on => {
       ...line.map(span),
     ], {
       right: context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined,
-      onPress: BAND_PRESS ? () => void openSession($).catch(() => {}) : undefined,
+      onPress: BAND_PRESS
+        ? () => {
+          // in the debug log (claude --debug), so a press that opens nothing can be told from one that never arrived
+          $.ui.log('iirc: band pressed, opening the pane', { to: 'debug' })
+          void openSession($).catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
+        }
+        : undefined,
       // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt
       dropsEmpty: true,
     })
@@ -1572,7 +1581,7 @@ function withRow(
   // the right end, when there is one, sits at the row's end: the line takes the room left of it. A pressable
   // line is a Button of the same spans: a Button holds Text and strings only, and needs a key, as its text changes
   const line = onPress
-    ? <Button key="iirc-open" plain label="open the iirc pane" onPress={onPress}>{spans}</Button>
+    ? <Button key="iirc-open" plain hotkey="i" label="open the iirc pane" onPress={onPress}>{spans}</Button>
     : <Text>{spans}</Text>
   const row = (
     <Box key={key} flexDirection="row">
