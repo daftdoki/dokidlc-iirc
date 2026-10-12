@@ -282,19 +282,25 @@ function reason(sentence: string): string {
   return /^[A-Z][a-z]/.test(why) ? why[0].toLowerCase() + why.slice(1) : why
 }
 
-/** The brief's status, turned yellow by a problem this session found, such as a recall that ran past the hook's time limit. */
+/** The brief's status, turned yellow by a problem this session found, such as a recall that ran past the hook's time limit, or while search runs on terms alone. */
 export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
+  if (s.level !== 'ok') return s
   const first = actions(s, c)[0]
-  return s.level === 'ok' && first ? { ...s, level: first.level } : s
+  return first ? { ...s, level: first.level } : isStringSearch(s) ? { ...s, level: 'warn' } : s
 }
 
 // how long a counter that rose stays lit with its +N in the band, in milliseconds
 const FLASH_MS = 4000
 
+/** "page" or "pages", for n of them. */
+const pageWord = (n: number) => (n === 1 ? 'page' : 'pages')
+
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
 
 const isStringSearch = (s: IircStatus) => !!s.mode && s.mode !== 'semantic+keyword'
+// how the band names a search that runs on terms alone, in the line or at its right end
+const STRING_SEARCH: LinePart = { text: 'string search', color: 'warning' }
 
 /**
  * The summary line above the prompt, after its circle and accent bar: "iirc status", then what this session did.
@@ -314,13 +320,13 @@ export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, ha
   const word = (text: string): LinePart => ({ text, color: 'subtle' })
   const items: LinePart[][] = []
   const isQuiet = c.suggested + c.searches + c.reads + c.writes === 0
-  if (!hasContext && s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(s.pages === 1 ? ' page' : ' pages')])
+  if (!hasContext && s.pages !== null && isQuiet) items.push([num(String(s.pages)), word(` ${pageWord(s.pages)}`)])
   if (c.suggested > 0) items.push([...count('used'), num('/'), ...count('suggested'), word(' suggested read')])
   for (const [key, label] of [['searches', 'searched'], ['reads', 'read'], ['writes', 'written']] as const) {
     if (c[key] > 0) items.push([...count(key), word(` ${label}`)])
   }
   // the mode shows only when it is not the default, so a weaker search stands out
-  if (!hasContext && isStringSearch(s)) items.push([{ text: 'string search', color: 'warning' }])
+  if (!hasContext && isStringSearch(s)) items.push([STRING_SEARCH])
   // a thin rule between the counters
   items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(' │ '), ...item))
   return out
@@ -332,12 +338,12 @@ export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, ha
  */
 export function contextParts(s: IircStatus, model: string | null): LinePart[] {
   const out: LinePart[] = []
-  if (isStringSearch(s)) out.push({ text: 'string search', color: 'warning' })
+  if (isStringSearch(s)) out.push(STRING_SEARCH)
   // in error, or before setup, the model the counts name is not the one in use
   else if (model && s.level !== 'error') out.push({ text: model, color: 'subtle' })
   if (s.pages !== null) {
     if (out.length > 0) out.push({ text: ' · ', color: 'subtle' })
-    out.push({ text: `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}`, color: 'subtle' })
+    out.push({ text: `${s.pages} ${pageWord(s.pages)}`, color: 'subtle' })
   }
   return out
 }
@@ -354,14 +360,8 @@ export function bandParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, colu
 /** How search runs, as the help names it, the band's rule: the model with semantic search, and the mode only when it is string search. */
 export function searchSetting(s: IircStatus | null, model: string | null): [string, string] {
   if (s === null) return ['search', '?']
-  if (isStringSearch(s)) return ['search:', 'string, the fallback']
+  if (isStringSearch(s)) return ['search', 'string (fallback)']
   return model ? ['model', model] : ['search', 'semantic']
-}
-
-/** The circle's level: the brief's, and yellow while search runs on terms alone. */
-function bandLevel(s: IircStatus, c: SessionCounts): IircStatus['level'] {
-  const level = liveStatus(s, c).level
-  return level === 'ok' && isStringSearch(s) ? 'warn' : level
 }
 
 /** A line's parts as plain text. */
@@ -723,7 +723,7 @@ export function matchText(m: MatchAverages): string {
 /** One store as the card says it: its pages, then clean or what it holds back. */
 export function storeText(x: IircHealth['stores'][number]): string {
   const held = [x.uncommitted > 0 ? `${x.uncommitted} not committed` : '', x.unpushed > 0 ? `${x.unpushed} not pushed` : ''].filter(Boolean)
-  return `${x.name} ${x.pages} ${x.pages === 1 ? 'page' : 'pages'}, ${held.length > 0 ? held.join(', ') : 'clean'}`
+  return `${x.name} ${x.pages} ${pageWord(x.pages)}, ${held.length > 0 ? held.join(', ') : 'clean'}`
 }
 
 /** Ask iirc how many distinct pages this session has read and written, from its log. */
@@ -1079,7 +1079,7 @@ export const register: Register = on => {
     const { Text } = $.ui.resolve(e)
     const span = (p: LinePart, k: number) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>
     return withRow($, e, await next(e), 'iirc-line', [
-      <Text key="circle" color={LEVEL_COLOR[bandLevel(s, c)]}>● </Text>,
+      <Text key="circle" color={LEVEL_COLOR[liveStatus(s, c).level]}>● </Text>,
       accentBar($, e, 'bar'),
       ...line.map(span),
     ], {
@@ -1221,7 +1221,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   }
   if (s && s.mode && s.mode !== 'semantic+keyword') statusRow.push(<Text key="mode" color={LEVEL_COLOR.warn}>{`   ${s.mode} mode`}</Text>)
   const tiles: [string, string][] = s && s.pages !== null
-    ? [[String(s.pages), s.pages === 1 ? 'page' : 'pages'], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
+    ? [[String(s.pages), pageWord(s.pages)], [`${c.used}/${c.suggested}`, 'used'], [String(c.reads), 'reads'], [String(c.writes), 'writes']]
     : []
   const share = c.suggested > 0 ? c.used / c.suggested : 0
   const pct = Math.round(share * 100)
@@ -1257,7 +1257,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
   const factWidths: number[] = []
   if (checkup) {
     const n = checkup.suspect.length
-    const text = n === 0 ? 'no suspect pages' : `${n} suspect ${n === 1 ? 'page' : 'pages'}: a cited file changed`
+    const text = n === 0 ? 'no suspect pages' : `${n} suspect ${pageWord(n)}: a cited file changed`
     trustRows.push(fact('trust', 'TRUST', n === 0, [<Text key="t" color="subtle">{text}</Text>], n > 0 ? MAINTAIN : undefined))
     factWidths.push(widthOf(text, n > 0 ? MAINTAIN : undefined))
     for (const name of checkup.suspect.slice(0, LIST_MAX)) {
@@ -1288,7 +1288,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('summary line, on|off', isShown ? 'on' : 'off', SET_LINE)}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, SET_MAX)}
-      {(([label, value]) => setting(label.replace(/:$/, ''), value, SET_SEARCH))(searchSetting(s, c.model))}
+      {setting(...searchSetting(s, c.model), SET_SEARCH)}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>
@@ -1394,7 +1394,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {gauge}
       {s && s.pages !== null && blank('b5')}
       {s && s.pages !== null && heading('STORE')}
-      {s && s.pages !== null && <Box flexDirection="row" paddingLeft={2}>{tile(String(s.pages), s.pages === 1 ? 'page' : 'pages')}</Box>}
+      {s && s.pages !== null && <Box flexDirection="row" paddingLeft={2}>{tile(String(s.pages), pageWord(s.pages))}</Box>}
     </Box>
   )
   // status: every number the card knows
@@ -1449,9 +1449,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       </Box>
       {/* a rule under the title, orange to violet, as long as the tagline line */}
       <Box flexDirection="row">
-        {Array.from({ length: inner }, (_, k) => (
-          <Text key={k} color={mix(TAGLINE_FROM, TAGLINE_TO, k / (inner - 1))}>━</Text>
-        ))}
+        {gradient('━'.repeat(inner)).map((p, k) => <Text key={k} color={p.color}>{p.text}</Text>)}
       </Box>
       {view === 'help' && helpBody}
       {view === 'home' && homeBody}
@@ -1584,7 +1582,7 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
   const n = Math.max(1, width)
   return (
     <Box key={key} flexDirection="row">
-      {Array.from({ length: n }, (_, k) => <Text key={`r${k}`} color={mix(TAGLINE_FROM, TAGLINE_TO, n > 1 ? k / (n - 1) : 0)}>━</Text>)}
+      {gradient('━'.repeat(n)).map((p, k) => <Text key={`r${k}`} color={p.color}>{p.text}</Text>)}
     </Box>
   )
 }
@@ -1914,7 +1912,7 @@ function drawNote($: EngineInterface, e: ResolveInput, id: string, note: ToolNot
 function drawPages($: EngineInterface, e: ResolveInput, id: string, pages: RecalledPage[], isOpen: boolean, verb: string) {
   const { Box, Button, Text } = $.ui.resolve(e)
   const toggle = () => update($, open, map => keepLast(map, id, !(map[id] === true)))
-  const noun = pages.length === 1 ? 'page' : 'pages'
+  const noun = pageWord(pages.length)
   const label = verb === 'suggested' ? `${noun} suggested` : `${noun} suggested for this error`
   return (
     <Box key={`iirc-${id}`} flexDirection="column" paddingLeft={3}>

@@ -368,7 +368,7 @@ test('a plain /iirc prints help with the session line, and does not load the ski
   expect(helpText).toContain('summary line on · max-suggested-pages 4 · search semantic')
   // the help names the mode only when it is string search, and the model otherwise
   expect(searchSetting(parseBrief(BRIEF)!.status, 'qwen3-embedding-0.6b')).toEqual(['model', 'qwen3-embedding-0.6b'])
-  expect(searchSetting(parseBrief('iirc: 9 pages, string search. Topics: x 9.')!.status, 'qwen3-embedding-0.6b')).toEqual(['search:', 'string, the fallback'])
+  expect(searchSetting(parseBrief('iirc: 9 pages, string search. Topics: x 9.')!.status, 'qwen3-embedding-0.6b')).toEqual(['search', 'string (fallback)'])
   // where a command runs another one, the help says so
   expect(helpText).toMatch(/\/iirc tune-suggestions .*evaluate thresholds/)
   expect(helpText).not.toMatch(/\/iirc tune-suggestions .*audit/)   // auditing is its own step
