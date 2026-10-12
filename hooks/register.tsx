@@ -301,8 +301,8 @@ const BAND_FLASH_MS = 4000
 // the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
 // both in the line itself, as before
 const BAND_CONTEXT = true
-// a click on the band's line opens the iirc pane, as /iirc reader does, and so does i once the band has the
-// focus (ctrl+x tab): a terminal on the main screen reports no clicks; false leaves it plain text
+// a click on the band's line opens the iirc pane, as /iirc reader does; no hotkey, since a plain Button draws
+// its hotkey before the label; false leaves it plain text
 const BAND_PRESS = true
 
 /** One part of the summary line: its text and how it is drawn. */
@@ -1595,7 +1595,7 @@ function withRow(
   // the right end, when there is one, sits at the row's end: the line takes the room left of it. A pressable
   // line is a Button of the same spans: a Button holds Text and strings only, and needs a key, as its text changes
   const line = onPress
-    ? <Button key="iirc-open" plain hotkey="i" label="open the iirc pane" onPress={onPress}>{spans}</Button>
+    ? <Button key="iirc-open" plain label="open the iirc pane" onPress={onPress}>{spans}</Button>
     : <Text>{spans}</Text>
   const row = (
     <Box key={key} flexDirection="row">

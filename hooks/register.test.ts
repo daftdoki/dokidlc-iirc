@@ -1296,7 +1296,7 @@ test('a press on the band opens the iirc pane at once, and i presses it once the
   const band = await bandRow($)
   const button = (await band.find({ key: 'iirc-open' })) as { type?: string; props?: Record<string, unknown> }
   expect(button.type).toBe('Button')
-  expect(button.props?.hotkey).toBe('i')                       // ctrl+x tab, then i, where a click does not reach the band
+  expect(button.props?.hotkey).toBeUndefined()                 // a plain Button draws its hotkey before the label ("i: "), so the band has none
   // the open comes first, while the press is still the person's: an open after a slow doctor --health may count as unasked
   await band.press({ key: 'iirc-open' })
   expect(order[0]).toBe('open iirc')
