@@ -7,7 +7,7 @@ tested on Claude Code 2.1.295.
 
 ## Under your prompt
 
-![A prompt with the folded row under it: [+] iirc: [3] pages suggested; Claude Code's status lines and the iirc line at the bottom](images/iirc-prompt-row.png)
+![A prompt with the folded row under it: [+] iirc: [3] pages suggested; above the input, the band reads iirc status 0/3 suggested read, with the model and 113 pages at its right end; under the input, the yellow action line asks for /iirc run-maintenance](images/iirc-prompt-row.png)
 
 ![The same row unfolded by /iirc unfold-suggested-pages: each page with its summary and how well it matched](images/iirc-prompt-row-open.png)
 
@@ -90,7 +90,7 @@ A counter at zero is left out, and a counter that rose shows its number
 bright with a dim `+N` for four seconds. When the terminal is too narrow
 for both, the right end goes and the line itself shows the page count
 until the session does something, and `string search` when it applies.
-A click on the line opens the iirc pane at any width, as `/iirc reader` does. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
+The first screenshot under [Under your prompt](#under-your-prompt) shows the band and, under the input, the line described next. A click on the line opens the iirc pane at any width, as `/iirc reader` does. The line updates after each `iirc read`, `read-matching-pages`, `search`, `write`, `delete`, `sync`,
 `migrate`, `set-embedding-model`, `add-embedding-model`, `remove-embedding-model`,
 `prefer-embedding-host`, `search-mode`, `init`, and `doctor`, and after each suggestion line.
 
@@ -188,7 +188,7 @@ away. Claude Code places it beside the transcript when it runs in
 fullscreen on a terminal at least 110 columns wide, and above the prompt
 otherwise.
 
-![The reader docked beside the transcript: the session tab with its keys row and the suggested pages, the first under the cursor](images/iirc-pane-docked-session.png)
+![The reader docked beside the transcript: the session tab with its keys row, the suggested pages with read marks and times suggested, the first under the cursor, and the written pages](images/iirc-pane-docked-session.png)
 
 ![The reader's page tab, docked: a page's title, kind and trust chips, summary, topics, and body](images/iirc-pane-docked-page.png)
 
