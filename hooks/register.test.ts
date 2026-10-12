@@ -57,7 +57,8 @@ async function promptRow($: Engine, uuid: string) {
 }
 
 const LINE = 'iirc status  68 pages'
-const TODO = '▲ /iirc run-maintenance · 1 near-duplicate pair'
+// before doctor --health loads, the brief's sentence stands whole
+const TODO = '▲ /iirc run-maintenance · maintenance is due (1 near-duplicate pair)'
 
 // The hint row as the terminal draws it under the prompt, mounted fresh each time.
 let mounts = 0
@@ -1393,13 +1394,23 @@ test('the line under the prompt: what to do and why, in the brief\'s words, the 
     .toBe('✖ Update the plugin · this repository needs a newer iirc plugin · +1 more')
 })
 
-test('the line under the prompt shows run-maintenance\'s first due reason and counts the rest, and keeps other lists whole', () => {
-  const due = parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (1 near-duplicate pair; 2 suspect pages (a.md, b.md); 2 store commits not pushed); run /iirc run-maintenance.')!.status
-  expect(actionText(due, counts())).toBe('▲ /iirc run-maintenance · 1 near-duplicate pair · +2 more')
-  expect(actionText(due, counts({ timeouts: 1 }))).toBe('▲ /iirc run-maintenance · 1 near-duplicate pair · +3 more')
+test('the line under the prompt shows run-maintenance\'s first due reason from doctor --health and counts the rest, whichever fix leads', () => {
+  const sentence = 'Maintenance is due (1 near-duplicate pair; 2 suspect pages (a.md, b.md); 2 store commits not pushed); run /iirc run-maintenance.'
+  const due = parseBrief(`iirc: 9 pages, semantic via h:1. ${sentence}`)!.status
+  const health = (d: string[]) => ({ suspect: [], stores: [], due: d })
+  const list = health(['1 near-duplicate pair', '2 suspect pages (a.md, b.md)', '2 store commits not pushed'])
+  expect(actionText(due, counts(), list)).toBe('▲ /iirc run-maintenance · 1 near-duplicate pair · +2 more')
+  expect(actionText(due, counts({ timeouts: 1 }), list)).toBe('▲ /iirc run-maintenance · 1 near-duplicate pair · +3 more')
+  // the due list is doctor's data, not the brief's sentence read back: before it loads, the sentence stands whole
+  expect(actionText(due, counts())).toBe('▲ /iirc run-maintenance · maintenance is due (1 near-duplicate pair; 2 suspect pages (a.md, b.md); 2 store commits not pushed)')
+  // a setup fix leads, and the due reasons still count one each
+  const both = parseBrief(`iirc: 9 pages, semantic via h:1. ${sentence} Persistence: .claude/settings.json does not exist.`)!.status
+  expect(actionText(both, counts(), list)).toBe('▲ iirc doctor --fix · persistence: .claude/settings.json does not exist · +3 more')
+  // maintenance doctor found due since the session started joins too
+  expect(actionText(parseBrief(OK_BRIEF)!.status, counts(), health(['8 days, 5 sessions since the last run']))).toBe('▲ /iirc run-maintenance · 8 days, 5 sessions since the last run')
   // the creator's example: a due list of one, and this session's timeout as the one more
   const week = parseBrief('iirc: 9 pages, semantic via h:1. Maintenance is due (2 suggestion lookups timed out this week); run /iirc run-maintenance.')!.status
-  expect(actionText(week, counts({ timeouts: 1 }))).toBe('▲ /iirc run-maintenance · 2 suggestion lookups timed out this week · +1 more')
+  expect(actionText(week, counts({ timeouts: 1 }), health(['2 suggestion lookups timed out this week']))).toBe('▲ /iirc run-maintenance · 2 suggestion lookups timed out this week · +1 more')
   const git = parseBrief('iirc: 9 pages, semantic via h:1. Persistence: .claude/settings.json does not exist; .gitignore does not ignore .iirc/.cache.')!.status
   expect(actionText(git, counts())).toBe('▲ iirc doctor --fix · persistence: .claude/settings.json does not exist; .gitignore does not ignore .iirc/.cache')
 })

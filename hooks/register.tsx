@@ -259,22 +259,6 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
   return { status: { level, pages: Number(m[1]), mode, note: null, problems }, warnings }
 }
 
-/** A list joined with '; ', split where the '; ' stands outside parentheses. */
-function splitTop(text: string): string[] {
-  const out: string[] = []
-  let depth = 0
-  let start = 0
-  for (let k = 0; k < text.length; k++) {
-    if (text[k] === '(') depth++
-    else if (text[k] === ')') depth = Math.max(0, depth - 1)
-    else if (depth === 0 && text.startsWith('; ', k)) {
-      out.push(text.slice(start, k))
-      start = k + 2
-    }
-  }
-  return [...out, text.slice(start)]
-}
-
 /** The command that clears a warning: WARNING_FIX's, else the iirc command the sentence names in backticks or after "run". */
 function fixFor(w: string): string | undefined {
   return WARNING_FIX.find(([re]) => re.test(w))?.[1] ?? /`(\/?iirc [^`]+)`/.exec(w)?.[1] ?? /\brun (\/?iirc [^;]+?)\.?$/.exec(w)?.[1]
@@ -406,8 +390,13 @@ export function statusText(s: IircStatus, c: SessionCounts): string {
  * What the person needs to do, most severe first: errors, then warnings in WARNING_FIX's order of their
  * commands (setup before upkeep), then the rest in the brief's order. This session's timed-out recalls join here.
  */
-export function actions(s: IircStatus | null, c: SessionCounts): Problem[] {
-  const out = [...(s?.problems ?? [])]
+export function actions(s: IircStatus | null, c: SessionCounts, checkup: IircHealth | null = null): Problem[] {
+  // run-maintenance's reasons are doctor's due list, one problem each, once doctor --health has loaded: the brief's
+  // sentence stands until then. Maintenance doctor finds due since the session started joins the same way
+  const due = checkup?.due ?? []
+  const isDue = (p: Problem) => p.fix === MAINTAIN && /^maintenance is due\b/.test(p.why)
+  const brief = s?.problems ?? []
+  const out = due.length === 0 ? [...brief] : [...brief.filter(p => !isDue(p)), ...due.map((why): Problem => ({ level: 'warn', fix: MAINTAIN, why }))]
   if (c.timeouts > 0) out.push({ level: 'warn', fix: MAINTAIN, why: `${c.timeouts} suggestion ${c.timeouts === 1 ? 'lookup' : 'lookups'} timed out this session` })
   const rank = (p: Problem) => {
     const k = WARNING_FIX.findIndex(([, fix]) => fix === p.fix)
@@ -417,28 +406,25 @@ export function actions(s: IircStatus | null, c: SessionCounts): Problem[] {
 }
 
 /** The line under the prompt as its parts: a mark, the command, why, and how many more; none when all is well. */
-export function actionParts(s: IircStatus | null, c: SessionCounts): LinePart[] {
-  const all = actions(s, c)
+export function actionParts(s: IircStatus | null, c: SessionCounts, checkup: IircHealth | null = null): LinePart[] {
+  const all = actions(s, c, checkup)
   if (all.length === 0) return []
   const [first] = all
   const color = first.level === 'error' ? 'error' : 'warning'
   const dot: LinePart = { text: ' · ', color: 'subtle' }
-  // run-maintenance's reason is the due list itself: its first item shows, and the rest count with the other problems
-  const due = first.fix === MAINTAIN ? /^maintenance is due \((.*)\)$/.exec(first.why)?.[1] : undefined
-  const reasons = due ? splitTop(due) : [first.why]
-  const more = all.length - 1 + reasons.length - 1
+  const more = all.length - 1
   const capital = (t: string) => t[0].toUpperCase() + t.slice(1)
   // the command, bold, is the instruction; a fix that is no command, such as updating the plugin, reads as one
   const out: LinePart[] = [{ text: first.level === 'error' ? '✖ ' : '▲ ', bold: true, color }]
-  if (first.fix) out.push({ text: /^\/?iirc /.test(first.fix) ? first.fix : capital(first.fix), bold: true, color }, dot, { text: reasons[0], color })
-  else out.push({ text: capital(reasons[0]), color })
+  if (first.fix) out.push({ text: /^\/?iirc /.test(first.fix) ? first.fix : capital(first.fix), bold: true, color }, dot, { text: first.why, color })
+  else out.push({ text: capital(first.why), color })
   if (more > 0) out.push(dot, { text: `+${more} more`, color: 'subtle' })
   return out
 }
 
 /** The line under the prompt as plain text, empty when all is well. */
-export function actionText(s: IircStatus | null, c: SessionCounts): string {
-  return plain(actionParts(s, c))
+export function actionText(s: IircStatus | null, c: SessionCounts, checkup: IircHealth | null = null): string {
+  return plain(actionParts(s, c, checkup))
 }
 
 function keepLast<T>(map: Record<string, T>, key: string, value: T): Record<string, T> {
@@ -501,7 +487,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   if (max !== '?') await update($, maxSuggested, () => Number(max))
   // the engine puts the plugin's name in front of a command's text
   const c = await read($, counts)
-  const todo = actionText(s, c)
+  const todo = actionText(s, c, await read($, health))
   const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
@@ -1125,7 +1111,7 @@ export const register: Register = on => {
 
   // Under the prompt, beside the engine's hint: a line only when the person needs to act.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    const todo = actionParts(await read($, status), await read($, counts))
+    const todo = actionParts(await read($, status), await read($, counts), await read($, health))
     if (todo.length === 0) return next(e)
     const { Text } = $.ui.resolve(e)
     return withRow($, e, await next(e), 'iirc-todo', todo.map((p, k) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>))
