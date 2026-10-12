@@ -78,7 +78,7 @@ In the band above the prompt, one line sums up iirc for the session:
 
 | Part | Means |
 |---|---|
-| `●` | turns ◐ ◓ ◑ ◒ while the suggestion hook searches; then green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off |
+| `●` | green when all is well; yellow when the session-start check has a warning, such as a suspect page or two pages that read as duplicates, or when a suggestion line this session ran past the hook's time limit; red when iirc needs setup, an init, or a migration, or when a bad `.claude/iirc.toml` turned the hooks off |
 | `2/5 suggested read` | of the pages the suggestion hook suggested this session, how many were then read; left out until a page is suggested |
 | `4 searched` | the session's own `iirc search` and `iirc read-matching-pages` runs; a hook's suggestion is not one |
 | `3 read` | different pages this session read with `iirc read` or `iirc read-matching-pages` |
