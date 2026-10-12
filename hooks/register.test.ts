@@ -1195,7 +1195,7 @@ test('a counter that rises lights up with its +N for four seconds, then settles;
   let usage: Record<string, unknown> = { read: ['a.md'], written: [], suggested: [], used: [], searches: 1 }
   on('session.id', () => ({ value: 's1' }))
   on('ui.toast', () => ({ value: undefined }))
-  on('process.run', ($, e) => (e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ missed: [], match: {}, gone: [], timeouts: 0, ...usage })) : ran(OK_BRIEF)))
+  on('process.run', ($, e) => (e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ missed: [], match: {}, gone: [], timeouts: 0, model: 'nomic-embed-text', ...usage })) : ran(OK_BRIEF)))
   await hookRow($, 'SessionStart', OK_BRIEF, 'hf1')
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'tf1' })
   await clock.settle()

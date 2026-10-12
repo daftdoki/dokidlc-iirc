@@ -52,11 +52,8 @@ const COMPACT_NEAR = 0.9
 const compactAsked = atom({ plugin: 'iirc', key: 'compactAsked' } as const, false)
 const compactNudge = atom({ plugin: 'iirc', key: 'compactNudge' } as const, null)
 const maxSuggested = atom({ plugin: 'iirc', key: 'maxSuggested' } as const, null)
-// counters that rose a moment ago, for the band to light up, and whether this session's counts loaded once,
-// so the first load, which rises from nothing, lights nothing
+// counters that rose, with when, for the band to light up while the rise is fresh
 const flash = atom({ plugin: 'iirc', key: 'flash' } as const, {} as Flash)
-const countsLoaded = atom({ plugin: 'iirc', key: 'countsLoaded' } as const, false)
-let flashGen = 0
 
 const RECALL_RE = /iirc: \d+ pages? may apply\. Read a page whose summary bears on this task; skip the rest: (.*)/
 const RECOVERED_RE = /`([^`]+)` failed (\d+) times this session before it worked/g
@@ -312,8 +309,8 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
 const BAND_DIVIDER = ' │ '
 // "iirc status" along the card's gradient, letter by letter; false draws it in the claude color
 const BAND_GRADIENT = true
-// how long a counter that rose stays lit with its +N, in milliseconds; 0 lights nothing
-const BAND_FLASH_MS = 4000
+// how long a counter that rose stays lit with its +N, in milliseconds
+const FLASH_MS = 4000
 // the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
 // both in the line itself, as before
 const BAND_CONTEXT = true
@@ -780,19 +777,29 @@ async function loadCounts($: EngineInterface) {
       const next = { reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts, model }
       const before = await read($, counts)
       await update($, counts, () => next)
-      if ((await read($, countsLoaded)) && BAND_FLASH_MS > 0) await lightRises($, before, next)
-      await update($, countsLoaded, () => true)
+      // counts that never loaded carry no model: the first load rises from nothing and lights nothing
+      if (before.model !== null) await lightRises($, before, next)
 }
 
-/** Light each counter that rose, and put it out after BAND_FLASH_MS; a later rise of the same counter keeps it lit for its own time. */
+/**
+ * Record when each counter rose and by how much. The band decides at draw time whether a rise is still lit, so
+ * a hot reload that drops a timer leaves nothing lit for good; one timer asks for the redraw that puts it out.
+ */
 async function lightRises($: EngineInterface, before: SessionCounts, after: SessionCounts) {
-  const gen = ++flashGen
   const rose = (['suggested', 'used', 'searches', 'reads', 'writes'] as const).filter(k => after[k] > before[k])
   if (rose.length === 0) return
-  await update($, flash, f => ({ ...f, ...Object.fromEntries(rose.map(k => [k, { by: after[k] - before[k], gen }])) }))
-  $.clock.after(BAND_FLASH_MS, () => {
-    void update($, flash, f => Object.fromEntries(Object.entries(f).filter(([, v]) => v?.gen !== gen))).catch(() => {})
-  })
+  const at = await $.clock.now()
+  await update($, flash, f => ({ ...f, ...Object.fromEntries(rose.map(k => [k, { by: after[k] - before[k], at }])) }))
+  $.clock.after(FLASH_MS, () => void litNow($).then(lit => update($, flash, () => lit)).catch(() => {}))
+}
+
+/** The rises still lit now: FLASH_MS after each one. */
+async function litNow($: EngineInterface): Promise<Flash> {
+  const rises = Object.entries(await read($, flash))
+  // no rise, no clock: most drawings
+  if (rises.length === 0) return {}
+  const now = await $.clock.now()
+  return Object.fromEntries(rises.filter(([, v]) => v !== undefined && now - v.at < FLASH_MS))
 }
 
 /** Ask iirc which pages are suspect and what each store holds back, for the card. */
@@ -1093,7 +1100,7 @@ export const register: Register = on => {
     const s = await read($, status)
     if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
-    const { line, context } = bandParts(s, c, await read($, flash), e.props.bodyColumns)
+    const { line, context } = bandParts(s, c, await litNow($), e.props.bodyColumns)
     const { Text } = $.ui.resolve(e)
     const span = (p: LinePart, k: number) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>
     return withRow($, e, await next(e), 'iirc-line', [
