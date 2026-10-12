@@ -535,10 +535,12 @@ async function showPage($: EngineInterface, ref: string): Promise<{ page: ShownP
 
 /** Read one page with `iirc show`, the person's read, and show it in the reader tab. Back passes isBack, which keeps the history. */
 async function openPage($: EngineInterface, ref: string, isBack = false) {
+  // a name in the tree or a card opens the pane; inside the pane this only retitles it. The open comes before any
+  // await, while the press is still running: then it is the person's, and Claude Code seats it at any width
+  const opening = $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
   await update($, reader, r => ({ ...r, loading: ref, tab: 'page' as const }))
   await update($, cursor, x => ({ ...x, page: 0, pageTop: 0 }))
-  // a name in the tree or a card opens the pane; inside the pane this only retitles it
-  sayIfWaiting($, await $.ui.open({ id: PANE, title: 'iirc reader', focus: true }))
+  sayIfWaiting($, await opening)
   // while the page loads, the ring stays off the keys row too, where Enter would close the tab or the reader
   await $.ui.focus({ requestId: PANE, key: 'tab-page' }).catch(() => undefined)
   let page: ShownPage | null = null
@@ -651,8 +653,9 @@ async function moveCursor($: EngineInterface, step: number | 'start' | 'end') {
 }
 
 /**
- * A toast when Claude Code holds the pane back: an open from a click counts as the plugin's own, and waits undrawn
- * below 144 columns (110 once the person opened the pane by hand); the reason says the floor and the width now.
+ * A toast when Claude Code holds the pane back. An open answering the person's press or command is seated at any
+ * width; one that reaches the engine after the press ended counts as the plugin's own and waits undrawn below 144
+ * columns (110 once the person opened the pane by hand). The reason says the floor and the width now.
  */
 function sayIfWaiting($: EngineInterface, opened: { isPlaced: boolean; reason?: unknown }) {
   if (!opened.isPlaced) $.ui.toast(`iirc: the reader is waiting: ${String(opened.reason)}; /iirc reader opens it`)
@@ -1076,9 +1079,11 @@ export const register: Register = on => {
       right: context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined,
       onPress: BAND_PRESS
         ? () => {
-          // in the debug log (claude --debug), so a press that opens nothing can be told from one that never arrived
+          // the open first (openSession's own first call), then a line in the debug log (claude --debug), so a
+          // press that opens nothing can be told from one that never arrived
+          const opening = openSession($)
           $.ui.log('iirc: band pressed, opening the pane', { to: 'debug' })
-          void openSession($).catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
+          void opening.catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
         }
         : undefined,
       // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt

@@ -630,6 +630,56 @@ test('/iirc reader opens the Session tab; a page name opens the reader tab, a li
 
 })
 
+// A press's open is the person's, and Claude Code seats it at any width, only while the press is still running:
+// the open must be the press handler's first call on the engine, before any state write or process run
+function recordCalls(on: On, order: string[], health = '{"suspect":[],"stores":[]}') {
+  const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+  on('ui.open', ($, e) => (order.push(`open ${e.id}`), { value: { isPlaced: true } }))
+  on('state.set', ($, e, next) => (order.push('state'), next(e)))
+  on('process.run', ($, e) => {
+    order.push('run')
+    if (e.argv.includes('--health')) return ran(health)
+    if (e.argv.includes('show')) return ran(JSON.stringify({ store: 'project', name: 'a.md', label: 'a.md', path: '/p', fm: {}, body: 'b', links: [], signals: [] }))
+    return ran(OK_BRIEF)
+  })
+}
+
+test('every press that opens the pane opens it before anything else: the band, a suggested page, a card\'s page', async ($: Engine, on: On) => {
+  engine(on)
+  const order: string[] = []
+  on('ui.toast', () => ({ value: undefined }))
+  recordCalls(on, order, JSON.stringify({ suspect: ['old.md'], stores: [] }))
+  on('ui.close', () => ({ value: undefined }))
+  await hookRow($, 'SessionStart', OK_BRIEF, 'ho1')
+  // the band
+  const band = await bandRow($)
+  order.length = 0
+  await band.press({ key: 'iirc-open' })
+  expect(order[0]).toBe('open iirc')
+  // a suggested page under a prompt
+  await promptRow($, 'p-order')
+  await hookRow($, 'UserPromptSubmit', 'iirc: 1 page may apply. Read a page whose summary bears on this task; skip the rest: `iirc read a.md` (one)', 'h-order')
+  await $.command.run({ command: 'iirc', args: 'unfold-suggested-pages' })
+  const row = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'UserMessage', requestId: 'p-order', props: { text: 'a prompt' } as never })
+  order.length = 0
+  await row.press({ key: 'open-p-order-0-0-1' })
+  expect(order[0]).toBe('open iirc')
+  // a page the /iirc status card names
+  const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+  const card = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'CommandOutput', requestId: 'card-order', props: { command: 'iirc', args: 'status', text, isErrored: false } })
+  order.length = 0
+  await card.press({ key: 'card-s-old.md' })
+  expect(order[0]).toBe('open iirc')
+  // after the pane closes (here its own q: the test kit raises no person close), Claude Code forgets the person
+  // opened it, so the 110-column floor no longer helps; a press is still theirs, the open first, at any width
+  const pane = await $.ui.mount({ plugin: 'iirc', surface: 'terminal', component: 'Pane', requestId: 'iirc',
+    props: { title: 'iirc', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } })
+  await pane.press({ key: 'key-q' })
+  order.length = 0
+  await (await bandRow($)).press({ key: 'iirc-open' })
+  expect(order[0]).toBe('open iirc')
+})
+
 test('a page name in the suggested-pages tree opens the reader', async ($: Engine, on: On) => {
   engine(on)
   const opened: string[] = []
