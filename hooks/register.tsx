@@ -288,19 +288,8 @@ export function liveStatus(s: IircStatus, c: SessionCounts): IircStatus {
   return s.level === 'ok' && first ? { ...s, level: first.level } : s
 }
 
-// The band above the prompt, one switch each, so a part the creator does not like goes with one edit:
-// the thin rule between its counters
-const BAND_DIVIDER = ' │ '
-// "iirc status" along the card's gradient, letter by letter; false draws it in the claude color
-const BAND_GRADIENT = true
-// how long a counter that rose stays lit with its +N, in milliseconds
+// how long a counter that rose stays lit with its +N in the band, in milliseconds
 const FLASH_MS = 4000
-// the model and the page count at the band's right end, dropped first when the line does not fit; false keeps
-// both in the line itself, as before
-const BAND_CONTEXT = true
-// a click on the band's line opens the iirc pane, as /iirc reader does; no hotkey, since a plain Button draws
-// its hotkey before the label; false leaves it plain text
-const BAND_PRESS = true
 
 /** One part of the summary line: its text and how it is drawn. */
 type LinePart = { text: string; color?: string; bold?: boolean }
@@ -314,9 +303,8 @@ const isStringSearch = (s: IircStatus) => !!s.mode && s.mode !== 'semantic+keywo
  * the session suggested, searched, read, or wrote anything, and string search when search runs on terms alone.
  */
 export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, hasContext = false): LinePart[] {
-  const out: LinePart[] = BAND_GRADIENT
-    ? gradient('iirc status').map(p => ({ ...p, bold: true }))
-    : [{ text: 'iirc status', bold: true, color: 'claude' }]
+  // "iirc status" along the card's gradient, letter by letter
+  const out: LinePart[] = gradient('iirc status').map(p => ({ ...p, bold: true }))
   const num = (text: string): LinePart => ({ text, bold: true, color: 'claude' })
   // a counter that rose a moment ago: its number bright, and how much it rose, dim
   const count = (key: keyof SessionCounts & keyof Flash): LinePart[] => {
@@ -333,7 +321,8 @@ export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, ha
   }
   // the mode shows only when it is not the default, so a weaker search stands out
   if (!hasContext && isStringSearch(s)) items.push([{ text: 'string search', color: 'warning' }])
-  items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(BAND_DIVIDER), ...item))
+  // a thin rule between the counters
+  items.forEach((item, k) => out.push(k === 0 ? { text: '  ' } : word(' │ '), ...item))
   return out
 }
 
@@ -355,7 +344,7 @@ export function contextParts(s: IircStatus, model: string | null): LinePart[] {
 
 /** The band's parts, the line and its right end, as wide as `columns` allows: the right end goes first when they do not fit. */
 export function bandParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, columns = Infinity): { line: LinePart[]; context: LinePart[] } {
-  const context = BAND_CONTEXT ? contextParts(s, c.model) : []
+  const context = contextParts(s, c.model)
   const line = statusParts(s, c, lit, context.length > 0)
   // the circle and the bar take three columns, the gap before the right end two
   if (context.length > 0 && 3 + plain(line).length + 2 + plain(context).length <= columns) return { line, context }
@@ -1095,15 +1084,14 @@ export const register: Register = on => {
       ...line.map(span),
     ], {
       right: context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined,
-      onPress: BAND_PRESS
-        ? () => {
-          // the open first (openSession's own first call), then a line in the debug log (claude --debug), so a
-          // press that opens nothing can be told from one that never arrived
-          const opening = openSession($, false, false)
-          $.ui.log('iirc: band pressed, opening the pane', { to: 'debug' })
-          void opening.catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
-        }
-        : undefined,
+      // a click opens the iirc pane, as /iirc reader does; no hotkey, since a plain Button draws its hotkey before
+      // the label. The open first (openSession's own first call), then a line in the debug log (claude --debug),
+      // so a press that opens nothing can be told from one that never arrived
+      onPress: () => {
+        const opening = openSession($, false, false)
+        $.ui.log('iirc: band pressed, opening the pane', { to: 'debug' })
+        void opening.catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
+      },
       // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt
       dropsEmpty: true,
     })
