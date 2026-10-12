@@ -1233,6 +1233,9 @@ test('the summary line hides zero counters and the suggested pages read with no 
   expect(statusText(parseBrief(BRIEF)!.status, counts())).toBe('iirc status  68 pages')
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts({ reads: 2 }))).toBe('iirc status  2 read')
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts())).toBe('iirc status')
+  // with iirc not set up, or in error, the model the counts name is not in use: the right end leaves it out
+  expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts({ model: 'qwen3-embedding-0.6b' }))).toBe('iirc status')
+  expect(statusText({ level: 'error', pages: 12, mode: 'semantic+keyword', note: 'hooks off' }, counts({ model: 'qwen3-embedding-0.6b' }))).toBe('iirc status  12 pages')
   // with semantic search the model names itself; with string search the right end says so instead, once
   expect(statusText(ok, counts({ model: 'qwen3-embedding-0.6b' }))).toBe('iirc status  qwen3-embedding-0.6b · 110 pages')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status

@@ -358,12 +358,13 @@ export function statusParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, ha
 
 /**
  * The band's right end: the embedding model, or string search when search runs on terms alone (the line under
- * the prompt says why), then the page count, which stays all session.
+ * the prompt says why), then the page count, which stays all session. In error, the page count alone, if any.
  */
 export function contextParts(s: IircStatus, model: string | null): LinePart[] {
   const out: LinePart[] = []
   if (isStringSearch(s)) out.push({ text: 'string search', color: 'warning' })
-  else if (model) out.push({ text: model, color: 'subtle' })
+  // in error, or before setup, the model the counts name is not the one in use
+  else if (model && s.level !== 'error') out.push({ text: model, color: 'subtle' })
   if (s.pages !== null) {
     if (out.length > 0) out.push({ text: ' · ', color: 'subtle' })
     out.push({ text: `${s.pages} ${s.pages === 1 ? 'page' : 'pages'}`, color: 'subtle' })
