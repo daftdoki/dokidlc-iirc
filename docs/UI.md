@@ -100,18 +100,19 @@ status card, described below.
 
 ## The line under the prompt
 
-Beside Claude Code's own hint, a line shows only when you need to act: a
-mark, the command, and why, in the words of the session-start check.
+Under Claude Code's own hint, a line shows only when you need to act: a
+mark, the command to run, and why, in the words of the session-start check.
 
 ```
-▲ Run /iirc run-maintenance: maintenance is due (1 near-duplicate pair)
-✖ Run iirc init: this repository has no .iirc/
+▲ /iirc run-maintenance · 2 suggestion lookups timed out this week · +1 more
+✖ iirc init · this repository has no .iirc/
 ```
 
 `▲` is a warning and `✖` an error, in yellow or red. A suggestion line that
 ran past the hook's 5-second limit this session also asks for
-`/iirc run-maintenance`. With more than one problem, the most severe shows
-first and `and N more` follows; `/iirc status` lists them. This line stays
+`/iirc run-maintenance`. For run-maintenance the reason is the first thing
+that made it due. With more than one problem or reason, the most severe
+shows first and `+N more` follows; `/iirc status` lists them. This line stays
 on when the summary line is off.
 
 ## A plain `/iirc`, `/iirc status`, and `/iirc help`

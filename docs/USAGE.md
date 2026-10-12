@@ -38,7 +38,7 @@ suggestion lookup timed out in the last 7 days and since the last run,
 or two pages are near-duplicates. When 10 sessions wait to be judged,
 the run offers tuning, but they do not make it due. The
 session-start line then says `Maintenance is due (REASONS)`, the line
-under the prompt says `▲ Run /iirc run-maintenance: maintenance is due (REASONS)`, and
+under the prompt says `▲ /iirc run-maintenance · REASON`, with `+N more` for the other reasons, and
 `iirc doctor` ends with `run-maintenance is due: REASONS`.
 
 The agent runs `iirc run-maintenance`. It commits each store's loose
@@ -127,7 +127,7 @@ when `.iirc/` is committed.
 
 When a repository or machine still has the memory plugin's layout, the
 session-start line says so, and the line under the prompt says, in red,
-`✖ Run iirc migrate`. Say "yes, migrate". The agent runs
+`✖ iirc migrate`. Say "yes, migrate". The agent runs
 `iirc migrate`, which moves the store directory, the config, the
 `CLAUDE.md` section, the plugin setting, and this machine's directories
 to their iirc names. It stages the changes and prints a suggested
@@ -384,7 +384,7 @@ A bad `.claude/iirc.toml`, such as a threshold out of range, a
 `[recall]` table under the thresholds' old name, or a store table with no
 `kind`, turns the hooks off. The session-start line
 reads "iirc: hooks off", then the error and the command that fixes it,
-and the line under the prompt says, in red, `✖ Run iirc doctor --fix: hooks off, <the error>`. Every other
+and the line under the prompt says, in red, `✖ iirc doctor --fix · hooks off, <the error>`. Every other
 hook stays quiet until the file is fixed. `iirc doctor` fails the check
 ".claude/iirc.toml loads, so the hooks run" and names the line to
 change. `iirc doctor --fix` renames each `[recall.MODEL-ID]` table to

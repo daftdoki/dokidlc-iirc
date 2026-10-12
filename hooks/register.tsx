@@ -109,7 +109,7 @@ const DEMO_HEALTH: IircHealth = {
 const DEMO_DOCTOR_RE = /^demo\s+doctor$/
 const DEMO_DOCTOR = [
   'ok  .claude/iirc.toml loads, so the hooks run',
-  'ok  suggest-pages finished inside the hook\'s 5 s limit in the last 7 days and since the last run',
+  'ok  suggest-pages finished inside the hook\'s 5 s limit this week',
   'ok  uv on PATH',
   'FAIL memoryfield-tool at 3e447e1  (iirc doctor --fix)',
   'ok  embedding endpoint http://127.0.0.1:11434 answers within 2 s (serving nomic-embed-text, 768 wide)',
@@ -262,6 +262,22 @@ export function parseBrief(text: string): { status: IircStatus; warnings: string
   return { status: { level, pages: Number(m[1]), mode, note: null, problems }, warnings }
 }
 
+/** A list joined with '; ', split where the '; ' stands outside parentheses. */
+function splitTop(text: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let start = 0
+  for (let k = 0; k < text.length; k++) {
+    if (text[k] === '(') depth++
+    else if (text[k] === ')') depth = Math.max(0, depth - 1)
+    else if (depth === 0 && text.startsWith('; ', k)) {
+      out.push(text.slice(start, k))
+      start = k + 2
+    }
+  }
+  return [...out, text.slice(start)]
+}
+
 /** The command that clears a warning: WARNING_FIX's, else the iirc command the sentence names in backticks or after "run". */
 function fixFor(w: string): string | undefined {
   return WARNING_FIX.find(([re]) => re.test(w))?.[1] ?? /`(\/?iirc [^`]+)`/.exec(w)?.[1] ?? /\brun (\/?iirc [^;]+?)\.?$/.exec(w)?.[1]
@@ -408,16 +424,17 @@ export function actionParts(s: IircStatus | null, c: SessionCounts): LinePart[] 
   if (all.length === 0) return []
   const [first] = all
   const color = first.level === 'error' ? 'error' : 'warning'
-  // a fix that is a command reads "Run it"; one that is not, such as updating the plugin, is the instruction itself
-  const isCommand = !!first.fix && /^\/?iirc /.test(first.fix)
+  const dot: LinePart = { text: ' · ', color: 'subtle' }
+  // run-maintenance's reason is the due list itself: its first item shows, and the rest count with the other problems
+  const due = first.fix === MAINTAIN ? /^maintenance is due \((.*)\)$/.exec(first.why)?.[1] : undefined
+  const reasons = due ? splitTop(due) : [first.why]
+  const more = all.length - 1 + reasons.length - 1
+  const capital = (t: string) => t[0].toUpperCase() + t.slice(1)
+  // the command, bold, is the instruction; a fix that is no command, such as updating the plugin, reads as one
   const out: LinePart[] = [{ text: first.level === 'error' ? '✖ ' : '▲ ', bold: true, color }]
-  if (first.fix) {
-    if (isCommand) out.push({ text: 'Run ', color })
-    out.push({ text: isCommand ? first.fix : first.fix[0].toUpperCase() + first.fix.slice(1), bold: true, color }, { text: `: ${first.why}`, color })
-  } else {
-    out.push({ text: first.why[0].toUpperCase() + first.why.slice(1), color })
-  }
-  if (all.length > 1) out.push({ text: `, and ${all.length - 1} more`, color: 'subtle' })
+  if (first.fix) out.push({ text: /^\/?iirc /.test(first.fix) ? first.fix : capital(first.fix), bold: true, color }, dot, { text: reasons[0], color })
+  else out.push({ text: capital(reasons[0]), color })
+  if (more > 0) out.push(dot, { text: `+${more} more`, color: 'subtle' })
   return out
 }
 

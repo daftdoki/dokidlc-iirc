@@ -211,7 +211,7 @@ for iirc's model and overrides the operator's own setting for that model. `run_r
 state directory, and removes it when it finishes. When the next suggestion line or
 the session snapshot finds the marker, `note_timeout` logs a `timeout`
 row. `iirc doctor` reports the 7-day count, the circle above the prompt
-turns yellow, and the line under the prompt says `▲ Run /iirc run-maintenance: N suggestion lookups timed out this session`.
+turns yellow, and the line under the prompt says `▲ /iirc run-maintenance · N suggestion lookups timed out this session`.
 
 ### A shell command fails, recovers, and the agent stops
 
