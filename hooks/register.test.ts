@@ -76,7 +76,7 @@ const fixOf = (s: IircStatus) => actions(s, counts())[0]?.fix
 
 // a session's counts: none, except what the test names
 function counts(some: Partial<SessionCounts> = {}): SessionCounts {
-  return { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0, ...some }
+  return { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: { all: null, read: null, unread: null }, timeouts: 0, model: null, ...some }
 }
 
 // a drawn row as its Text parts: each part's text and the props it is drawn with
@@ -300,16 +300,20 @@ test('after a read or write, counts the pages this session read and wrote', asyn
   const argv: string[][] = []
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('session.id', () => ({ value: 's1' }))
+  let isRead = false
   on('process.run', ($, e) => {
     argv.push([...e.argv])
-    return e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ session: 's1', read: ['a.md', 'b.md'], written: ['c.md'], suggested: ['a.md', 'd.md', 'e.md'], used: ['a.md'] })) : ran(BRIEF)
+    // nothing read until the read below; doctor refreshes the counts too, for the model they carry
+    return e.argv.includes('summarize-session-usage') ? ran(JSON.stringify(isRead ? { session: 's1', read: ['a.md', 'b.md'], written: ['c.md'], suggested: ['a.md', 'd.md', 'e.md'], used: ['a.md'] } : { session: 's1' })) : ran(BRIEF)
   })
   on('ui.toast', () => ({ value: undefined }))
   await $.tool.call({ tool: 'Bash', command: 'iirc doctor --brief', tool_use_id: 't6' })
   await clock.settle()
   expect(await waitFor($, LINE)).toBe(true)
+  isRead = true
   await $.tool.call({ tool: 'Bash', command: 'iirc read a.md b.md', tool_use_id: 't7' })
   await clock.settle()
+  await clock.advance(4000)                                    // past the rise's light
   expect(await waitFor($, 'iirc status  1/3 suggested read │ 2 read │ 1 written')).toBe(true)
   expect(argv.at(-1)?.slice(1)).toEqual(['summarize-session-usage', 's1'])
   // read-matching-pages reads pages too, so it refreshes the counts
@@ -1224,15 +1228,15 @@ test('the summary line hides zero counters and the suggested pages read with no 
   expect(statusText(ok, counts({ reads: 1, writes: 1 }))).toBe('iirc status  1 read │ 1 written  110 pages')
   // a suggestion nobody read still shows
   expect(statusText(ok, counts({ suggested: 3 }))).toBe('iirc status  0/3 suggested read  110 pages')
-  expect(statusText(ok, counts({ suggested: 10, used: 1 }), 'nomic-embed-text')).toBe('iirc status  1/10 suggested read  nomic-embed-text · 110 pages')
+  expect(statusText(ok, counts({ suggested: 10, used: 1, model: 'nomic-embed-text' }))).toBe('iirc status  1/10 suggested read  nomic-embed-text · 110 pages')
   // the line holds no problem: a warning or an error leaves the counts alone, and an error with no pages leaves the name
   expect(statusText(parseBrief(BRIEF)!.status, counts())).toBe('iirc status  68 pages')
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts({ reads: 2 }))).toBe('iirc status  2 read')
   expect(statusText({ level: 'error', pages: null, mode: null, note: 'needs setup' }, counts())).toBe('iirc status')
   // with semantic search the model names itself; with string search the right end says so instead, once
-  expect(statusText(ok, counts(), 'qwen3-embedding-0.6b')).toBe('iirc status  qwen3-embedding-0.6b · 110 pages')
+  expect(statusText(ok, counts({ model: 'qwen3-embedding-0.6b' }))).toBe('iirc status  qwen3-embedding-0.6b · 110 pages')
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status
-  expect(statusText(down, counts({ reads: 1 }), 'qwen3-embedding-0.6b')).toBe('iirc status  1 read  string search · 5 pages')
+  expect(statusText(down, counts({ reads: 1, model: 'qwen3-embedding-0.6b' }))).toBe('iirc status  1 read  string search · 5 pages')
 })
 
 for (const isHintNative of [false, true]) {
@@ -1308,15 +1312,33 @@ test('the band\'s right end: the model or string search, then the page count, dr
   engine(on)
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('ui.toast', () => ({ value: undefined }))
-  on('process.run', ($, e) => (e.argv.includes('--health') ? ran(JSON.stringify({ suspect: [], stores: [], model: 'qwen3-embedding-0.6b' })) : ran(OK_BRIEF)))
+  const clock = mock.clock(on)
+  let model = 'qwen3-embedding-0.6b'
+  on('session.id', () => ({ value: 's1' }))
+  const health: string[][] = []
+  on('process.run', ($, e) => {
+    if (e.argv.includes('--health')) health.push([...e.argv])
+    return e.argv.includes('summarize-session-usage') ? ran(JSON.stringify({ read: [], written: [], suggested: [], used: [], missed: [], match: {}, timeouts: 0, searches: 0, model, gone: [] })) : ran(OK_BRIEF)
+  })
   await hookRow($, 'SessionStart', OK_BRIEF, 'hc1')
-  await $.command.run({ command: 'iirc', args: 'status' })                  // reads doctor --health, as a session start does
+  await $.tool.call({ tool: 'Bash', command: 'iirc read a.md', tool_use_id: 'tc1' })      // the counts carry the model
+  await clock.settle()
+  expect(await waitFor($, 'qwen3-embedding-0.6b · 110 pages')).toBe(true)
   const wide = parts(await (await bandRow($)).find({ key: 'iirc-line' }))
   expect(wide[0]).toEqual(['● ', { color: 'success' }])
   expect(wide.slice(-4)).toEqual([['  ', {}], ['qwen3-embedding-0.6b', { color: 'subtle' }], [' · ', { color: 'subtle' }], ['110 pages', { color: 'subtle' }]])
   // 3 + "iirc status" + 2 + "qwen3-embedding-0.6b · 110 pages" is 48 columns: at 40 the right end goes, and the line takes the page count back
   const narrow = parts(await (await bandRow($, false, 40)).find({ key: 'iirc-line' }))
   expect(narrow.map(([t]) => t).join('')).toBe('● ▍iirc status  110 pages')
+  // a new model shows after the command that sets it, from the counts that command refreshes
+  model = 'nomic-embed-text'
+  await $.tool.call({ tool: 'Bash', command: 'iirc set-embedding-model nomic-embed-text', tool_use_id: 'tc2' })
+  await clock.settle()
+  expect(await waitFor($, 'nomic-embed-text · 110 pages')).toBe(true)
+  // a press opens the pane and refreshes the counts; it runs no doctor --health
+  await (await bandRow($)).press({ key: 'iirc-open' })
+  await clock.settle()
+  expect(health).toEqual([])
   // string search: the right end says so in yellow, the circle turns yellow, and the line under the prompt says why
   await hookRow($, 'SessionStart', 'iirc: 110 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 110.', 'hc2')
   const string = parts(await (await bandRow($)).find({ key: 'iirc-line' }))

@@ -18,7 +18,7 @@ const lastPrompt = atom({ plugin: 'iirc', key: 'lastPrompt' } as const, null)
 const lastTool = atom({ plugin: 'iirc', key: 'lastTool' } as const, null)
 const briefShown = atom({ plugin: 'iirc', key: 'briefShown' } as const, null)
 const status = atom({ plugin: 'iirc', key: 'status' } as const, null)
-const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0 })
+const counts = atom({ plugin: 'iirc', key: 'counts' } as const, { reads: 0, writes: 0, searches: 0, suggested: 0, used: 0, missed: [], match: NO_MATCH, timeouts: 0, model: null })
 const health = atom({ plugin: 'iirc', key: 'health' } as const, null)
 const reader = atom({ plugin: 'iirc', key: 'reader' } as const, { page: null, history: [], error: null, loading: null, tab: 'session' } as Reader)
 // pages `/iirc show` read, by name, for the transcript card that draws each
@@ -96,12 +96,12 @@ const DEMO_COUNTS: SessionCounts = {
   reads: 58, writes: 9, searches: 23, suggested: 42, used: 31,
   match: { all: 68, read: 74, unread: 55 },
   timeouts: 0,
+  model: 'qwen3-embedding-0.6b',
   missed: [['ollama-keep-alive-for-the-embed-model.md', 4], ['plugin-cache-keeps-old-versions.md', 3], ['gh-auth-on-a-new-machine.md', 2]],
 }
 const DEMO_HEALTH: IircHealth = {
   suspect: [],
   due: [],
-  model: 'qwen3-embedding-0.6b',
   stores: [{ name: 'project', kind: 'project', pages: 97, uncommitted: 0, unpushed: 0 }, { name: 'shared', kind: 'remote', pages: 45, uncommitted: 0, unpushed: 0 }],
 }
 // `/iirc demo doctor`: doctor's own lines for a sample machine, 13 checks with one failure and one note,
@@ -372,8 +372,8 @@ export function contextParts(s: IircStatus, model: string | null): LinePart[] {
 }
 
 /** The band's parts, the line and its right end, as wide as `columns` allows: the right end goes first when they do not fit. */
-export function bandParts(s: IircStatus, c: SessionCounts, model: string | null, lit: Flash = {}, columns = Infinity): { line: LinePart[]; context: LinePart[] } {
-  const context = BAND_CONTEXT ? contextParts(s, model) : []
+export function bandParts(s: IircStatus, c: SessionCounts, lit: Flash = {}, columns = Infinity): { line: LinePart[]; context: LinePart[] } {
+  const context = BAND_CONTEXT ? contextParts(s, c.model) : []
   const line = statusParts(s, c, lit, context.length > 0)
   // the circle and the bar take three columns, the gap before the right end two
   if (context.length > 0 && 3 + plain(line).length + 2 + plain(context).length <= columns) return { line, context }
@@ -399,8 +399,8 @@ function plain(parts: LinePart[]): string {
 }
 
 /** The summary line as plain text, for the text help: the band's line and its right end, two spaces apart, as a wide band draws them after the circle and bar. */
-export function statusText(s: IircStatus, c: SessionCounts, model: string | null = null): string {
-  const { line, context } = bandParts(s, c, model)
+export function statusText(s: IircStatus, c: SessionCounts): string {
+  const { line, context } = bandParts(s, c)
   return plain(line) + (context.length > 0 ? `  ${plain(context)}` : '')
 }
 
@@ -504,7 +504,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   // the engine puts the plugin's name in front of a command's text
   const c = await read($, counts)
   const todo = actionText(s, c)
-  const head = [s === null ? 'no session brief yet' : statusText(s, c, (await read($, health))?.model ?? null).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
+  const head = [s === null ? 'no session brief yet' : statusText(s, c).replace(/^iirc status\s*/, ''), todo].filter(Boolean).join('\n')
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
   if (view === 'status') {
@@ -512,7 +512,7 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
-    `summary line ${shown} · max-suggested-pages ${max} · ${searchSetting(s, (await read($, health))?.model ?? null).join(' ')}`,
+    `summary line ${shown} · max-suggested-pages ${max} · ${searchSetting(s, (await read($, counts)).model).join(' ')}`,
     row(SET_LINE, 'on|off: show or hide the summary line'),
     row(SET_MAX, 'pages per suggestion line (1-10)'),
     row(SET_SEARCH, 'the embedding model and where it runs'),
@@ -679,7 +679,7 @@ function sayIfWaiting($: EngineInterface, opened: { isPlaced: boolean; reason?: 
 }
 
 /** The Session tab, with its numbers fresh. */
-async function openSession($: EngineInterface, isDemo = false) {
+async function openSession($: EngineInterface, isDemo = false, isHealthRead = true) {
   // open before any await: an open is the person's only while their press or command is still running, and
   // doctor --health may take seconds; the pane redraws as the state below and the numbers land
   const opening = $.ui.open({ id: PANE, title: 'iirc reader', focus: true })
@@ -693,9 +693,11 @@ async function openSession($: EngineInterface, isDemo = false) {
   // an unplaced pane never closes, so nothing else would drop the demo
   if (!opened.isPlaced) await update($, demoSession, () => null)
   sayIfWaiting($, opened)
+  // the band's press refreshes the counts only: doctor --health may take seconds, and the session start and a
+  // plain /iirc keep it fresh; /iirc reader, a command, reads it too, for the Session tab's suspect pages
   if (!isDemo) {
     refreshCounts($)
-    await refreshHealth($)
+    if (isHealthRead) await refreshHealth($)
   }
   // put the ring on the first page name when it shows, so Enter works at once; a short pane shows it after j
   const v = await sessionView($)
@@ -717,7 +719,7 @@ async function loadDemoSession($: EngineInterface) {
     pages: { read: used, written, suggested: [...used, ...unread], used, gone: [] },
     counts: {
       reads: used.length + 3, writes: written.length, searches: 5, suggested: used.length + unread.length, used: used.length,
-      missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: DEMO_COUNTS.match, timeouts: DEMO_COUNTS.timeouts,
+      missed: unread.map((n, i) => [n, 4 - i] as [string, number]), match: DEMO_COUNTS.match, timeouts: DEMO_COUNTS.timeouts, model: DEMO_COUNTS.model,
     },
     health: DEMO_HEALTH,
   }))
@@ -773,7 +775,8 @@ async function loadCounts($: EngineInterface) {
       await update($, sessionPages, () => ({ read: list('read'), written: list('written'), suggested: list('suggested'), used: list('used'), gone: list('gone') }))
       const timeouts = typeof got.timeouts === 'number' ? got.timeouts : 0
       const searches = typeof got.searches === 'number' ? got.searches : 0
-      const next = { reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts }
+      const model = typeof got.model === 'string' ? got.model : null
+      const next = { reads: n('read'), writes: n('written'), searches, suggested: n('suggested'), used: n('used'), missed, match, timeouts, model }
       const before = await read($, counts)
       await update($, counts, () => next)
       if ((await read($, countsLoaded)) && BAND_FLASH_MS > 0) await lightRises($, before, next)
@@ -867,7 +870,11 @@ export const register: Register = on => {
     const result = await next(e)
     // keep the hint row's page count and read count current within the session
     if (e.tool === 'Bash') {
-      if (CHANGES_BRIEF_RE.test(e.command)) refreshBrief($)
+      // a change to the setup changes the model the counts carry too
+      if (CHANGES_BRIEF_RE.test(e.command)) {
+        refreshBrief($)
+        refreshCounts($)
+      }
       if (COUNTS_RE.test(e.command)) refreshCounts($)
     }
     if (e.agentId === undefined && result.deny === undefined) {
@@ -1085,7 +1092,7 @@ export const register: Register = on => {
     const s = await read($, status)
     if (s === null || e.props.hasSurvey || !(await read($, isStatusShown))) return next(e)
     const c = await read($, counts)
-    const { line, context } = bandParts(s, c, (await read($, health))?.model ?? null, await read($, flash), e.props.bodyColumns)
+    const { line, context } = bandParts(s, c, await read($, flash), e.props.bodyColumns)
     const { Text } = $.ui.resolve(e)
     const span = (p: LinePart, k: number) => <Text key={k} bold={p.bold} color={p.color}>{p.text}</Text>
     return withRow($, e, await next(e), 'iirc-line', [
@@ -1098,7 +1105,7 @@ export const register: Register = on => {
         ? () => {
           // the open first (openSession's own first call), then a line in the debug log (claude --debug), so a
           // press that opens nothing can be told from one that never arrived
-          const opening = openSession($)
+          const opening = openSession($, false, false)
           $.ui.log('iirc: band pressed, opening the pane', { to: 'debug' })
           void opening.catch(err => $.ui.log(`iirc: the band's pane did not open: ${String(err)}`, { to: 'debug' }))
         }
@@ -1299,7 +1306,7 @@ function drawHelp($: EngineInterface, e: ResolveInput, view: CardView, s: IircSt
       {heading('SETTINGS')}
       {setting('summary line, on|off', isShown ? 'on' : 'off', SET_LINE)}
       {setting('suggested pages', max === null ? '?' : `up to ${max}`, SET_MAX)}
-      {(([label, value]) => setting(label.replace(/:$/, ''), value, SET_SEARCH))(searchSetting(s, checkup?.model ?? null))}
+      {(([label, value]) => setting(label.replace(/:$/, ''), value, SET_SEARCH))(searchSetting(s, c.model))}
       {(['MAINTENANCE', 'LOOK UP'] as const).map(group => (
         <Box key={group} flexDirection="column">
           <Text> </Text>

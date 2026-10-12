@@ -358,7 +358,6 @@ def test_doctor_health_names_suspects_and_store_state(tmp_path, monkeypatch, cap
     assert "old.md" in out["suspect"]
     assert [(s["name"], s["kind"], s["unpushed"]) for s in out["stores"]] == [("project", "project", 0)]
     assert out["due"] == ["1 suspect page (old.md)"]                    # the hooks module reads this, and decides nothing
-    assert out["model"] == iirc.active_model().id                       # the band names it beside the page count
 
 
 def test_git_checks_and_init_staging(tmp_path, monkeypatch):
@@ -723,7 +722,9 @@ def test_stats_session_counts_the_sessions_own_searches(tmp_path, monkeypatch, c
     iirc.log_event("recall", hits=1, pages=["d.md"], via="prompt")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("search", query="x", hits=0, pages=[])
     iirc.main(["summarize-session-usage", "s9"])
-    assert json.loads(capsys.readouterr().out)["searches"] == 3
+    out = json.loads(capsys.readouterr().out)
+    assert out["searches"] == 3
+    assert out["model"] == iirc.active_model().id      # the band names it, fresh after every iirc command
 
 
 def test_stats_session_lists_missed_pages_most_suggested_first(tmp_path, monkeypatch, capsys):
@@ -1033,7 +1034,7 @@ def test_stats_session_counts_distinct_pages_read_and_written(tmp_path, monkeypa
     iirc.log_event("write", page="f.md", kind="finding"); iirc.log_event("write", page="f.md", kind="finding")
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "other"); iirc.log_event("read", pages=["e.md"])
     iirc.main(["summarize-session-usage", "s5"])
-    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "searches": 2, "gone": ["f.md"]}
+    assert json.loads(capsys.readouterr().out) == {"session": "s5", "read": ["a.md", "b.md", "c.md"], "written": ["f.md"], "suggested": [], "used": [], "missed": [], "match": {"all": None, "read": None, "unread": None}, "timeouts": 0, "searches": 2, "model": iirc.active_model().id, "gone": ["f.md"]}
     iirc.main(["summarize-session-usage"])
     assert json.loads(capsys.readouterr().out)["read"] == ["e.md"]
 
@@ -3212,7 +3213,7 @@ def test_old_recall_tables_move_on_doctor_fix(tmp_path, monkeypatch, capsys):
     assert "`iirc doctor --fix`" in iirc.CONFIG_ERROR and "[suggestions.nomic-embed-text]" in iirc.CONFIG_ERROR
     assert iirc.knob_error_only()
     iirc.main(["doctor", "--health"])   # the /iirc card still gets its JSON
-    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores", "due", "model"}
+    assert set(json.loads(capsys.readouterr().out)) == {"suspect", "stores", "due"}
     iirc.main(["doctor", "--brief"])
     assert "hooks off" in (out := capsys.readouterr().out) and "`iirc doctor --fix`" in out
     monkeypatch.setattr(iirc, "install_tool", lambda pin: False)   # stop before the network checks

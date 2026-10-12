@@ -8,8 +8,8 @@ export type IircStatus = { level: 'ok' | 'warn' | 'error'; pages: number | null;
 /** One thing the person needs to do: the command that does it, if the brief names one, and why, in the brief's words. */
 export type Problem = { level: 'warn' | 'error'; fix?: string; why: string }
 
-/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `searches` counts its own `iirc search` and `iirc read-matching-pages` runs; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
-export type SessionCounts = { reads: number; writes: number; searches: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number }
+/** What this session did with pages: distinct pages read or pulled, written, suggested by recall, and suggested then read; `searches` counts its own `iirc search` and `iirc read-matching-pages` runs; `model` is the embedding model, null until the counts load; `missed` is each page suggested and never read, with how often, most first; `timeouts` counts recalls the hook's time limit killed. */
+export type SessionCounts = { reads: number; writes: number; searches: number; suggested: number; used: number; missed: [string, number][]; match: MatchAverages; timeouts: number; model: string | null }
 
 /** Counters that rose a moment ago, by SessionCounts key: how much, and which rise lit it, so its timer puts out only its own. */
 export type Flash = Partial<Record<'suggested' | 'used' | 'searches' | 'reads' | 'writes', { by: number; gen: number }>>
@@ -20,8 +20,8 @@ export type MatchAverages = { all: number | null; read: number | null; unread: n
 /** One store's state for the card, from `iirc doctor --health`. */
 export type StoreHealth = { name: string; kind: string; pages: number; uncommitted: number; unpushed: number }
 
-/** Trust and store state for the card: pages whose cited file changed, each store, why run-maintenance is due, and the embedding model, which the band names. */
-export type IircHealth = { suspect: string[]; stores: StoreHealth[]; due?: string[]; model?: string }
+/** Trust and store state for the card: pages whose cited file changed, each store, and why run-maintenance is due. */
+export type IircHealth = { suspect: string[]; stores: StoreHealth[]; due?: string[] }
 
 /** One page as `iirc show` returns it, for the pane's reader. */
 export type ShownPage = {

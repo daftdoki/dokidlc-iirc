@@ -4174,7 +4174,6 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             "suspect": suspects,
             "stores": [{"name": s.name, "kind": s.kind, "pages": len(ps), "uncommitted": uncommitted(s), "unpushed": a} for s, ps, a in stores],
             "due": maintenance_due(counts),
-            "model": active_model().id,
         }))
         return
     if args.brief:
@@ -4399,11 +4398,11 @@ def cmd_record_session_summary(args: argparse.Namespace) -> None:
 
 
 def cmd_summarize_session_usage(args: argparse.Namespace) -> None:
-    # one session, for the line under the prompt
+    # one session, and the embedding model, for the lines at the prompt
     summary = session_summary(args.session or session_id())
     # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
     gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
-    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts", "searches")}, "gone": gone}))
+    print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts", "searches")}, "model": active_model().id, "gone": gone}))
 
 
 def cmd_summarize_page_usage(args: argparse.Namespace) -> None:
@@ -5416,7 +5415,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--fix", action="store_true")
     p.add_argument("--brief", action="store_true", help="one line; to name the search mode it probes the embedding hosts, 2 s each; nothing if no field")
     p.add_argument("--hook", action="store_true", help="with --brief: read the hook payload on stdin and frame the line for its event")
-    p.add_argument("--health", action="store_true", help="JSON: suspect pages, each store's pages, uncommitted changes, and unpushed commits, and the embedding model")
+    p.add_argument("--health", action="store_true", help="JSON: suspect pages, and each store's pages, uncommitted changes, and unpushed commits")
     p.set_defaults(func=cmd_doctor, runs_with_bad_config=True, skips_format_check=True, needs_model=True)
 
     p = sub.add_parser("set-embedding-model", help="this repository's embedding model, in .claude/iirc.toml for every machine")
