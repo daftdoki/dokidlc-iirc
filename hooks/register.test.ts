@@ -16,7 +16,7 @@ const STOP =
 
 // Stand-ins for the engine beneath the plugin: it stores rows, runs tools, reads
 // files, and draws each row as plain text.
-function engine(on: On, toml = '', isBandEmpty = false) {
+function engine(on: On, toml = '', isBandEmpty = false, isHintNative = false) {
   // Needs the test kit of 2.1.290 or later, which keeps rows beneath this hook.
   on('session.append', ($, e, next) => next(e))
   on('tool.call', () => ({ result: 'ok' }))
@@ -32,6 +32,8 @@ function engine(on: On, toml = '', isBandEmpty = false) {
     const { Box, Text } = $.ui.resolve(e)
     // with no survey, the engine's band may hold nothing
     if (isBandEmpty && e.component === 'AbovePrompt') return h(Box, null)
+    // the terminal may keep the hint line its own, live with its pills, and hand the hook an element with no text in it
+    if (isHintNative && e.component === 'PromptHint') return h(Box, null)
     return h(Text, null, 'engine row')
   })
 }
@@ -1209,6 +1211,22 @@ test('the summary line hides zero counters and the suggested pages read with no 
   const down = parseBrief('iirc: 5 pages, string only (127.0.0.1:11434 does not answer; `iirc doctor` to check). Topics: x 5.')!.status
   expect(statusText(down, counts({ reads: 1 }), 'qwen3-embedding-0.6b')).toBe('iirc status  1 read  string search · 5 pages')
 })
+
+for (const isHintNative of [false, true]) {
+  test(`the line under the prompt is its own row under the engine's hint${isHintNative ? ', even when the hint hands over no text' : ''}`, async ($: Engine, on: On) => {
+    engine(on, '', false, isHintNative)
+    on('ui.toast', () => ({ value: undefined }))
+    await hookRow($, 'SessionStart', BRIEF, `hr-${isHintNative}`)
+    type Node = { type?: string; props?: Record<string, unknown>; children?: Node[] }
+    const root = (await (await hintRow($)).find({ text: TODO })) as Node
+    // a column: the engine's hint first, as it handed it over, and the line second
+    expect(root.type).toBe('Box')
+    expect(root.props?.flexDirection).toBe('column')
+    expect(root.children).toHaveLength(2)
+    expect(JSON.stringify(root.children![0])).toBe(isHintNative ? JSON.stringify({ type: 'Box' }) : JSON.stringify({ type: 'Text', children: ['engine row'] }))
+    expect(parts(root.children![1]).map(([t]) => t).join('')).toBe(TODO)
+  })
+}
 
 test('over an empty engine band, the band is our one row and nothing else', async ($: Engine, on: On) => {
   engine(on, '', true)

@@ -1083,7 +1083,12 @@ export const register: Register = on => {
       <Text key="circle" color={LEVEL_COLOR[bandLevel(s, c)]}>{`${frame === null ? '●' : PULSE[frame]} `}</Text>,
       accentBar($, e, 'bar'),
       ...line.map(span),
-    ], context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined, BAND_PRESS ? () => void openSession($).catch(() => {}) : undefined)
+    ], {
+      right: context.length > 0 ? [{ text: '  ' }, ...context].map(span) : undefined,
+      onPress: BAND_PRESS ? () => void openSession($).catch(() => {}) : undefined,
+      // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt
+      dropsEmpty: true,
+    })
   })
 
   // Under the prompt, beside the engine's hint: a line only when the person needs to act.
@@ -1582,7 +1587,10 @@ function gradientRule($: EngineInterface, e: ResolveInput, width: number, key = 
  * What the engine drew, with one line of iirc's under it, in a keyed Box. The line is one Text of inline spans,
  * so it wraps as one run of prose: in a row Box each span would take a column of its own and wrap inside it.
  */
-function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[], right?: RenderChildren[], onPress?: () => void) {
+function withRow(
+  $: EngineInterface, e: ResolveInput, original: RenderChildren, key: string, spans: RenderChildren[],
+  { right, onPress, dropsEmpty = false }: { right?: RenderChildren[]; onPress?: () => void; dropsEmpty?: boolean } = {},
+) {
   const { Box, Button, Text } = $.ui.resolve(e)
   // the right end, when there is one, sits at the row's end: the line takes the room left of it. A pressable
   // line is a Button of the same spans: a Button holds Text and strings only, and needs a key, as its text changes
@@ -1595,8 +1603,9 @@ function withRow($: EngineInterface, e: ResolveInput, original: RenderChildren, 
       {right && <Box flexShrink={0}><Text>{right}</Text></Box>}
     </Box>
   )
-  // an engine element with nothing in it may still take a row: the band would draw a blank row above the prompt
-  if (isEmpty(original)) return row
+  // Under the prompt the original stays first even when it holds no text: the terminal may keep the hint line
+  // its own and hand over an empty element, and a row alone would then draw beside the hint, not under it
+  if (dropsEmpty && isEmpty(original)) return row
   return (
     <Box flexDirection="column">
       {original}
