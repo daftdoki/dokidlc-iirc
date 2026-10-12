@@ -1290,7 +1290,7 @@ for (const isPlaced of [false, true]) {
   })
 }
 
-test('a press on the band opens the iirc pane at once, and i presses it once the band has the focus', async ($: Engine, on: On) => {
+test('a press on the band opens the iirc pane at once, through a Button with no hotkey, at any width', async ($: Engine, on: On) => {
   engine(on)
   const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   const order: string[] = []
@@ -1305,7 +1305,7 @@ test('a press on the band opens the iirc pane at once, and i presses it once the
   const button = (await band.find({ key: 'iirc-open' })) as { type?: string; props?: Record<string, unknown> }
   expect(button.type).toBe('Button')
   expect(button.props?.hotkey).toBeUndefined()                 // a plain Button draws its hotkey before the label ("i: "), so the band has none
-  // the open comes first, while the press is still the person's: an open after a slow doctor --health may count as unasked
+  // the open comes first, while the press is still the person's: an open after an await may count as unasked
   await band.press({ key: 'iirc-open' })
   expect(order[0]).toBe('open iirc')
   // a narrow band keeps the Button
