@@ -4402,6 +4402,10 @@ def cmd_record_session_summary(args: argparse.Namespace) -> None:
 def cmd_summarize_session_usage(args: argparse.Namespace) -> None:
     # one session, and the embedding model, for the lines at the prompt
     summary = session_summary(args.session or session_id())
+    # the line under the prompt asks for a run while this session's timeouts stand; a run that settled them clears it
+    settled = settled_at([r for r in read_log(days=DUE_WINDOW_DAYS) if r.get("repo") == str(ROOT)]) or -math.inf
+    summary["timeouts"] = sum(1 for r in read_log(session=summary["session"])
+                              if r.get("repo") == str(ROOT) and r["cmd"] == "timeout" and (parse_ts(r.get("ts")) or 0) > settled)
     # pages renamed or deleted since recall suggested them, so the pane does not offer a dead link
     gone = sorted({p.split("/")[-1] for p in summary["suggested"] + summary["written"]} - {p.name for st in live_stores() for p in list_pages(st.dir)})
     print(json.dumps({**{k: summary[k] for k in ("session", "read", "written", "suggested", "used", "missed", "match", "timeouts", "searches")}, "model": active_model().id, "gone": gone}))
@@ -5124,6 +5128,12 @@ def plural(n: int, word: str, many: str | None = None) -> str:
     return f"{n} {word if n == 1 else many or word + 's'}"
 
 
+def settled_at(rows: list[dict]) -> float | None:
+    """When the last run whose host checks passed ended: it settles the timed-out lookups before it. A run whose host
+    checks failed leaves them standing."""
+    return max((parse_ts(r.get("ts")) or 0 for r in rows if r["cmd"] == "maintenance" and not r.get("host_failed")), default=None)
+
+
 def logged_counts(waiting_limit: int | None = WAITING_SESSIONS) -> dict:
     """What maintenance counts from the log, in one read of its last DUE_WINDOW_DAYS: the last run and the sessions
     since, timed-out lookups since both, the last URL check, and sessions waiting to be judged, up to waiting_limit.
@@ -5132,8 +5142,7 @@ def logged_counts(waiting_limit: int | None = WAITING_SESSIONS) -> dict:
     rows = [r for r in read_log(days=DUE_WINDOW_DAYS) if r.get("repo") == str(ROOT)]
     at = lambda r: parse_ts(r.get("ts")) or 0
     last = max((at(r) for r in rows if r["cmd"] == "maintenance"), default=None)
-    # a run whose host checks failed leaves the timed-out lookups standing
-    settled = max((at(r) for r in rows if r["cmd"] == "maintenance" and not r.get("host_failed")), default=None)
+    settled = settled_at(rows)
     return {
         "last_run": last,
         "sessions": len({r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}),

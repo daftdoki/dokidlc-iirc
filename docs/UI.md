@@ -110,7 +110,7 @@ mark, the command to run, and why, in the words of the session-start check.
 
 `▲` is a warning and `✖` an error, in yellow or red. A suggestion line that
 ran past the hook's 5-second limit this session also asks for
-`/iirc run-maintenance`. For run-maintenance the reason is the first thing
+`/iirc run-maintenance`, until a run whose host checks pass settles it. For run-maintenance the reason is the first thing
 that made it due. With more than one problem or reason, the most severe
 shows first and `+N more` follows; `/iirc status` lists them. This line stays
 on when the summary line is off. It reads the checks again after `iirc run-maintenance`,

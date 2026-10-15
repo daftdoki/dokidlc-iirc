@@ -4475,6 +4475,23 @@ def test_run_maintenance_keeps_the_timeouts_when_its_host_checks_fail(tmp_path, 
 
 
 
+def test_session_usage_counts_only_the_timeouts_after_a_run_that_settled_them(tmp_path, monkeypatch, capsys):
+    """The line under the prompt asks for a run while this session's timeouts stand; a run whose host checks passed settles them."""
+    _project(tmp_path, monkeypatch)
+
+    def timeouts() -> int:
+        iirc.main(["summarize-session-usage", "s1"])
+        return json.loads(capsys.readouterr().out)["timeouts"]
+    _log([("timeout", "s1", 3), ("timeout", "s1", 2)])
+    assert timeouts() == 2
+    _log([("maintenance", None, 1, {"host_failed": True})])
+    assert timeouts() == 2
+    _log([("maintenance", None, 1 - 1 / 86400)])
+    assert timeouts() == 0
+    _log([("timeout", "s1", 0)])
+    assert timeouts() == 1
+
+
 def test_maintenance_is_not_due_on_an_empty_store(tmp_path, monkeypatch):
     field = _project(tmp_path, monkeypatch)
     _log([("start", f"s{i}", 1) for i in range(6)])
