@@ -295,6 +295,51 @@ test('after a command that changes the brief, asks iirc for it again', async ($:
   expect(await waitFor($, LINE)).toBe(true)
 })
 
+// a session whose brief and doctor --health say maintenance is due until `clean`, as a run of it would leave them
+function dueUntilClean(on: On) {
+  const state = { clean: false }
+  const DUE = 'iirc: 113 pages, semantic via 127.0.0.1:11434. Maintenance is due (2 suggestion lookups timed out this week); run /iirc run-maintenance. A hook names matching pages when the creator prompts; read one whose summary bears on the task.'
+  const CLEAN = 'iirc: 113 pages, semantic via 127.0.0.1:11434. A hook names matching pages when the creator prompts; read one whose summary bears on the task.'
+  on('process.run', ($, e) => {
+    const a = e.argv.join(' ')
+    const due = state.clean ? [] : ['2 suggestion lookups timed out this week', '15 URL refs, not checked in 30 days']
+    const out = a.includes('--brief') ? (state.clean ? CLEAN : DUE) : a.includes('--health') ? JSON.stringify({ suspect: [], due, stores: [] }) : '{}'
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  return state
+}
+
+const DUE_TODO = '▲ /iirc run-maintenance · 2 suggestion lookups timed out this week · +1 more'
+
+test('after run-maintenance in the shell, the line under the prompt reads doctor --health again and clears', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const state = dueUntilClean(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await new Promise(r => setTimeout(r, 50))
+  expect(parts(await (await hintRow($)).find({ key: 'iirc-todo' })).map(([t]) => t).join('')).toBe(DUE_TODO)
+  state.clean = true
+  await $.tool.call({ tool: 'Bash', command: 'cd /repo && iirc run-maintenance 2>&1', tool_use_id: 't9' })
+  await clock.settle()
+  await new Promise(r => setTimeout(r, 50))
+  expect(await (await hintRow($)).find({ key: 'iirc-todo' })).toBeUndefined()
+})
+
+test('/iirc status prints the line under the prompt as doctor --health has it now', async ($: Engine, on: On) => {
+  engine(on)
+  const clock = mock.clock(on)
+  const state = dueUntilClean(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await new Promise(r => setTimeout(r, 50))
+  state.clean = true
+  const text = (await $.command.run({ command: 'iirc', args: 'status' })).text
+  expect(text).not.toContain('run-maintenance')
+})
+
 test('after a read or write, counts the pages this session read and wrote', async ($: Engine, on: On) => {
   engine(on)
   const clock = mock.clock(on)
@@ -1254,7 +1299,9 @@ for (const isHintNative of [false, true]) {
     expect(root.type).toBe('Box')
     expect(root.props?.flexDirection).toBe('column')
     expect(root.children).toHaveLength(2)
-    expect(JSON.stringify(root.children![0])).toBe(isHintNative ? JSON.stringify({ type: 'Box' }) : JSON.stringify({ type: 'Text', children: ['engine row'] }))
+    // its element and text only: from 2.1.299 the test kit also tags each element with the plugin that drew it
+    const { type, children } = root.children![0]
+    expect(JSON.stringify({ type, children })).toBe(isHintNative ? JSON.stringify({ type: 'Box' }) : JSON.stringify({ type: 'Text', children: ['engine row'] }))
     expect(parts(root.children![1]).map(([t]) => t).join('')).toBe(TODO)
   })
 }
@@ -1339,7 +1386,8 @@ test('the band\'s right end: the model or string search, then the page count, dr
   await $.tool.call({ tool: 'Bash', command: 'iirc set-embedding-model nomic-embed-text', tool_use_id: 'tc2' })
   await clock.settle()
   expect(await waitFor($, 'nomic-embed-text · 110 pages')).toBe(true)
-  // a press opens the pane and refreshes the counts; it runs no doctor --health
+  // a press opens the pane and refreshes the counts; it runs no doctor --health (set-embedding-model above ran one)
+  health.length = 0
   await (await bandRow($)).press({ key: 'iirc-open' })
   await clock.settle()
   expect(health).toEqual([])

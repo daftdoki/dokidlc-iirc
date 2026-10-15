@@ -34,7 +34,8 @@ due. Type `/iirc run-maintenance`, or say yes when the agent suggests
 it. It is due after 7 days and at least 5 sessions since the last run
 once the stores hold a page,
 or sooner when a page is suspect, a store commit is not pushed, a
-suggestion lookup timed out in the last 7 days and since the last run,
+suggestion lookup timed out in the last 7 days and since the last run
+whose embedding host checks passed,
 or two pages are near-duplicates. When 10 sessions wait to be judged,
 the run offers tuning, but they do not make it due. The
 session-start line then says `Maintenance is due (REASONS)`, the line

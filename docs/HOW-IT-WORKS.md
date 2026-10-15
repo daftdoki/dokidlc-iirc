@@ -131,7 +131,8 @@ suspect pages, store
 commits not pushed, near-duplicate pairs (at the model's duplicate
 distance or closer, 0.07 for nomic, unless the pair has different kinds
 and one links the other with `[[name]]`), and suggestion lines that
-timed out in the last 7 days and since the last run. Sessions waiting
+timed out in the last 7 days and since the last run whose embedding
+host checks passed. Sessions waiting
 to be judged are not a reason: run-maintenance offers tuning when 10
 wait, and only a tuning pass clears them. After
 a compaction in a session that wrote nothing, it adds:

@@ -4454,6 +4454,26 @@ def test_run_maintenance_clears_the_timeouts_it_reported(tmp_path, monkeypatch, 
     assert iirc.logged_counts()["timeouts"] == 1
 
 
+def test_run_maintenance_keeps_the_timeouts_when_its_host_checks_fail(tmp_path, monkeypatch, capsys):
+    """A run whose embedding host failed its checks settles nothing: the lookups that timed out still count."""
+    field = _project(tmp_path, monkeypatch)
+    _page(field, "a.md"); _git(tmp_path, "add", ".iirc"); _git(tmp_path, "commit", "-qm", "page")
+
+    def host_down(fix_it, report, counts):
+        report("embedding endpoint http://127.0.0.1:11434 answers", False, "check the endpoint")
+        counts["host_failed"] = True
+        return True
+    monkeypatch.setattr(iirc, "setup_checks", host_down)
+    _log([("timeout", "s1", 1), ("timeout", "s2", 2)])
+    iirc.main(["run-maintenance"])
+    capsys.readouterr()
+    assert _due() == ["2 suggestion lookups timed out this week"]
+    monkeypatch.setattr(iirc, "setup_checks", lambda fix_it, report, counts: True)
+    iirc.main(["run-maintenance"])
+    capsys.readouterr()
+    assert _due() == []
+
+
 
 def test_maintenance_is_not_due_on_an_empty_store(tmp_path, monkeypatch):
     field = _project(tmp_path, monkeypatch)

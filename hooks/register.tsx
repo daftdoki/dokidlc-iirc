@@ -452,7 +452,10 @@ async function runDirect($: EngineInterface, args: string): Promise<string> {
   const slow = args === 'doctor --fix' || verb === 'sync' || verb === 'rebuild-search-index'
   try {
     const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, ...argv], { cwd: await $.session.root(), timeoutMs: slow ? 600000 : 60000 })
-    if (['doctor', 'sync', 'rebuild-search-index'].includes(verb)) refreshBrief($)
+    if (['doctor', 'sync', 'rebuild-search-index'].includes(verb)) {
+      refreshBrief($)
+      $.clock.after(0, () => void refreshHealth($))
+    }
     // a read or a search the person ran is one of the session's counts
     if (verb === 'read' || verb === 'search') refreshCounts($)
     const out = `${ran.stdout}${ran.stderr}`.trim() || '(no output)'
@@ -467,6 +470,8 @@ type CardView = 'home' | 'status' | 'help'
 
 /** The text a plain /iirc, /iirc status, or /iirc help returns; the cards draw over it, and it stands where they cannot. */
 async function helpText($: EngineInterface, view: CardView): Promise<string> {
+  // status reads the brief and doctor --health first, so its line under the prompt is the one the person sees after it
+  if (view === 'status') await Promise.all([loadBrief($).catch(() => {}), refreshHealth($)])
   const s = await read($, status)
   let max = '?'
   try {
@@ -481,7 +486,6 @@ async function helpText($: EngineInterface, view: CardView): Promise<string> {
   const shown = (await read($, isStatusShown)) ? 'on' : 'off'
   if (view === 'home') return `${head}\n/iirc <request> asks iirc in words; /iirc help lists the settings and commands; /iirc status shows ${STATUS_HINT}`
   if (view === 'status') {
-    await refreshHealth($)
     return [head, ...healthLines(await read($, health), await read($, counts))].join('\n')
   }
   return [
@@ -788,16 +792,17 @@ async function refreshHealth($: EngineInterface) {
 /** Ask iirc for the brief and show it. Without --hook, doctor --brief reads no stdin and pulls nothing. */
 function refreshBrief($: EngineInterface) {
   // on a timer, so the run outlives this dispatch and no prompt or tool waits for it
-  $.clock.after(0, () => {
-    void (async () => {
-      if (!(await uiEnabled($))) return
-      const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'doctor', '--brief'], {
-        cwd: await $.session.root(),
-        timeoutMs: 15000,
-      })
-      if (ran.exitCode === 0) await showBrief($, ran.stdout)
-    })().catch(() => {})
+  $.clock.after(0, () => void loadBrief($).catch(() => {}))
+}
+
+/** Ask iirc for the brief and show it, for a caller that waits for it. */
+async function loadBrief($: EngineInterface) {
+  if (!(await uiEnabled($))) return
+  const ran = await $.process.run([`${$.plugin.root}/bin/iirc`, 'doctor', '--brief'], {
+    cwd: await $.session.root(),
+    timeoutMs: 15000,
   })
+  if (ran.exitCode === 0) await showBrief($, ran.stdout)
 }
 
 /** Near the auto-compact threshold, ask iirc once for the line that asks the model to write what it learned. */
@@ -857,6 +862,8 @@ export const register: Register = on => {
       if (CHANGES_BRIEF_RE.test(e.command)) {
         refreshBrief($)
         refreshCounts($)
+        // run-maintenance's reasons, and the line under the prompt, come from doctor --health
+        $.clock.after(0, () => void refreshHealth($))
       }
       if (COUNTS_RE.test(e.command)) refreshCounts($)
     }

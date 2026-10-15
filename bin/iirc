@@ -4119,6 +4119,8 @@ def setup_checks(fix_it: bool, report, counts: dict) -> bool:
                                                     f"or iirc remove-embedding-model {model.id} {e.host}")
             else:
                 print(f"note {line}")
+    # a run settles the week's timed-out lookups only when the host it would embed with passed its checks
+    counts["host_failed"] = semantic_enabled() and not up
 
     for store in STORES:
         if store.kind == "remote" and not store.dir.is_dir() and fix_it:
@@ -5130,11 +5132,13 @@ def logged_counts(waiting_limit: int | None = WAITING_SESSIONS) -> dict:
     rows = [r for r in read_log(days=DUE_WINDOW_DAYS) if r.get("repo") == str(ROOT)]
     at = lambda r: parse_ts(r.get("ts")) or 0
     last = max((at(r) for r in rows if r["cmd"] == "maintenance"), default=None)
+    # a run whose host checks failed leaves the timed-out lookups standing
+    settled = max((at(r) for r in rows if r["cmd"] == "maintenance" and not r.get("host_failed")), default=None)
     return {
         "last_run": last,
         "sessions": len({r.get("session") for r in rows if r["cmd"] == "start" and at(r) > (last or -math.inf)}),
-        # since the last run too, so the run that reported them settles them
-        "timeouts": sum(1 for r in rows if r["cmd"] == "timeout" and at(r) >= now - TIMEOUT_DAYS * 86400 and at(r) > (last or -math.inf)),
+        # since the last run whose host checks passed too, so the run that reported them settles them
+        "timeouts": sum(1 for r in rows if r["cmd"] == "timeout" and at(r) >= now - TIMEOUT_DAYS * 86400 and at(r) > (settled or -math.inf)),
         "last_network": max((at(r) for r in rows if r["cmd"] == "doubt" and r.get("network")), default=None),
         "waiting": len(untuned_sessions(repo_sessions(rows), limit=waiting_limit)),
     }
@@ -5307,7 +5311,7 @@ def cmd_run_maintenance(args: argparse.Namespace) -> None:
     print(f"tuning: {plural(counts['waiting'], 'session')} waiting to be judged")
     left = [f"{i.detail}: {i.action}" for i in upkeep_items(counts) if i.action]
     log_event("maintenance", start=starts, failed=len(failed), suspects=len(suspects), unapproved=len(counts["unapproved"]),
-              pairs=len(pairs), findings=len(counts["findings"]), waiting=counts["waiting"])
+              pairs=len(pairs), findings=len(counts["findings"]), waiting=counts["waiting"], host_failed=counts.get("host_failed", False))
     if not left:
         print("Nothing is left to decide.")
         return
